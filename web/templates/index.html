@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AYUR-INTEL — Ayurvedic Product Intelligence Platform</title>
+  <meta name="description" content="Evidence-backed Ayurvedic Product Intelligence & Decision-Support Platform">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/styles.css?v=60">
+</head>
+<body>
+  <!-- Ambient Procedural Botanical Growth Tree Background Layer -->
+  <canvas id="floating-paths-canvas" class="floating-paths-canvas"></canvas>
+  <canvas id="growth-tree-canvas" class="growth-tree-canvas"></canvas>
+
+  <div class="app">
+    <!-- ===== Sleek Modern Sidebar ===== -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="sidebar-brand">
+          <div class="sidebar-brand-icon">
+            <span class="material-symbols-outlined">spa</span>
+          </div>
+          <div class="sidebar-brand-text">
+            <h1>AYUR-INTEL</h1>
+            <small>Product Intelligence</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Action CTA -->
+      <div class="sidebar-cta-wrap">
+        <button class="sidebar-new-btn" id="sidebar-new-case-btn">
+          <span class="material-symbols-outlined">add_circle</span>
+          <span>New Product</span>
+        </button>
+      </div>
+
+      <!-- Streamlined Primary Navigation (5 Items) -->
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">Workspace</div>
+
+        <button class="nav-item active" data-view="dashboard">
+          <span class="material-symbols-outlined">dashboard</span>
+          <span>Dashboard</span>
+        </button>
+
+        <button class="nav-item" data-view="product-cases">
+          <span class="material-symbols-outlined">inventory_2</span>
+          <span>Products</span>
+        </button>
+
+        <button class="nav-item" data-view="case-detail" id="nav-case-intel">
+          <span class="material-symbols-outlined">hub</span>
+          <div class="nav-label-wrap">
+            <span>Case Intelligence</span>
+            <small class="nav-case-indicator" id="nav-active-case-name">Select Case</small>
+          </div>
+        </button>
+
+        <button class="nav-item" data-view="knowledge-hub">
+          <span class="material-symbols-outlined">menu_book</span>
+          <span>Knowledge Hub</span>
+        </button>
+
+        <button class="nav-item" data-view="monitoring-center">
+          <span class="material-symbols-outlined">visibility</span>
+          <span>Monitoring</span>
+        </button>
+
+        <!-- Secondary Section (1 Item) -->
+        <div class="nav-section-label" style="margin-top: 20px;">System</div>
+
+        <button class="nav-item" data-view="settings">
+          <span class="material-symbols-outlined">settings</span>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <!-- Sidebar Footer User Profile -->
+      <div class="sidebar-footer">
+        <div class="user-pill" id="sidebar-user-pill">
+          <div class="user-avatar">JS</div>
+          <div class="user-info">
+            <strong>Demo User</strong>
+            <small>Researcher</small>
+          </div>
+          <span class="material-symbols-outlined user-status-icon">verified_user</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== Main Area ===== -->
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="mobile-toggle" id="mobile-toggle" aria-label="Toggle navigation">
+            <span class="material-symbols-outlined">menu</span>
+          </button>
+          <div class="topbar-breadcrumb" id="topbar-breadcrumb">
+            <span class="topbar-breadcrumb-icon material-symbols-outlined">dashboard</span>
+            <span class="topbar-breadcrumb-title">Dashboard</span>
+          </div>
+        </div>
+
+        <!-- Case Context Pill in Topbar -->
+        <div class="topbar-center">
+          <div class="topbar-case-context" id="topbar-case-context" title="Current Active Product Case">
+            <span class="material-symbols-outlined topbar-case-icon">spa</span>
+            <div class="topbar-case-meta">
+              <span class="topbar-case-pretitle" id="topbar-case-pretitle" style="display:none;">PRODUCT</span>
+              <strong id="topbar-case-name">No Active Case</strong>
+              <small id="topbar-case-stage">Click to select</small>
+            </div>
+            <span class="material-symbols-outlined topbar-case-arrow">arrow_drop_down</span>
+          </div>
+        </div>
+
+        <!-- Right Topbar Controls -->
+        <div class="topbar-right">
+          <div class="topbar-search">
+            <span class="material-symbols-outlined">search</span>
+            <input type="text" id="topbar-search-input" placeholder="Search products, ingredients..." aria-label="Search">
+          </div>
+
+          <button class="topbar-btn-cta" id="topbar-new-case-btn">
+            <span class="material-symbols-outlined">add</span>
+            <span>New</span>
+          </button>
+
+          <button class="topbar-icon-btn" id="topbar-settings-btn" title="Settings">
+            <span class="material-symbols-outlined">settings</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Content Container -->
+      <div class="content" id="content">
+        <!-- Rendered dynamically by JavaScript -->
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toasts"></div>
+
+  <!-- D3.js and Application Scripts -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="/static/js/floating-paths.js?v=70"></script>
+  <script src="/static/js/growth-tree.js?v=70"></script>
+  <script src="/static/js/app.js?v=60"></script>
+  <script src="/static/js/passport.js?v=60"></script>
+  <script src="/static/js/knowledge.js?v=60"></script>
+</body>
+</html>
