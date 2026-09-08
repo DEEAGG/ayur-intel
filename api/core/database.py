@@ -13,8 +13,6 @@ from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-from api.core.config import settings
-
 logger = logging.getLogger("ayur_intel.database")
 
 # ---------------------------------------------------------------------------
@@ -22,21 +20,27 @@ logger = logging.getLogger("ayur_intel.database")
 # ---------------------------------------------------------------------------
 
 # Production: PostgreSQL (Supabase) — Vercel pe use hoga
-_DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not _DATABASE_URL:
-    # Development: SQLite — local pe use hoga
-    _DATABASE_URL = f"sqlite:///{settings.AYURINTEL_DB_PATH}"
-    logger.info("🔗 Using SQLite (Development)")
-else:
+if DATABASE_URL:
+    # Vercel Production: PostgreSQL
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        echo=False,
+    )
     logger.info("🔗 Using PostgreSQL (Production)")
+else:
+    # Development: SQLite
+    from api.core.config import settings
 
-engine = create_engine(
-    _DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in _DATABASE_URL else {},
-    echo=settings.AYURINTEL_DEBUG,
-    pool_pre_ping=True,
-)
+    engine = create_engine(
+        f"sqlite:///{settings.AYURINTEL_DB_PATH}",
+        connect_args={"check_same_thread": False},
+        echo=settings.AYURINTEL_DEBUG,
+        pool_pre_ping=True,
+    )
+    logger.info("🔗 Using SQLite (Development)")
 
 # Enable foreign keys for SQLite
 @event.listens_for(engine, "connect")
@@ -65,6 +69,10 @@ def init_db() -> None:
     Import models before calling this so SQLAlchemy registers them.
     """
     from api.models import models  # noqa: F401 — triggers model registration
-    Path(settings.AYURINTEL_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
+    if not DATABASE_URL:
+        # Only create SQLite directory if using SQLite
+        Path(settings.AYURINTEL_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
     models.Base.metadata.create_all(bind=engine)
-    logger.info("Database initialized at %s", settings.AYURINTEL_DB_PATH)
+    logger.info("Database initialized successfully")
