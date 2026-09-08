@@ -1,7 +1,21 @@
 /* AYUR-INTEL — Knowledge Engine Views (Phase 3)
    Research workspace for Traditional Knowledge and evidence-backed findings.
-   This file is loaded after app.js and extends it with knowledge functions.
-   Must be loaded within the same IIFE scope (concatenated before app.js closes). */
+   This file is loaded after app.js and extends it with knowledge functions. */
+
+(function () {
+  "use strict";
+
+  var A = window.AYUR;
+  if (!A) {
+    return;
+  }
+
+  var state = A.state || {};
+  var api = A.api;
+  var toast = A.toast || window.showToast;
+  var escapeHtml = A.escapeHtml;
+  var icon = A.icon;
+  var render = A.render;
 
   // ----------------------------------------------------------------
   // Knowledge Engine — API calls
@@ -12,7 +26,11 @@
     state.error = null;
     render();
     try {
-      var data = await api("POST", "/knowledge/search", params);
+      var data = await api("/api/knowledge/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params)
+      });
       state.knowledgeResults = data;
     } catch (e) {
       state.error = e.message;
@@ -23,12 +41,16 @@
 
   async function saveKnowledgeFinding(findingData, caseId) {
     var payload = Object.assign({}, findingData, { product_case_id: caseId });
-    return await api("POST", "/knowledge/findings/save", payload);
+    return await api("/api/knowledge/findings/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
   }
 
   async function loadKnowledgeSources() {
     try {
-      var data = await api("GET", "/knowledge/sources");
+      var data = await api("/api/knowledge/sources");
       state.knowledgeSources = data.sources || [];
     } catch (e) {
       state.knowledgeSources = [];
@@ -52,7 +74,7 @@
     }
 
     var sourcesHtml = "";
-    if (state.knowledgeSources.length > 0) {
+    if (state.knowledgeSources && state.knowledgeSources.length > 0) {
       sourcesHtml = '<div class="card" style="margin-top:20px"><div class="card-head"><h2>Registered Sources</h2></div><div class="card-body">';
       state.knowledgeSources.forEach(function (s) {
         var statusClass = s.is_configured ? "source-status-active" : "source-status-inactive";
@@ -82,17 +104,17 @@
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
       + '<div class="form-group">'
       + '<label class="form-label">Search Query *</label>'
-      + '<input class="form-input" type="text" id="kq-query" placeholder="e.g. traditional uses, preparations, safety" value="' + escapeHtml(state.knowledgeQuery) + '" required>'
+      + '<input class="form-input" type="text" id="kq-query" placeholder="e.g. traditional uses, preparations, safety" value="' + escapeHtml(state.knowledgeQuery || "") + '" required>'
       + '</div>'
       + '<div class="form-group">'
       + '<label class="form-label">Plant / Ingredient</label>'
-      + '<input class="form-input" type="text" id="kq-plant" placeholder="e.g. Withania somnifera" value="' + escapeHtml(state.knowledgePlantName) + '">'
+      + '<input class="form-input" type="text" id="kq-plant" placeholder="e.g. Withania somnifera" value="' + escapeHtml(state.knowledgePlantName || "") + '">'
       + '</div>'
       + '</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
       + '<div class="form-group">'
       + '<label class="form-label">Botanical Name</label>'
-      + '<input class="form-input" type="text" id="kq-botanical" placeholder="e.g. Bacopa monnieri" value="' + escapeHtml(state.knowledgeBotanicalName) + '">'
+      + '<input class="form-input" type="text" id="kq-botanical" placeholder="e.g. Bacopa monnieri" value="' + escapeHtml(state.knowledgeBotanicalName || "") + '">'
       + '</div>'
       + '<div class="form-group">'
       + '<label class="form-label">Category</label>'
@@ -119,7 +141,7 @@
       + '</select>'
       + '</div>'
       + '</div>'
-      + '<button class="btn btn-primary" type="submit" id="kq-search-btn">' + icon("beaker", 15) + ' Search Sources</button>'
+      + '<button class="btn btn-primary" type="submit" id="kq-search-btn">' + icon("search", 15) + ' Search Sources</button>'
       + '</form>'
       + '</div></div>'
       + resultsHtml
@@ -141,14 +163,14 @@
 
     if (!data.has_configured_sources && (!data.sources || data.sources.length === 0)) {
       html += '<div class="empty-state">'
-        + '<div class="empty-icon">' + icon("evidence", 28) + '</div>'
+        + '<div class="empty-icon">' + icon("menu_book", 28) + '</div>'
         + '<h3>No sources available</h3>'
         + '<p>No knowledge sources are currently configured. Configure source adapters in the environment to enable real data retrieval.</p>'
         + '</div>';
     } else if (!data.has_configured_sources) {
       // Sources exist but none are configured
       html += '<div class="source-status-banner source-status-warning">'
-        + icon("alert", 18)
+        + icon("warning", 18)
         + '<div><strong>Source adapters found but not configured.</strong>'
         + '<p style="margin-top:4px;font-size:13px;color:var(--text-secondary)">Configure the corresponding API keys and credentials in your .env file to enable real knowledge retrieval. No fabricated results are shown.</p></div>'
         + '</div>';
@@ -228,55 +250,11 @@
       + '</div>'
       + (finding.evidence_locator ? '<div class="knowledge-finding-evidence"><strong>Evidence:</strong> ' + escapeHtml(finding.evidence_locator) + '</div>' : '')
       + (finding.excerpt ? '<div class="knowledge-finding-excerpt">"' + escapeHtml(finding.excerpt) + '"</div>' : '')
-      + (finding.limitations ? '<div class="knowledge-finding-limitations">' + icon("alert", 14) + ' ' + escapeHtml(finding.limitations) + '</div>' : '')
+      + (finding.limitations ? '<div class="knowledge-finding-limitations">' + icon("warning", 14) + ' ' + escapeHtml(finding.limitations) + '</div>' : '')
       + '<div class="knowledge-finding-actions">'
-      + '<button class="btn btn-primary btn-sm save-finding-btn" data-finding=\'' + findingDataJson + '\'>' + icon("plus", 14) + ' Save to Product Case</button>'
+      + '<button class="btn btn-primary btn-sm save-finding-btn" data-finding=\'' + findingDataJson + '\'>' + icon("add", 14) + ' Save to Product Case</button>'
       + '</div>'
       + '</div>';
-  }
-
-  // ----------------------------------------------------------------
-  // Knowledge Engine — Event handlers
-  // ----------------------------------------------------------------
-
-  function bindKnowledgeEvents() {
-    // Search form
-    var form = document.getElementById("knowledge-search-form");
-    if (form) {
-      form.addEventListener("submit", function (e) {
-        e.preventDefault();
-        var query = document.getElementById("kq-query").value.trim();
-        if (!query) {
-          toast("Search query is required", "error");
-          return;
-        }
-        state.knowledgeQuery = query;
-        state.knowledgePlantName = document.getElementById("kq-plant").value.trim();
-        state.knowledgeBotanicalName = document.getElementById("kq-botanical").value.trim();
-        state.knowledgeCategory = document.getElementById("kq-category").value;
-        state.knowledgeJurisdiction = document.getElementById("kq-jurisdiction").value;
-
-        searchKnowledge({
-          query: query,
-          plant_name: state.knowledgePlantName || null,
-          botanical_name: state.knowledgeBotanicalName || null,
-          category: state.knowledgeCategory || null,
-          jurisdiction: state.knowledgeJurisdiction || null,
-          limit: 20,
-        });
-      });
-    }
-
-    // Save finding buttons
-    document.querySelectorAll(".save-finding-btn").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        var findingStr = btn.getAttribute("data-finding");
-        if (!findingStr) return;
-        var finding;
-        try { finding = JSON.parse(findingStr); } catch (e) { return; }
-        showSaveFindingModal(finding);
-      });
-    });
   }
 
   // ----------------------------------------------------------------
@@ -319,7 +297,7 @@
       + '</div>'
       + '<div class="modal-foot">'
       + '<button class="btn btn-secondary" id="ksm-cancel">Cancel</button>'
-      + '<button class="btn btn-primary" id="ksm-save">' + icon("plus", 15) + ' Save Finding</button>'
+      + '<button class="btn btn-primary" id="ksm-save">' + icon("add", 15) + ' Save Finding</button>'
       + '</div>'
       + '</div></div>';
 
@@ -351,8 +329,14 @@
         } catch (e) {
           toast("Failed to save: " + e.message, "error");
           saveBtn.disabled = false;
-          saveBtn.innerHTML = icon("plus", 15) + " Save Finding";
+          saveBtn.innerHTML = icon("add", 15) + " Save Finding";
         }
       });
     }
   }
+
+  // Expose on window.AYUR if needed
+  A.searchKnowledge = searchKnowledge;
+  A.saveKnowledgeFinding = saveKnowledgeFinding;
+  A.loadKnowledgeSources = loadKnowledgeSources;
+})();

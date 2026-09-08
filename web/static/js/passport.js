@@ -118,6 +118,18 @@
     "vasa": "Adhatoda vasica"
   };
 
+  // Quantity Input Validation helper
+  function validateQuantityInput(input) {
+    if (!input) return;
+    var value = input.value;
+    if (!value) return;
+    // Only allow: numbers, space, 'mg', 'gm', 'ml', 'g', 'm', 'l'
+    value = value.replace(/[^0-9\s.mgMG]/g, '');
+    input.value = value;
+  }
+  window.validateQuantityInput = validateQuantityInput;
+  if (window.AYUR) window.AYUR.validateQuantityInput = validateQuantityInput;
+
   // Helper to normalize custom ingredient name from Hindi/Hinglish/English
   function normalizeCustomIngredient(raw) {
     if (!raw) return { name: "", botanical: "" };
@@ -181,6 +193,8 @@
       name: c.name || "",
       product_type: c.product_type || null, // ZERO DEFAULT
       description: c.description || "",
+      normalized_description: c.normalized_description || "",
+      product_suggestions: c.product_suggestions || [],
       reference_context: c.reference_context || "", // Optional benchmark context
       ingredients: ingredients, // ZERO DEFAULT INGREDIENTS
       form: c.form || null, // ZERO DEFAULT
@@ -192,10 +206,80 @@
       notes: c.notes || "",
       is_normalizing: false,
       ai_normalized: false,
-      activeBotanicalCard: null // Holds botanical currently selected for quantity popup modal
+      activeBotanicalCard: null, // Holds botanical currently selected for quantity popup modal
+      activeSuggestionModal: null // Holds suggestion currently displayed in detail popup modal
     };
 
     state.passportStep = 0;
+  }
+
+  // Helper to generate dynamic formulation / product suggestions based on ingredients
+  function getFormulationSuggestions(ingredients, existingSuggestions) {
+    if (existingSuggestions && Array.isArray(existingSuggestions) && existingSuggestions.length > 0) {
+      return existingSuggestions;
+    }
+    var list = ingredients || [];
+    if (list.length === 0) {
+      return [];
+    }
+    var names = list.map(function (i) { return (i.name || "").trim(); }).filter(Boolean);
+    if (names.length === 0) {
+      return [];
+    }
+
+    var herbCombo = names.slice(0, 2).join(" & ");
+    var suggestions = [];
+    var namesLower = names.map(function (n) { return n.toLowerCase(); });
+
+    if (namesLower.some(function(n){ return n.includes("ashwagandha") || n.includes("brahmi") || n.includes("shankhpushpi") || n.includes("jatamansi"); })) {
+      suggestions.push(herbCombo + " Stress Relief & Focus Capsules");
+      suggestions.push(herbCombo + " Cognitive Support Formula");
+    }
+    if (namesLower.some(function(n){ return n.includes("tulsi") || n.includes("turmeric") || n.includes("haridra") || n.includes("haldi") || n.includes("giloy") || n.includes("amla"); })) {
+      suggestions.push(herbCombo + " Immunity & Defense Elixir");
+      suggestions.push(herbCombo + " Daily Defense Tablets");
+    }
+    if (namesLower.some(function(n){ return n.includes("shatavari") || n.includes("triphala") || n.includes("mulethi") || n.includes("neem"); })) {
+      suggestions.push(herbCombo + " Digestive Wellness & Balance Churna");
+      suggestions.push(herbCombo + " Rejuvenating Detox Formula");
+    }
+
+    if (suggestions.length === 0) {
+      suggestions.push(herbCombo + " Vitality & Balance Capsules");
+      suggestions.push("Standardized " + herbCombo + " Herbal Extract");
+    }
+    return suggestions.slice(0, 4);
+  }
+
+  function getFormulationSuggestionsDetailed(ingredients, existingSuggestions) {
+    var raw = getFormulationSuggestions(ingredients, existingSuggestions);
+    var list = ingredients || [];
+    var herbNames = list.map(function (i) { return i.name || ""; }).filter(Boolean);
+    var herbStr = herbNames.length > 0 ? herbNames.join(", ") : "Ayurvedic Botanicals";
+
+    return raw.map(function (item) {
+      if (typeof item === "object" && item && item.name) {
+        return {
+          name: item.name,
+          ingredientsText: item.ingredientsText || herbStr,
+          description: item.description || "Synergistic Ayurvedic formulation engineered for therapeutic efficacy and regulatory safety."
+        };
+      }
+      var name = String(item);
+      var desc = "A synergistic Ayurvedic formulation designed for holistic therapeutic balance, standardized active extracts, and regulatory compliance.";
+      if (name.toLowerCase().indexOf("medhya") !== -1 || name.toLowerCase().indexOf("focus") !== -1) {
+        desc = "A classical Ayurvedic Medhya Rasayana formulation supporting cognitive vitality, neurotransmitter balance, memory, and nervous system nourishment.";
+      } else if (name.toLowerCase().indexOf("kwatha") !== -1 || name.toLowerCase().indexOf("immunity") !== -1) {
+        desc = "A traditional immune-modulating Ayurvedic decoction / infusion supporting respiratory wellness, cellular defense, and natural vitality.";
+      } else if (name.toLowerCase().indexOf("digestive") !== -1 || name.toLowerCase().indexOf("gut") !== -1) {
+        desc = "A tri-doshic digestive balancing formulation supporting optimal Agni (digestive fire), bioavailability, and natural gut health.";
+      }
+      return {
+        name: name,
+        ingredientsText: herbStr,
+        description: desc
+      };
+    });
   }
 
   // ----------------------------------------------------------------
@@ -257,9 +341,50 @@
       + '<div class="conv-nav-bar">'
       + (isFirst ? '<div></div>' : '<button class="conv-btn-back" id="conv-back-btn">' + icon("arrow_back", 16) + ' Back</button>')
       + '<div style="display:flex;gap:10px;align-items:center;">'
+      + (pd.id ? '<button type="button" class="btn btn-secondary btn-sm" id="conv-jump-review-btn">📋 Return to Review</button>' : '')
       + '<button class="btn btn-ghost btn-sm" id="conv-skip-btn">Skip for now</button>'
       + '<button class="conv-btn-continue" id="conv-next-btn">Continue ' + icon("arrow_forward", 16) + '</button>'
       + '</div></div>'
+      + '</div>'
+      + renderSuggestionModalHtml(pd);
+  }
+
+  // Shared Helper for Suggestion Detail Modal
+  function renderSuggestionModalHtml(pd) {
+    if (!pd || !pd.activeSuggestionModal) return "";
+    var sm = pd.activeSuggestionModal;
+    return '<div class="ing-modal-overlay" id="sugg-modal-overlay">'
+      + '<div class="ing-modal-card" style="max-width:500px;">'
+      + '<div class="ing-modal-head">'
+      + '<div class="ing-modal-title-wrap">'
+      + '<span class="ing-modal-icon">💡</span>'
+      + '<div>'
+      + '<h3 class="ing-modal-name" style="font-size:16px;">Product Suggestion</h3>'
+      + '<span class="ing-modal-latin" style="color:#a5b4fc;">Formulation Innovation & Line Extension</span>'
+      + '</div>'
+      + '</div>'
+      + '<button class="ing-modal-close-btn" id="conv-cancel-sugg-modal" aria-label="Close">&times;</button>'
+      + '</div>'
+      + '<div class="ing-modal-body" style="padding:16px 0;">'
+      + '<h2 id="sugg-modal-product-name" style="font-size:19px;font-weight:700;color:#ffffff;margin-bottom:12px;line-height:1.3;">'
+      + esc(sm.name)
+      + '</h2>'
+      + '<div style="margin-bottom:12px;">'
+      + '<div style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Ingredients Used</div>'
+      + '<div id="sugg-modal-ingredients" style="font-size:13px;color:#34d399;font-weight:500;">🌿 ' + esc(sm.ingredientsText || "Active Ayurvedic Botanicals") + '</div>'
+      + '</div>'
+      + '<div>'
+      + '<div style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Description</div>'
+      + '<div id="sugg-modal-description" style="font-size:13px;color:#e2e8f0;line-height:1.5;">' + esc(sm.description || "Synergistic traditional formulation developed for therapeutic balance.") + '</div>'
+      + '</div>'
+      + '</div>'
+      + '<div class="ing-modal-foot">'
+      + '<button class="btn btn-ghost btn-sm" id="conv-close-sugg-btn">Close</button>'
+      + '<button class="btn btn-primary btn-sm" id="conv-use-sugg-btn">'
+      + icon("check", 16) + ' Use This Name'
+      + '</button>'
+      + '</div>'
+      + '</div>'
       + '</div>';
   }
 
@@ -309,7 +434,9 @@
   // Step 3: Description + Structure with AI + Optional Benchmark Reference
   function renderStepDescription(pd) {
     var isNormalizing = pd.is_normalizing;
+    var normDesc = pd.normalized_description || "";
     return '<div class="conv-input-wrap">'
+      + '<label class="form-label" style="font-weight:600;margin-bottom:8px;display:block;">Product Description (Original)</label>'
       + '<textarea class="conv-textarea" id="conv-desc-input" placeholder="Example: Yeh ek Ayurvedic herbal capsule formulation hai jisme Ashwagandha ko primary ingredient ke roop mein use kiya gaya hai for stress management and mental balance.">' + esc(pd.description) + '</textarea>'
       + '<div class="conv-lang-hint">'
       + '<span>Type in Hindi, English, Hinglish, or mixed language. Enter inside textarea creates normal newlines.</span>'
@@ -319,11 +446,20 @@
       + '<div class="conv-ai-banner">'
       + icon("psychology", 20)
       + '<div style="flex:1;">'
-      + '<strong>Structure with AI:</strong> Parses botanical ingredients, dosage form, intended use, and claims into professional English.'
+      + '<strong>Structure with AI:</strong> Translates & structures botanical ingredients, dosage form, intended use, and claims into professional English.'
       + '</div>'
       + '<button class="btn btn-secondary btn-sm" id="conv-normalize-btn" ' + (isNormalizing ? "disabled" : "") + '>'
       + (isNormalizing ? icon("hourglass_empty", 14) + " Structuring..." : icon("auto_awesome", 14) + " Structure with AI")
       + '</button>'
+      + '</div>'
+      + '<div id="conv-desc-normalized-wrap" class="conv-normalized-preview" style="display:' + (normDesc ? 'block' : 'none') + ';">'
+      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+      + '<div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#34d399;">'
+      + icon("auto_awesome", 15) + ' 📝 Structured English Description'
+      + '</div>'
+      + '<span class="chip" style="font-size:10px;background:rgba(52,211,153,0.15);color:#34d399;">AI Translation</span>'
+      + '</div>'
+      + '<div id="conv-desc-normalized-text" style="font-size:13px;color:#f1f5f9;line-height:1.5;">' + esc(normDesc) + '</div>'
       + '</div>'
       + '<div style="margin-top:16px;">'
       + '<label class="form-label" style="font-size:12px;margin-bottom:6px;display:block;color:#94a3b8;">Known Benchmark Product / Classical Reference (Optional):</label>'
@@ -370,14 +506,14 @@
         + '<button class="ing-modal-close-btn" id="conv-cancel-bot-card" aria-label="Close">&times;</button>'
         + '</div>'
         + '<div class="ing-modal-body">'
-        + '<label class="form-label" for="conv-ing-card-qty" style="font-weight:600;font-size:13px;margin-bottom:6px;display:block;">Quantity / Dosage</label>'
-        + '<input type="text" class="form-input" id="conv-ing-card-qty" placeholder="e.g. 500 mg" autocomplete="off" autofocus />'
-        + '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Enter quantity and press Enter to add.</div>'
+        + '<label class="form-label" for="conv-ing-card-qty" style="font-weight:600;font-size:13px;margin-bottom:6px;display:block;">Quantity / Dosage (Optional)</label>'
+        + '<input type="text" class="form-input" id="conv-ing-card-qty" value="' + esc(activeBot.initialQty || '') + '" placeholder="e.g. 500 mg (Optional)" autocomplete="off" autofocus oninput="validateQuantityInput(this)" />'
+        + '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Leave blank for \'Add Qty\', or enter dosage, then press Enter to confirm.</div>'
         + '</div>'
         + '<div class="ing-modal-foot">'
         + '<button class="btn btn-ghost btn-sm" id="conv-cancel-bot-btn">Cancel</button>'
         + '<button class="btn btn-primary btn-sm" id="conv-ing-card-confirm">'
-        + icon("add_circle", 16) + ' Press Enter to Add'
+        + icon("check_circle", 16) + ' Confirm (Enter)'
         + '</button>'
         + '</div>'
         + '</div>'
@@ -389,14 +525,40 @@
       + '<label class="form-label" style="font-weight:600;font-size:13px;margin-bottom:8px;display:block;">Add Custom Ingredient (e.g. "tulsi ka extract", "50 mg"):</label>'
       + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
       + '<input class="form-input" type="text" id="conv-custom-ing-name" placeholder="Ingredient name (e.g. tulsi ka extract)" style="flex:2;min-width:180px;">'
-      + '<input class="form-input" type="text" id="conv-custom-ing-qty" placeholder="Quantity (e.g. 50 mg)" style="flex:1;min-width:120px;">'
+      + '<input class="form-input" type="text" id="conv-custom-ing-qty" placeholder="Quantity optional (e.g. 50 mg)" style="flex:1;min-width:120px;" oninput="validateQuantityInput(this)">'
       + '<button class="btn btn-primary btn-sm" id="conv-add-ing-btn">' + icon("add", 16) + ' Add Custom (Enter)</button>'
       + '</div>'
       + '</div>';
 
-    // Formulation Ingredients List
+    // Dynamic Formulation Suggestions ("What can you make with these ingredients")
+    var suggestions = getFormulationSuggestionsDetailed(ingredients, pd.product_suggestions);
+    if (suggestions && suggestions.length > 0) {
+      html += '<div class="conv-suggestions-card" style="margin-bottom:20px;">'
+        + '<div class="conv-suggestions-head">'
+        + '<div class="conv-suggestions-title">' + icon("lightbulb", 16) + ' What can you make with these ingredients?</div>'
+        + '<span style="font-size:11px;color:#94a3b8;">Click suggestion to view details & apply name</span>'
+        + '</div>'
+        + '<div class="conv-suggestions-grid">';
+      suggestions.forEach(function (sugg, sIdx) {
+        html += '<button type="button" class="conv-suggestion-card-btn" data-sugg-idx="' + sIdx + '">'
+          + '<div style="font-weight:600;display:flex;align-items:center;gap:6px;">' + icon("auto_awesome", 14) + ' ' + esc(sugg.name) + '</div>'
+          + '<div style="font-size:11.5px;color:#a5b4fc;opacity:0.9;">(' + esc(sugg.ingredientsText) + ')</div>'
+          + '</button>';
+      });
+      html += '</div></div>';
+    }
+
+    // Formulation Ingredients List with DRAVYA Eligibility Badges
+    var verifiedCount = 0;
+    ingredients.forEach(function(ing) {
+      if (ing.eligibility && ing.eligibility.verified) verifiedCount++;
+    });
+
     html += '<div style="margin-top:16px;">'
-      + '<label class="form-label" style="font-weight:600;margin-bottom:8px;display:block;">Formulation Ingredients (' + ingredients.length + '):</label>';
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+      + '<label class="form-label" style="font-weight:600;margin:0;">Formulation Ingredients (' + ingredients.length + '):</label>'
+      + (ingredients.length > 0 ? '<span class="chip" style="font-weight:700;font-size:11px;background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3);">' + verifiedCount + '/' + ingredients.length + ' Verified ✅</span>' : '')
+      + '</div>';
 
     if (ingredients.length === 0) {
       html += '<div style="padding:16px;text-align:center;color:var(--text-secondary);border:1.5px dashed rgba(255,255,255,0.1);border-radius:12px;">'
@@ -404,11 +566,33 @@
         + '</div>';
     } else {
       ingredients.forEach(function (ing, idx) {
-        html += '<div class="conv-ing-item">'
-          + '<div class="conv-ing-main">'
+        var el = ing.eligibility;
+        var badgeHTML = '';
+        if (el) {
+          var lvl = el.eligibility_level || 'NOT FOUND';
+          var badgeClass = lvl.toLowerCase().replace(' ', '_');
+          var badgeText = el.verified ? ('✅ ' + lvl) : (lvl === 'LOW' ? '⚠️ PARTIAL' : '❌ NOT FOUND');
+          if (el.schedule_e1) badgeText = '⚠️ SCHEDULE E-1';
+          badgeHTML = '<span class="eligibility-badge ' + badgeClass + '" style="cursor:pointer;" onclick="if(window.showIngredientPopup)window.showIngredientPopup(\'' + esc(ing.name).replace(/'/g, "\\'") + '\', \'' + esc(ing.botanical || '').replace(/'/g, "\\'") + '\', \'' + esc(ing.quantity || '').replace(/'/g, "\\'") + '\');">' + esc(badgeText) + '</span>';
+        } else {
+          // Asynchronously trigger eligibility check if not cached
+          fetch('/api/ingredients/eligibility/' + encodeURIComponent(ing.name))
+            .then(function(r){ return r.json(); })
+            .then(function(data){ ing.eligibility = data; if(window.AYUR && typeof window.AYUR.render === 'function') window.AYUR.render(); })
+            .catch(function(e){});
+          badgeHTML = '<span class="eligibility-badge low" style="opacity:0.6;">Checking...</span>';
+        }
+
+        html += '<div class="conv-ing-item" style="cursor:pointer;" onclick="if(event.target.tagName!==\'BUTTON\' && window.showIngredientPopup)window.showIngredientPopup(\'' + esc(ing.name).replace(/'/g, "\\'") + '\', \'' + esc(ing.botanical || '').replace(/'/g, "\\'") + '\', \'' + esc(ing.quantity || '').replace(/'/g, "\\'") + '\');">'
+          + '<div class="conv-ing-main" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
           + '<span class="conv-ing-name">🌿 ' + esc(ing.name) + '</span>'
           + (ing.botanical ? '<span class="conv-ing-botanical">(' + esc(ing.botanical) + ')</span>' : '')
-          + (ing.quantity ? '<span class="chip" style="font-size:11px;margin-left:8px;background:rgba(52,211,153,0.15);color:#34d399;">' + esc(ing.quantity) + '</span>' : '')
+          + badgeHTML
+          + (ing.quantity ? (
+              '<button type="button" class="conv-qty-badge" data-edit-ing-idx="' + idx + '" title="Click to edit quantity">' + esc(ing.quantity) + '</button>'
+            ) : (
+              '<button type="button" class="conv-qty-badge empty" data-edit-ing-idx="' + idx + '" title="Click to add quantity">+ Add Qty</button>'
+            ))
           + '</div>'
           + '<button class="btn btn-ghost btn-sm conv-remove-ing" data-idx="' + idx + '" title="Remove ingredient" style="color:#f87171;">' + icon("delete", 16) + '</button>'
           + '</div>';
@@ -559,8 +743,11 @@
       + '<div class="passport-review-header">'
       + '<div>'
       + '<div class="passport-review-category">' + icon("spa", 14) + ' ' + esc(productType) + ' • 🇮🇳 India Scope</div>'
-      + '<h1 class="passport-review-title" style="margin-top:8px;">' + esc(name) + '</h1>'
-      + '<div style="font-size:13px;opacity:0.9;">Structured product identity & Indian patent landscape readiness baseline.</div>'
+      + '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">'
+      + '<h1 class="passport-review-title" style="margin:0;">' + esc(name) + '</h1>'
+      + '<button class="passport-edit-btn" data-jump-step="1" title="Edit Product Name">' + icon("edit", 12) + ' Edit Name</button>'
+      + '</div>'
+      + '<div style="font-size:13px;opacity:0.9;margin-top:6px;">Structured product identity & Indian patent landscape readiness baseline.</div>'
       + '</div>'
       + '<div style="text-align:right;">'
       + '<span class="confidence-badge confidence-high" style="font-size:13px;padding:6px 14px;">Passport Complete</span>'
@@ -572,13 +759,15 @@
       // Product Form & Identity
       + '<div class="passport-section-card">'
       + '<div class="passport-section-head">'
-      + '<div class="passport-section-title">' + icon("inventory_2", 16) + ' Product Identity</div>'
-      + '<button class="passport-edit-btn" data-jump-step="0">' + icon("edit", 12) + ' Edit</button>'
+      + '<div class="passport-section-title">' + icon("inventory_2", 16) + ' Product Identity & Category</div>'
+      + '<button class="passport-edit-btn" data-jump-step="0">' + icon("edit", 12) + ' Edit Category</button>'
       + '</div>'
       + '<div class="passport-value-text">' + esc(productType) + '</div>'
       + '<div style="margin-top:8px;font-size:13px;color:var(--text-secondary);">'
-      + '<strong>Dosage Form:</strong> ' + esc(pd.form || "Capsule Formulation")
+      + '<strong>Dosage Form:</strong> ' + ((pd.form || pd.product_type) ? esc(pd.form || pd.product_type) : '<span style="color:var(--text-tertiary);font-style:italic;">Not specified</span>')
       + '</div>'
+      + (pd.description ? '<div style="margin-top:8px;font-size:13px;color:var(--text-secondary);display:flex;justify-content:space-between;align-items:flex-start;gap:8px;"><div><strong>Description:</strong> ' + esc(pd.description) + '</div><button class="passport-edit-btn" data-jump-step="2" style="flex-shrink:0;">' + icon("edit", 12) + ' Edit</button></div>' : '<div style="margin-top:8px;"><button class="passport-edit-btn" data-jump-step="2">' + icon("edit", 12) + ' Add Description</button></div>')
+      + (pd.normalized_description ? '<div style="margin-top:10px;padding:8px 10px;background:rgba(52,211,153,0.08);border-left:2px solid #34d399;border-radius:4px;font-size:12px;color:#e2e8f0;line-height:1.4;"><strong>AI Structured:</strong> ' + esc(pd.normalized_description) + '</div>' : '')
       + '</div>'
 
       // Target Market Scope (Fixed National Jurisdiction)
@@ -600,7 +789,7 @@
       + '</div>';
 
     if (ingredients.length === 0) {
-      html += '<p style="color:var(--text-secondary);font-size:13px;">No ingredients specified.</p>';
+      html += '<p style="color:var(--text-secondary);font-size:13px;padding:8px 0;font-style:italic;">No ingredients specified.</p>';
     } else {
       html += '<table class="passport-ing-table">'
         + '<thead><tr style="text-align:left;font-size:11px;color:var(--text-secondary);text-transform:uppercase;">'
@@ -614,14 +803,33 @@
         html += '<tr>'
           + '<td style="padding:8px 0;font-weight:600;">🌿 ' + esc(ing.name) + '</td>'
           + '<td style="padding:8px 0;font-style:italic;color:var(--text-secondary);">' + (ing.botanical ? esc(ing.botanical) : '<span style="color:var(--text-tertiary)">Matched via Rule Engine</span>') + '</td>'
-          + '<td style="padding:8px 0;">' + (ing.quantity ? '<span class="chip" style="font-size:11px;background:rgba(52,211,153,0.15);color:#34d399;">' + esc(ing.quantity) + '</span>' : '<span style="color:var(--text-tertiary)">Unspecified</span>') + '</td>'
+          + '<td style="padding:8px 0;">' + (ing.quantity ? '<span class="chip" style="font-size:11px;background:rgba(52,211,153,0.15);color:#34d399;">' + esc(ing.quantity) + '</span>' : '<span style="color:var(--text-tertiary);font-style:italic;font-size:11px;">Unspecified</span>') + '</td>'
           + '<td style="padding:8px 0;text-align:right;"><span class="chip selected" style="font-size:10px;">' + esc(ing.status || "IDENTIFIED") + '</span></td>'
           + '</tr>';
       });
       html += '</tbody></table>';
     }
-    html += '</div>'
+    html += '</div>';
 
+    // Formulation Suggestions
+    var reviewSuggestions = getFormulationSuggestionsDetailed(ingredients, pd.product_suggestions);
+    if (reviewSuggestions && reviewSuggestions.length > 0) {
+      html += '<div class="passport-section-card full-width" style="background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.22);">'
+        + '<div class="passport-section-head">'
+        + '<div class="passport-section-title" style="color:#a5b4fc;">' + icon("lightbulb", 16) + ' Suggested Product Formulations & Line Extensions</div>'
+        + '<span style="font-size:11px;color:#94a3b8;">Click suggestion to view details & apply name</span>'
+        + '</div>'
+        + '<div class="conv-suggestions-grid" style="margin-top:8px;">';
+      reviewSuggestions.forEach(function(sugg, sIdx) {
+        html += '<button type="button" class="conv-suggestion-card-btn" data-sugg-idx="' + sIdx + '">'
+          + '<div style="font-weight:600;display:flex;align-items:center;gap:6px;">' + icon("auto_awesome", 14) + ' ' + esc(sugg.name) + '</div>'
+          + '<div style="font-size:11.5px;color:#a5b4fc;opacity:0.9;">(' + esc(sugg.ingredientsText) + ')</div>'
+          + '</button>';
+      });
+      html += '</div></div>';
+    }
+
+    html += ''
       // Intended Uses
       + '<div class="passport-section-card">'
       + '<div class="passport-section-head">'
@@ -631,7 +839,7 @@
       + '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
 
     if (uses.length === 0) {
-      html += '<span style="font-size:13px;color:#94a3b8;">General Wellness</span>';
+      html += '<span style="font-size:13px;color:var(--text-tertiary);font-style:italic;">No indications specified</span>';
     } else {
       uses.forEach(function (u) {
         html += '<span class="passport-badge-tag">🎯 ' + esc(u) + '</span>';
@@ -645,7 +853,7 @@
       + '<div class="passport-section-title">' + icon("precision_manufacturing", 16) + ' Preparation & Formulation</div>'
       + '<button class="passport-edit-btn" data-jump-step="5">' + icon("edit", 12) + ' Edit</button>'
       + '</div>'
-      + '<div class="passport-value-text" style="font-size:14px;">' + esc(pd.process || "Standard Ayurvedic preparation") + '</div>'
+      + '<div class="passport-value-text" style="font-size:14px;">' + (pd.process ? esc(pd.process) : '<span style="color:var(--text-tertiary);font-style:italic;">Not specified</span>') + '</div>'
       + '</div>'
 
       // Proposed Claims
@@ -656,7 +864,7 @@
       + '</div>';
 
     if (claims.length === 0) {
-      html += '<p style="color:var(--text-secondary);font-size:13px;">No claims specified.</p>';
+      html += '<p style="color:var(--text-secondary);font-size:13px;font-style:italic;">No claims specified.</p>';
     } else {
       html += '<div style="display:flex;flex-direction:column;gap:8px;">';
       claims.forEach(function (clm) {
@@ -692,7 +900,8 @@
       + '</div>'
       + '</div>'
 
-      + '</div></div>';
+      + '</div></div>'
+      + renderSuggestionModalHtml(pd);
 
     return html;
   }
@@ -722,6 +931,7 @@
       card.addEventListener("click", function () {
         var val = this.getAttribute("data-val");
         pd.product_type = val;
+        if (!pd.form || pd.form === "Not specified") pd.form = val;
         A.render();
       });
     });
@@ -730,6 +940,7 @@
     if (catText) {
       catText.addEventListener("input", function () {
         pd.product_type = this.value || "Other";
+        if (!pd.form || pd.form === "Not specified" || pd.form === "Other") pd.form = this.value || "Other";
       });
     }
 
@@ -823,29 +1034,47 @@
       });
     }
 
-    // Confirm & Add predefined botanical with quantity
+    // Confirm & Add/Edit botanical with quantity
     function confirmBotanicalQuantity() {
       if (!pd.activeBotanicalCard) return;
       var qtyInput = document.getElementById("conv-ing-card-qty");
       var qty = qtyInput ? qtyInput.value.trim() : "";
       
-      // Default to 500 mg if left blank on enter
-      var finalQty = qty || "500 mg";
+      if (qty) {
+        // If user typed only letters or symbols without numbers (e.g. "g" or "mg"), reject
+        if (!/[0-9]/.test(qty)) {
+          if (typeof toast === "function") {
+            toast("⚠️ Please enter a valid quantity with numbers (e.g. 500 mg)", "warning");
+          }
+          return;
+        }
+        qty = qty.replace(/[^0-9\s.mgMGkKlL%]/g, "").trim();
+      }
 
-      // Prevent duplicate
-      var existsIdx = pd.ingredients.findIndex(function (ing) {
-        return (ing.name || "").toLowerCase() === pd.activeBotanicalCard.name.toLowerCase();
-      });
+      // If left blank by user, do NOT auto-fill 500 mg! Leave as null / unspecified.
+      var finalQty = qty || null;
 
-      if (existsIdx >= 0) {
-        pd.ingredients[existsIdx].quantity = finalQty;
+      if (typeof pd.activeBotanicalCard.editingIdx === "number" && pd.activeBotanicalCard.editingIdx >= 0) {
+        var editIdx = pd.activeBotanicalCard.editingIdx;
+        if (pd.ingredients[editIdx]) {
+          pd.ingredients[editIdx].quantity = finalQty;
+        }
       } else {
-        pd.ingredients.push({
-          name: pd.activeBotanicalCard.name,
-          botanical: pd.activeBotanicalCard.botanical || "",
-          quantity: finalQty,
-          status: "IDENTIFIED"
+        // Prevent duplicate
+        var existsIdx = pd.ingredients.findIndex(function (ing) {
+          return (ing.name || "").toLowerCase() === pd.activeBotanicalCard.name.toLowerCase();
         });
+
+        if (existsIdx >= 0) {
+          pd.ingredients[existsIdx].quantity = finalQty;
+        } else {
+          pd.ingredients.push({
+            name: pd.activeBotanicalCard.name,
+            botanical: pd.activeBotanicalCard.botanical || "",
+            quantity: finalQty,
+            status: "IDENTIFIED"
+          });
+        }
       }
 
       pd.activeBotanicalCard = null;
@@ -859,6 +1088,32 @@
       });
     }
 
+    // Edit Ingredient Quantity Badge Click
+    document.querySelectorAll(".conv-qty-badge[data-edit-ing-idx]").forEach(function (badge) {
+      badge.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var idx = parseInt(this.getAttribute("data-edit-ing-idx"), 10);
+        if (!isNaN(idx) && idx >= 0 && idx < pd.ingredients.length) {
+          var ing = pd.ingredients[idx];
+          pd.activeBotanicalCard = {
+            name: ing.name,
+            botanical: ing.botanical || "",
+            emoji: "🌿",
+            editingIdx: idx,
+            initialQty: ing.quantity || ""
+          };
+          A.render();
+          setTimeout(function() {
+            var qtyInput = document.getElementById("conv-ing-card-qty");
+            if (qtyInput) {
+              qtyInput.focus();
+              qtyInput.select();
+            }
+          }, 30);
+        }
+      });
+    });
+
     // Custom Ingredient Add
     function addCustomIngredient() {
       var nameEl = document.getElementById("conv-custom-ing-name");
@@ -871,8 +1126,19 @@
         return;
       }
 
+      if (rawQty) {
+        if (!/[0-9]/.test(rawQty)) {
+          if (typeof toast === "function") {
+            toast("⚠️ Please enter a valid quantity with numbers (e.g. 50 mg)", "warning");
+          }
+          return;
+        }
+        rawQty = rawQty.replace(/[^0-9\s.mgMGkKlL%]/g, "").trim();
+      }
+
       var normalized = normalizeCustomIngredient(rawName);
-      var finalQty = rawQty || "100 mg";
+      // If left blank, do NOT auto-fill 100 mg! Leave as null / unspecified.
+      var finalQty = rawQty || null;
 
       pd.ingredients.push({
         name: normalized.name,
@@ -892,6 +1158,68 @@
         addCustomIngredient();
       });
     }
+
+    // Suggestion Cards Click (Opens Modal Popup)
+    document.querySelectorAll(".conv-suggestion-card-btn[data-sugg-idx]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var sIdx = parseInt(this.getAttribute("data-sugg-idx"), 10);
+        var suggList = getFormulationSuggestionsDetailed(pd.ingredients, pd.product_suggestions);
+        if (suggList && suggList[sIdx]) {
+          pd.activeSuggestionModal = suggList[sIdx];
+          A.render();
+        }
+      });
+    });
+
+    // Suggestion Modal Actions
+    var useSuggBtn = document.getElementById("conv-use-sugg-btn");
+    if (useSuggBtn) {
+      useSuggBtn.addEventListener("click", function () {
+        if (pd.activeSuggestionModal && pd.activeSuggestionModal.name) {
+          pd.name = pd.activeSuggestionModal.name;
+          if (A.updateTopbarUI) A.updateTopbarUI();
+          toast("Applied product name: " + pd.name, "success");
+        }
+        pd.activeSuggestionModal = null;
+        A.render();
+      });
+    }
+
+    var closeSuggBtn = document.getElementById("conv-close-sugg-btn");
+    if (closeSuggBtn) {
+      closeSuggBtn.addEventListener("click", function () {
+        pd.activeSuggestionModal = null;
+        A.render();
+      });
+    }
+
+    var cancelSuggModal = document.getElementById("conv-cancel-sugg-modal");
+    if (cancelSuggModal) {
+      cancelSuggModal.addEventListener("click", function () {
+        pd.activeSuggestionModal = null;
+        A.render();
+      });
+    }
+
+    var suggOverlay = document.getElementById("sugg-modal-overlay");
+    if (suggOverlay) {
+      suggOverlay.addEventListener("click", function (e) {
+        if (e.target === suggOverlay) {
+          pd.activeSuggestionModal = null;
+          A.render();
+        }
+      });
+    }
+
+    // Formulation suggestion pills click (fallback legacy pills)
+    document.querySelectorAll(".conv-suggestion-pill[data-sugg-name]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var name = this.getAttribute("data-sugg-name");
+        pd.name = name;
+        if (A.updateTopbarUI) A.updateTopbarUI();
+        toast("Applied product name: " + name, "success");
+      });
+    });
 
     // Remove ingredient
     document.querySelectorAll(".conv-remove-ing").forEach(function (btn) {
@@ -1025,6 +1353,14 @@
     }
 
     // Review Screen Actions
+    var jumpReviewBtn = document.getElementById("conv-jump-review-btn");
+    if (jumpReviewBtn) {
+      jumpReviewBtn.addEventListener("click", function () {
+        state.passportStep = CONV_STEPS.length - 1; // Jump directly to Review
+        A.render();
+      });
+    }
+
     var editAllBtn = document.getElementById("passport-edit-all-btn");
     if (editAllBtn) {
       editAllBtn.addEventListener("click", function () {
@@ -1137,17 +1473,27 @@
     var pd = state.passportData;
     if (!pd) return;
 
-    if (!pd.description || !pd.description.trim()) {
-      toast("Please enter a product description first", "info");
+    var descInput = document.getElementById("conv-desc-input");
+    var rawText = (descInput ? descInput.value : (pd.description || "")).trim();
+
+    if (!rawText) {
+      console.warn("⚠️ No description entered");
+      toast("Please enter a product description first", "warning");
       return;
     }
 
+    pd.description = rawText;
+    var normBtn = document.getElementById("conv-normalize-btn");
+    var originalText = normBtn ? normBtn.innerHTML : "Structure with AI";
+    if (normBtn) {
+      normBtn.innerHTML = '<span class="spinner"></span> Analyzing...';
+      normBtn.disabled = true;
+    }
     pd.is_normalizing = true;
-    A.render();
 
     try {
       var payload = {
-        description: pd.description || "",
+        description: rawText,
         name: pd.name || "",
         product_type: pd.product_type || "",
         ingredients: pd.ingredients || [],
@@ -1158,11 +1504,15 @@
         jurisdictions: ["IN"]
       };
 
+      console.log("📤 Sending normalization payload:", payload);
+
       var res = await api("/api/cases/normalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+
+      console.log("✅ AI Normalization response:", res);
 
       if (res) {
         if (res.product_name && !pd.name) {
@@ -1173,15 +1523,30 @@
         if (res.process && !pd.process) {
           pd.process = res.process;
         }
+        if (res.normalized_description) {
+          pd.normalized_description = res.normalized_description;
+        }
+        if (res.product_suggestions && Array.isArray(res.product_suggestions)) {
+          pd.product_suggestions = res.product_suggestions;
+        }
 
         // Merge ingredients
         if (res.ingredients && Array.isArray(res.ingredients) && res.ingredients.length > 0) {
           res.ingredients.forEach(function (normIng) {
+            var ingName = normIng.input_name || normIng.name || "";
+            var ingBot = normIng.botanical_name || normIng.botanical || "";
+            if (!ingName) return;
             var exists = pd.ingredients.some(function (existing) {
-              return (existing.name || "").toLowerCase() === (normIng.name || "").toLowerCase();
+              return (existing.name || "").toLowerCase() === ingName.toLowerCase() ||
+                     (ingBot && (existing.botanical || "").toLowerCase() === ingBot.toLowerCase());
             });
             if (!exists) {
-              pd.ingredients.push(normIng);
+              pd.ingredients.push({
+                name: ingName.charAt(0).toUpperCase() + ingName.slice(1),
+                botanical: ingBot,
+                quantity: normIng.quantity || null,
+                status: normIng.status || "AI_DETECTED"
+              });
             }
           });
         }
@@ -1205,13 +1570,114 @@
         }
 
         pd.ai_normalized = true;
-        toast("Product description structured into professional English", "success");
+        console.log("✅ Passport updated:", pd);
+
+        // Show success toast with ingredients and confidence
+        var ingNames = (pd.ingredients || []).map(function (i) { return i.name; }).filter(Boolean).join(", ") || "Properties updated";
+        toast("✅ AI structured successfully! Ingredients: " + ingNames, "success");
       }
     } catch (e) {
-      toast("Information structured using local botanical engine", "info");
+      console.warn("⚠️ AI service error, running fallback:", e);
+      toast("⚠️ AI service unavailable. Using local botanical engine.", "warning");
+      fallbackNormalize(rawText);
+    } finally {
+      pd.is_normalizing = false;
+      if (normBtn) {
+        normBtn.innerHTML = originalText;
+        normBtn.disabled = false;
+      }
+      A.render();
     }
+  }
 
-    pd.is_normalizing = false;
+  // ----------------------------------------------------------------
+  // Fallback Normalization
+  // ----------------------------------------------------------------
+
+  function fallbackNormalize(rawText) {
+    var pd = state.passportData;
+    if (!pd || !rawText) return;
+
+    console.log("🔄 Using fallback normalization for:", rawText);
+    var textLower = rawText.toLowerCase();
+    var knownHerbs = {
+      "ashwagandha": "Withania somnifera",
+      "brahmi": "Bacopa monnieri",
+      "tulsi": "Ocimum sanctum",
+      "neem": "Azadirachta indica",
+      "haldi": "Curcuma longa",
+      "turmeric": "Curcuma longa",
+      "amla": "Phyllanthus emblica",
+      "giloy": "Tinospora cordifolia",
+      "shatavari": "Asparagus racemosus",
+      "shankhpushpi": "Convolvulus pluricaulis",
+      "jatamansi": "Nardostachys jatamansi",
+      "mulethi": "Glycyrrhiza glabra",
+      "triphala": "Triphala",
+      "haritaki": "Terminalia chebula",
+      "bibhitaki": "Terminalia bellirica"
+    };
+
+    var detected = [];
+    Object.keys(knownHerbs).forEach(function (herb) {
+      if (textLower.indexOf(herb) !== -1) {
+        detected.push({
+          name: herb.charAt(0).toUpperCase() + herb.slice(1),
+          botanical: knownHerbs[herb]
+        });
+      }
+    });
+
+    console.log("🔍 Detected ingredients (fallback):", detected);
+
+    if (detected.length > 0) {
+      detected.forEach(function (ing) {
+        var exists = pd.ingredients.some(function (existing) {
+          return (existing.name || "").toLowerCase() === ing.name.toLowerCase();
+        });
+        if (!exists) {
+          pd.ingredients.push({
+            name: ing.name,
+            botanical: ing.botanical,
+            quantity: null,
+            status: "USER_PROVIDED"
+          });
+        }
+      });
+      var ingsStr = detected.map(function (d) { return d.name; }).join(", ");
+      pd.normalized_description = "A classical Ayurvedic formulation containing active botanical extracts of " + ingsStr + " for holistic wellness.";
+      pd.product_suggestions = getFormulationSuggestions(pd.ingredients, []);
+      pd.ai_normalized = true;
+      toast("✅ Found ingredients: " + ingsStr, "success");
+    } else {
+      // Symptom / condition detection & translation
+      if (textLower.indexOf("sar dard") !== -1 || textLower.indexOf("sir dard") !== -1 || textLower.indexOf("headache") !== -1 || textLower.indexOf("migraine") !== -1) {
+        pd.normalized_description = "This formulation helps relieve headaches and provides soothing head tension relief.";
+        if (pd.intended_use.indexOf("Headache & Migraine Relief") === -1) {
+          pd.intended_use.push("Headache & Migraine Relief");
+        }
+      } else if (textLower.indexOf("pet") !== -1 || textLower.indexOf("pachan") !== -1 || textLower.indexOf("gas") !== -1 || textLower.indexOf("kabz") !== -1) {
+        pd.normalized_description = "This formulation promotes healthy digestion and relieves gastrointestinal discomfort.";
+        if (pd.intended_use.indexOf("Digestive Health & Gut Support") === -1) {
+          pd.intended_use.push("Digestive Health & Gut Support");
+        }
+      } else if (textLower.indexOf("stress") !== -1 || textLower.indexOf("tanaav") !== -1 || textLower.indexOf("calm") !== -1) {
+        pd.normalized_description = "This formulation supports daily stress management, mental calmness, and relaxation.";
+        if (pd.intended_use.indexOf("Stress Relief & Relaxation") === -1) {
+          pd.intended_use.push("Stress Relief & Relaxation");
+        }
+      } else if (textLower.indexOf("neend") !== -1 || textLower.indexOf("sleep") !== -1) {
+        pd.normalized_description = "This formulation promotes restful sleep, calming relaxation, and nightly rejuvenation.";
+        if (pd.intended_use.indexOf("Sleep & Calming Support") === -1) {
+          pd.intended_use.push("Sleep & Calming Support");
+        }
+      } else {
+        pd.normalized_description = "A targeted Ayurvedic formulation crafted to support daily health and holistic balance.";
+      }
+      pd.product_suggestions = getFormulationSuggestions(pd.ingredients, []);
+      pd.ai_normalized = true;
+      toast("✅ Description structured and translated into English", "success");
+    }
     A.render();
   }
 
@@ -1220,52 +1686,84 @@
   // ----------------------------------------------------------------
 
   async function saveProductPassportAndStartAnalysis() {
-    var pd = state.passportData;
+    var pd = (window.AYUR && window.AYUR.state && window.AYUR.state.passportData) || state.passportData;
     if (!pd) return;
 
-    state.loading = true;
-    A.render();
+    // CRITICAL: Ensure ingredients are properly formatted
+    var ingredients = pd.ingredients || [];
+    var cleanIngredients = ingredients.map(function (ing) {
+      return {
+        name: ing.name || ing.input_name || '',
+        botanical: ing.botanical || ing.botanical_name || '',
+        quantity: ing.quantity || '',
+        status: ing.status || 'USER_PROVIDED'
+      };
+    });
+
+    var payload = {
+      name: pd.name || 'Unnamed Product',
+      stage: 'IDEA',
+      jurisdictions: ['IN'],
+      ingredients: cleanIngredients,
+      form: pd.form || pd.product_type || null,
+      intended_use: Array.isArray(pd.intended_use) ? pd.intended_use.join(', ') : (pd.intended_use || null),
+      claims: pd.claims || [],
+      formulation: pd.formulation || pd.form || pd.product_type || null,
+      process: pd.process || null,
+      brand: pd.brand || null,
+      packaging: pd.packaging || null,
+      notes: pd.reference_context || pd.notes || null
+    };
+
+    console.log('💾 SAVING WITH PAYLOAD:', payload);
 
     try {
-      var payload = {
-        name: pd.name || "Ashwagandha Calm & Restore Capsules",
-        form: pd.form || "Capsule Formulation",
-        ingredients: pd.ingredients || [],
-        intended_use: pd.intended_use ? pd.intended_use.join(", ") : "Stress Management & Daily Wellness",
-        process: pd.process || "Standard Ayurvedic preparation",
-        claims: pd.claims || [],
-        jurisdictions: ["IN"], // INDIA ONLY
-        notes: pd.reference_context || pd.notes || "",
-        stage: "IDEA"
-      };
+      var response = await fetch('/api/cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
 
-      var savedCase;
-      if (pd.id) {
-        savedCase = await api("/api/cases/" + pd.id, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+      var data = await response.json();
+
+      if (response.ok) {
+        console.log('✅ Case saved:', data);
+
+        // Update state
+        window.AYUR.state.currentCase = data;
+        window.AYUR.state.passportData = null;
+
+        // Persist to localStorage
+        if (typeof window.AYUR.saveStateToLocalStorage === 'function') {
+          window.AYUR.saveStateToLocalStorage();
+        }
+
+        // Update topbar
+        if (typeof window.AYUR.updateTopbarUI === 'function') {
+          window.AYUR.updateTopbarUI();
+        } else if (typeof updateTopbarUI === 'function') {
+          updateTopbarUI();
+        }
+
+        // Show success
+        if (typeof showToast === 'function') {
+          showToast('✅ Product saved! Opening Case Intelligence...', 'success');
+        } else if (typeof toast === 'function') {
+          toast('✅ Product saved! Opening Case Intelligence...', 'success');
+        }
+
+        // Navigate to Case Intelligence
+        window.AYUR.state.view = 'case-detail';
+        window.AYUR.render();
       } else {
-        savedCase = await api("/api/cases", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+        var errMsg = '❌ Failed to save: ' + (data.detail || 'Unknown error');
+        if (typeof showToast === 'function') showToast(errMsg, 'error');
+        else if (typeof toast === 'function') toast(errMsg, 'error');
       }
-
-      toast("Product Passport saved successfully!", "success");
-
-      await A.loadCases();
-      await A.loadCase(savedCase.id);
-      state.view = "case-detail";
-      state.loading = false;
-      A.render();
-
-    } catch (err) {
-      state.loading = false;
-      toast("Failed to save Product Passport: " + (err.message || "Unknown error"), "error");
-      A.render();
+    } catch (error) {
+      console.error('Save error:', error);
+      if (typeof showToast === 'function') showToast('❌ Failed to save product', 'error');
+      else if (typeof toast === 'function') toast('❌ Failed to save product', 'error');
     }
   }
 
@@ -1273,5 +1771,7 @@
   window.AYUR.renderPassportWizard = renderPassportWizard;
   window.AYUR.initPassportData = initPassportData;
   window.AYUR.bindPassportEvents = bindPassportEvents;
+  window.AYUR.triggerAiNormalize = triggerAiNormalize;
+  window.AYUR.fallbackNormalize = fallbackNormalize;
 
 })();

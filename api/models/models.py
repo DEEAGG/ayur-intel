@@ -59,6 +59,8 @@ class User(Base):
     username = Column(String(100), unique=True, nullable=False)
     display_name = Column(String(200), nullable=False, default="")
     email = Column(String(200), nullable=True)
+    hashed_password = Column(String(300), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=_now_utc)
     updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)

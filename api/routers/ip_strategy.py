@@ -17,7 +17,7 @@ from api.schemas.ip_strategy import (
     IPStrategyItemUpdateRequest,
     IPStrategyResponse,
 )
-from api.services.ip_strategy_service import generate_ip_strategy, strategy_to_dict
+from api.services.ip_strategy_service import generate_ip_strategy, generate_ip_roadmap, strategy_to_dict
 
 logger = logging.getLogger("ayur_intel.routers.ip_strategy")
 
@@ -35,24 +35,50 @@ def get_current_user(db: Session = Depends(get_db)) -> User:
     return user
 
 
+@router.post("/ip-strategy/cases/{case_id}/roadmap")
+@router.get("/ip-strategy/cases/{case_id}/roadmap")
+@router.post("/cases/{case_id}/ip-strategy/roadmap")
+@router.get("/cases/{case_id}/ip-strategy/roadmap")
+def generate_ip_roadmap_endpoint(
+    case_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Generate complete IP strategy roadmap for a product case."""
+    case = (
+        db.query(ProductCase)
+        .filter(
+            ProductCase.public_id == case_id,
+            ProductCase.owner_id == user.id,
+        )
+        .first()
+    )
+    if not case:
+        raise HTTPException(status_code=404, detail="Product Case not found")
+
+    result = generate_ip_roadmap(case)
+    return result
+
+
 @router.post("/cases/{case_id}/ip-strategy")
 def create_ip_strategy(
     case_id: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Generate an IP Strategy Map for a Product Case.
-
-    Reads data from Product Passport, Innovation Analysis, Patent Analysis,
-    and Knowledge Findings to produce a visual IP investigation roadmap.
-    """
-    strategy = generate_ip_strategy(db, user, case_id)
-    if not strategy:
+    """Generate an IP Strategy Map for a Product Case."""
+    case = (
+        db.query(ProductCase)
+        .filter(
+            ProductCase.public_id == case_id,
+            ProductCase.owner_id == user.id,
+        )
+        .first()
+    )
+    if not case:
         raise HTTPException(status_code=404, detail="Product Case not found")
 
-    result = strategy_to_dict(strategy)
-    result["message"] = "IP Strategy generated successfully"
-    return result
+    return generate_ip_roadmap(case)
 
 
 @router.get("/cases/{case_id}/ip-strategy")

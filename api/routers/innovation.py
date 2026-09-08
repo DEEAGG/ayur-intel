@@ -45,6 +45,27 @@ def get_current_user(db: Session = Depends(get_db)) -> User:
 # -------------------------------------------------------------------
 
 @router.post(
+    "/{case_id}/innovate",
+    summary="Analyze innovation for a product case and return combined professional report",
+)
+def innovate_case(
+    case_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Analyze innovation for a product case and return combined professional report."""
+    from api.services.product_case_service import get_product_case
+    from api.services.innovation_service import analyze_innovation
+
+    case = get_product_case(db=db, owner=user, public_id=case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Product Case not found")
+
+    result = analyze_innovation(case)
+    return result
+
+
+@router.post(
     "/{case_id}/innovation-analysis",
     status_code=201,
     responses={404: {"description": "Product Case not found"}},
@@ -60,6 +81,14 @@ def create_innovation_analysis(
     This is a decision-support tool. Classifications are preliminary
     research assessments, NOT legal conclusions.
     """
+    from api.services.product_case_service import get_product_case
+    from api.services.innovation_service import analyze_innovation
+
+    # Return rich combined innovation analysis report
+    case = get_product_case(db=db, owner=user, public_id=case_id)
+    if case:
+        return analyze_innovation(case)
+
     result = create_analysis(db=db, owner=user, case_public_id=case_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Product Case not found")

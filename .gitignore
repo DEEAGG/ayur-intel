@@ -33,3 +33,5 @@ out/
 *.log
 
 .venv/
+.vercel
+.env*

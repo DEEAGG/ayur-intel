@@ -76,18 +76,22 @@ def classify_product(form: Optional[str], ingredients: list, intended_use: Optio
 
     # India-specific categories
     if jurisdiction == "IN":
-        if any(kw in intended_lower for kw in ["ayurved", "traditional", "herbal", "rasayana", "adaptogen"]):
-            return ("Ayurvedic Medicine / Traditional Medicine", "HIGH",
-                    "Product uses Ayurvedic/traditional terminology in intended use.")
-        if any(kw in claims_lower for kw in ["ayurved", "traditional", "herbal"]):
-            return ("Ayurvedic Medicine / Traditional Medicine", "MEDIUM",
-                    "Product claims reference Ayurvedic/traditional use.")
-        if form_lower in ("powder", "tablet", "capsule", "liquid", "oil"):
-            if any(kw in intended_lower for kw in ["supplement", "nutrient", "vitamin", "mineral"]):
-                return ("Nutraceutical / Food Supplement", "MEDIUM",
-                        "Product form and intended use suggest supplement category.")
-            return ("Herbal Product / Traditional Medicine", "MEDIUM",
-                    "Product form is consistent with Ayurvedic/herbal products.")
+        med_terms = ["treat", "cure", "prevent", "relieve", "disease", "therapeutic", "medicinal", "remedy", "healing", "anti-inflammatory", "analgesic", "management"]
+        food_terms = ["food", "supplement", "wellness", "immunity", "energy", "vitality", "digestive health", "gut health", "daily", "nutrition", "aahara"]
+
+        has_med = any(kw in intended_lower or kw in claims_lower for kw in med_terms)
+        has_food = any(kw in intended_lower or kw in claims_lower for kw in food_terms)
+        has_ayush = any(kw in intended_lower or kw in claims_lower for kw in ["ayurved", "traditional", "herbal", "rasayana", "bhasma", "kashayam", "churn", "churna"])
+
+        if has_med or (has_ayush and not has_food):
+            return ("AYUSH Drug License (Ayurvedic Medicine)", "HIGH",
+                    "Product contains therapeutic/medicinal claims or traditional Ayurvedic formulation requiring licensing under Drugs & Cosmetics Act 1940.")
+        elif has_food and not has_med:
+            return ("FSSAI Ayurveda Aahara (Food Category)", "HIGH",
+                    "Product is positioned for daily wellness, dietary support, or nutrition under FSSAI Ayurveda Aahara Regulations 2022.")
+        else:
+            return ("Dual Pathway (AYUSH Drug & FSSAI Ayurveda Aahara)", "HIGH",
+                    "Product encompasses both therapeutic traditional elements and daily dietary supplement features under Indian regulations.")
 
     # EU/Germany categories
     if jurisdiction in ("EU", "DE"):
@@ -569,10 +573,48 @@ def profile_to_dict(profile: RegulatoryProfile) -> dict:
             "created_at": req.created_at.isoformat() if req.created_at else "",
         })
 
+    case = profile.product_case
+    ingredients = _deserialize_list(case.ingredients) if case else []
+    claims = _deserialize_list(case.claims) if case else []
+
+    # Compute ingredient eligibility & Schedule E-1 compliance
+    from api.services.ingredient_eligibility import check_ingredient_eligibility
+    eligibility_evals = []
+    verified_count = 0
+    e1_count = 0
+    for ing in ingredients:
+        if isinstance(ing, dict):
+            iname = ing.get("name") or ing.get("input_name") or ing.get("ingredient_name") or ""
+            ibot = ing.get("botanical") or ing.get("botanical_name") or ""
+        else:
+            iname = str(ing).strip()
+            ibot = ""
+        if iname or ibot:
+            res = check_ingredient_eligibility(iname, ibot)
+            eligibility_evals.append(res)
+            if res.get("verified"):
+                verified_count += 1
+            if res.get("schedule_e1"):
+                e1_count += 1
+
+    tot_ings = len(eligibility_evals)
+    eligibility_summary = {
+        "evaluations": eligibility_evals,
+        "verified_count": verified_count,
+        "total_count": tot_ings,
+        "schedule_e1_count": e1_count,
+        "is_all_verified": (verified_count == tot_ings and tot_ings > 0),
+        "has_schedule_e1": (e1_count > 0),
+    }
+
     return {
         "id": profile.public_id,
-        "product_case_id": profile.product_case.public_id if profile.product_case else "",
-        "product_name": profile.product_case.name if profile.product_case else "",
+        "product_case_id": case.public_id if case else "",
+        "product_name": case.name if case else "Product Analysis",
+        "product_form": case.form if case else "Formulation",
+        "intended_use": case.intended_use if case else "General Wellness",
+        "ingredients": ingredients,
+        "claims": claims,
         "jurisdiction": profile.jurisdiction,
         "potential_category": profile.potential_category,
         "category_confidence": profile.category_confidence,
@@ -591,4 +633,77 @@ def profile_to_dict(profile: RegulatoryProfile) -> dict:
         "requirements": requirements,
         "created_at": profile.created_at.isoformat() if profile.created_at else "",
         "updated_at": profile.updated_at.isoformat() if profile.updated_at else "",
+        "ingredient_eligibility": eligibility_summary,
+
+        # Enriched India Regulatory Intelligence details
+        "ayush_details": {
+            "authority": "Ministry of Ayush / State Licensing Authority (SLA)",
+            "act": "Drugs and Cosmetics Act, 1940",
+            "gmp": "Schedule T Compliance Mandatory",
+            "portal_name": "e-AUSHADHI Portal",
+            "portal_url": "https://www.e-aushadhi.gov.in",
+            "forms": [
+                {
+                    "form": "Form 24-D",
+                    "title": "Application for License / NOC to manufacture Ayurvedic drugs",
+                    "timeline": "30-45 Days",
+                    "fee": "₹1,000",
+                    "description": "Form submitted to State Licensing Authority along with formulation details and lab test reports.",
+                    "download_url": "https://cdsco.gov.in/opencms/opencms/system/modules/CDSCO.WEB/elements/download_file_division.jsp?num_id=MTQ2Mw=="
+                },
+                {
+                    "form": "Form 24-E",
+                    "title": "Grant of License to manufacture for sale of Ayurvedic drugs",
+                    "timeline": "60 Days",
+                    "fee": "₹2,000",
+                    "description": "Final manufacturing license issued post physical site audit by SLA Inspectors.",
+                    "download_url": "https://cdsco.gov.in/opencms/opencms/system/modules/CDSCO.WEB/elements/download_file_division.jsp?num_id=MTQ2NA=="
+                },
+                {
+                    "form": "Form 24-E-I",
+                    "title": "GMP Certificate (Schedule T Compliance)",
+                    "timeline": "30 Days",
+                    "fee": "₹1,015",
+                    "description": "Mandatory Good Manufacturing Practices certificate for herbal processing premises.",
+                    "download_url": "https://cdsco.gov.in/opencms/opencms/system/modules/CDSCO.WEB/elements/download_file_division.jsp?num_id=MTQ2NQ=="
+                }
+            ]
+        },
+        "fssai_details": {
+            "authority": "Food Safety and Standards Authority of India (FSSAI)",
+            "act": "Food Safety and Standards Act, 2006",
+            "enforcement": "Strict compliance mandated from Sept 1, 2025.",
+            "fee": "₹7,500 + GST / Year (Central License)",
+            "penalty": "Operating without license: Up to ₹2,00,000 fine and/or up to 6 months imprisonment under Section 63 of FSS Act 2006.",
+            "portal_name": "FoSCoS Portal",
+            "portal_url": "https://foscos.fssai.gov.in",
+            "categories": [
+                {
+                    "code": "Category A",
+                    "name": "Recipes from Authoritative Texts (Schedule A)",
+                    "description": "Formulations declared in recognized texts (Ayurvedic Pharmacopoeia of India, Charaka Samhita, etc.). Direct filing on FoSCoS."
+                },
+                {
+                    "code": "Category B / B1 / B2",
+                    "name": "Proprietary Ayurveda Aahara / Novel Formulations",
+                    "description": "Requires prior scientific evaluation and FSSAI Prior Approval Letter before commercial sale."
+                }
+            ]
+        },
+        "step_guides": {
+            "ayush": [
+                {"step": 1, "title": "Recipe & Ingredient Verification", "desc": "Ensure all botanical ingredients are documented in the Ayurvedic Pharmacopoeia of India (API).", "timeline": "Week 1-2"},
+                {"step": 2, "title": "NABL Lab Analytical Testing", "desc": "Conduct mandatory testing for heavy metals, pesticide residues, microbial limits, and aflatoxins.", "timeline": "Week 3-4"},
+                {"step": 3, "title": "e-AUSHADHI Filing (Form 24-D)", "desc": "Create portal profile on e-AUSHADHI, upload formulation dossier, label proof, and pay government fee.", "timeline": "Week 5-6"},
+                {"step": 4, "title": "SLA Premises Audit & License (Form 24-E)", "desc": "Host State Licensing Inspector for Schedule T audit. Receive license and GMP Certificate (24-E-I).", "timeline": "Week 7-10"}
+            ],
+            "fssai": [
+                {"step": 1, "title": "Category Classification", "desc": "Determine if formulation qualifies as Category A (Schedule A recipe) or Category B (Proprietary).", "timeline": "Week 1"},
+                {"step": 2, "title": "FSSAI Prior Approval (If Proprietary)", "desc": "For Category B, submit safety rationale and claim data to FSSAI Scientific Committee.", "timeline": "Week 2-6"},
+                {"step": 3, "title": "FoSCoS Central License Filing", "desc": "File online application under 'Ayurveda Aahara' head on FoSCoS portal with laboratory test results.", "timeline": "Week 7"},
+                {"step": 4, "title": "License Issue & Packaging Logo", "desc": "Obtain 14-digit FSSAI License number and print mandatory 'Ayurveda Aahara' logo on packaging.", "timeline": "Week 8-9"}
+            ]
+        },
+        "disclaimer": "This regulatory intelligence report is generated strictly for research and decision-support purposes under Indian regulatory frameworks (AYUSH & FSSAI). It does not constitute formal legal or regulatory advice. Consult a licensed regulatory attorney prior to commercial distribution."
     }
+

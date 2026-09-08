@@ -1,0 +1,1826 @@
+{
+  "metadata": {
+    "source": "CCRAS DRAVYA Portal (https://dravya.ccras.org.in/)",
+    "extracted_at": "2026-09-08 00:34:41",
+    "total_plants": 3
+  },
+  "plants": [
+    {
+      "plant_id": 1,
+      "url": "https://dravya.ccras.org.in/plant/1/abies-webbiana",
+      "scientific_name": "Abies webbiana Lindl",
+      "family": "Pinaceae",
+      "vernacular_names": {
+        "Assamese": [
+          "Talish"
+        ],
+        "Bengali": [
+          "Taleesh Patra"
+        ],
+        "English": [
+          "Turmeric",
+          "Kadam",
+          "Himalayan siver"
+        ],
+        "Gujarati": [
+          "Talish Patra",
+          "Talish Patra"
+        ],
+        "Hindi": [
+          "Talish Patra",
+          "Talish Patra"
+        ],
+        "Kannada": [
+          "Tales Patra",
+          "Talisapathra",
+          "Shukodara",
+          "Tales Patra",
+          "Talisapathra",
+          "Shukodara"
+        ],
+        "Malyalam": [
+          "Taleesapatri"
+        ],
+        "Marathi": [
+          "Kadamb",
+          "Laghu taleespatra"
+        ],
+        "Oriya": [
+          "Holiptiya",
+          "Laghu Taleespatra"
+        ],
+        "Punjabi": [
+          "Talis"
+        ],
+        "Sanskrit": [
+          "Patrāḍhyaṁ",
+          "Patrāḍhyaṁ",
+          "Talisha",
+          "Dhatriptra",
+          "Shukodar"
+        ],
+        "Tamil": [
+          "Talispatra",
+          "Taleesapatri",
+          "Talispatra",
+          "Taleesapatri"
+        ],
+        "Telugu": [
+          "Taleesapatri",
+          "Taleesapatri"
+        ],
+        "Urdu": [
+          "Zarnab",
+          "Zarnab"
+        ]
+      },
+      "etymology": [],
+      "parts_used": [
+        {
+          "name": "Leaf",
+          "उपयग_हससहनद": "पत्र",
+          "part_useddiacritical": "Patra",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Leaf",
+          "उपयग_हससहनद": "पत्र",
+          "part_useddiacritical": "Patra",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "guna": [
+        {
+          "name": "Laghu/ Aguru",
+          "गणहनद": "लघु",
+          "gunadiacritical": "Laghu",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Tikshna",
+          "गणहनद": "तीक्ष्ण",
+          "gunadiacritical": "Tīkṣṇa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Laghu/ Aguru",
+          "गणहनद": "लघु",
+          "gunadiacritical": "Laghu",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Tikshna",
+          "गणहनद": "तीक्ष्ण",
+          "gunadiacritical": "Tīkṣṇa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "virya": [
+        {
+          "name": "Ushna Virya",
+          "वरय_हनद": "उष्ण वीर्य",
+          "virya_diacritical": "Uṣṇa vīrya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Ushna Virya",
+          "वरय_हनद": "उष्ण वीर्य",
+          "virya_diacritical": "Uṣṇa vīrya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "vipaka": [
+        {
+          "name": "Katu vipaka",
+          "वपक_हनद": "Kaṭu vipāka",
+          "vipakadiacritical": "कटु विपाक",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Katu vipaka",
+          "वपक_हनद": "Kaṭu vipāka",
+          "vipakadiacritical": "कटु विपाक",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "karma": [
+        {
+          "name": "Jvarahara",
+          "करम_हनद": "ज्वरहर",
+          "karma_diacritical": "jvarahara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrajanana/ Mutrala/ Mutravirechaniya",
+          "करम_हनद": "मुत्रजनन/ मूत्रल/ मुत्रविरेचनीय",
+          "karma_diacritical": "mutrajanana/ mūtrala/ mutravirecanīya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Trishnanigraha",
+          "करम_हनद": "",
+          "karma_diacritical": "",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Tvakdosahara",
+          "करम_हनद": "",
+          "karma_diacritical": "",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vatanulomana",
+          "करम_हनद": "वातानुलोमन",
+          "karma_diacritical": "vātānulomana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vedanasthapana",
+          "करम_हनद": "वेदनास्थापन",
+          "karma_diacritical": "vedanāsthāpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vatakaphahara/ Vatakaphapaha/ Vatakaphaprashamana/ Vatabalasajita",
+          "करम_हनद": "वातकफहर/ वाटकफपहा/ वातकफप्रशमन/ वातबलासजित",
+          "karma_diacritical": "vātakaphahara/ vāṭakaphapahā/ vātakaphapraśamana/",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Kaphapittahara/ Kaphapittaghna/ Kaphapittahrita/ Kaphapittanuta/ Kaphapittanashaka Kaphapittashamaka",
+          "करम_हनद": "कफपित्तहर/ कफपित्तघ्न/ कफपित्तहृत/ कफपित्तनुत/ कफपित्तनाशक कफपित्तशामक",
+          "karma_diacritical": "kaphapittahara/ kaphapittaghna/ kaphapittahṛta/ ka",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Dipana",
+          "करम_हनद": "दीपन",
+          "karma_diacritical": "dīpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Hridya/ Hridayam (Saumanasyakara)",
+          "करम_हनद": "हृद्य/ हृदयं (सौमनस्यकर)",
+          "karma_diacritical": "hṛdya/ hṛdayaṃ (saumanasyakara)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Jvarahara",
+          "करम_हनद": "ज्वरहर",
+          "karma_diacritical": "jvarahara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrajanana/ Mutrala/ Mutravirechaniya",
+          "करम_हनद": "मुत्रजनन/ मूत्रल/ मुत्रविरेचनीय",
+          "karma_diacritical": "mutrajanana/ mūtrala/ mutravirecanīya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vatanulomana",
+          "करम_हनद": "वातानुलोमन",
+          "karma_diacritical": "vātānulomana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vedanasthapana",
+          "करम_हनद": "वेदनास्थापन",
+          "karma_diacritical": "vedanāsthāpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vatakaphahara/ Vatakaphapaha/ Vatakaphaprashamana/ Vatabalasajita",
+          "करम_हनद": "वातकफहर/ वाटकफपहा/ वातकफप्रशमन/ वातबलासजित",
+          "karma_diacritical": "vātakaphahara/ vāṭakaphapahā/ vātakaphapraśamana/",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Kaphapittahara/ Kaphapittaghna/ Kaphapittahrita/ Kaphapittanuta/ Kaphapittanashaka Kaphapittashamaka",
+          "करम_हनद": "कफपित्तहर/ कफपित्तघ्न/ कफपित्तहृत/ कफपित्तनुत/ कफपित्तनाशक कफपित्तशामक",
+          "karma_diacritical": "kaphapittahara/ kaphapittaghna/ kaphapittahṛta/ ka",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Dipana",
+          "करम_हनद": "दीपन",
+          "karma_diacritical": "dīpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Hridya/ Hridayam (Saumanasyakara)",
+          "करम_हनद": "हृद्य/ हृदयं (सौमनस्यकर)",
+          "karma_diacritical": "hṛdya/ hṛdayaṃ (saumanasyakara)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "doshakarma": [
+        {
+          "name": "KaphaVatahara/KaphaVatashamana/ KaphaVstasaṃshamana",
+          "दषकरम_हनद": "कफवातहर/ कफवातशमन/ कफवातसंशमन",
+          "doshakarma_diacritical": "KaphaVātahara/KaphaVātaśamana/ KaphaVātasaṃśamana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "KaphaVatahara/KaphaVatashamana/ KaphaVstasaṃshamana",
+          "दषकरम_हनद": "कफवातहर/ कफवातशमन/ कफवातसंशमन",
+          "doshakarma_diacritical": "KaphaVātahara/KaphaVātaśamana/ KaphaVātasaṃśamana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "therapeutic_usage": [
+        {
+          "name": "Kāsa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "ādhmānam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Agnimāndya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "aruciḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "daurbalyam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "gulmaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "jvaraḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrakrichha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "rājayakṣmā",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "shukrameha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Śotha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "svarabhedaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Svasa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Kāsa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "ādhmānam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Agnimāndya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "aruciḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "daurbalyam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "gulmaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "jvaraḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrakrichha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "rājayakṣmā",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Śotha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "svarabhedaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Svasa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "dosage": [
+        {
+          "name": "Powder/Churna-2-5gm",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "dosage_formulations": [
+        {
+          "name": "Drakshadi Churna",
+          "dosageform": "Churna",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 7:16",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Yogaraja Guggulu",
+          "dosageform": "Guggulu",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 5:7",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Drakshadi Churna",
+          "dosageform": "Churna",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 7:16",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Yogaraja Guggulu",
+          "dosageform": "Guggulu",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 5:7",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "classical_references": [
+        {
+          "name": "The Ayurvedic Pharmacopoeia of india,Part-I,Vol.-IV,Pg. No.-124(Leaves)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "mahakashaya": [
+        {
+          "name": "Balya Mahakashaya",
+          "महकषय_हनद": "बल्य महाकषाय",
+          "mahakashayadiacritical": "Balya mahākaṣāya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Brimhaniya Mahakashaya",
+          "महकषय_हनद": "बृंहणीय महाकषाय",
+          "mahakashayadiacritical": "Bṛṃhaṇīya mahākaṣāya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "varga": [
+        {
+          "name": "Karpuradivarga",
+          "वरगहनद": "कर्पूरादिवर्ग",
+          "vargadiacritical": "Karpūrādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Karpuradivarga",
+          "वरगहनद": "कर्पूरादिवर्ग",
+          "vargadiacritical": "Karpūrādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Oshadhivarga",
+          "वरगहनद": "ओषधिवर्ग",
+          "vargadiacritical": "Oṣadhivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Pippalyadivarga",
+          "वरगहनद": "पिप्पल्यादिवर्ग",
+          "vargadiacritical": "Pippalyādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shatapushpadivarga",
+          "वरगहनद": "शतपुष्पादिवर्ग",
+          "vargadiacritical": "Śatapuṣpādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Karpuradivarga",
+          "वरगहनद": "कर्पूरादिवर्ग",
+          "vargadiacritical": "Karpūrādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Karpuradivarga",
+          "वरगहनद": "कर्पूरादिवर्ग",
+          "vargadiacritical": "Karpūrādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Oshadhivarga",
+          "वरगहनद": "ओषधिवर्ग",
+          "vargadiacritical": "Oṣadhivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Pippalyadivarga",
+          "वरगहनद": "पिप्पल्यादिवर्ग",
+          "vargadiacritical": "Pippalyādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shatapushpadivarga",
+          "वरगहनद": "शतपुष्पादिवर्ग",
+          "vargadiacritical": "Śatapuṣpādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "skandha": []
+    },
+    {
+      "plant_id": 2,
+      "url": "https://dravya.ccras.org.in/plant/2/abrus-precatorius",
+      "scientific_name": "Abrus precatorius Linn.",
+      "family": "Fabaceae",
+      "vernacular_names": {
+        "Assamese": [
+          "Rati",
+          "Rati"
+        ],
+        "Bengali": [
+          "Shonkainch"
+        ],
+        "English": [
+          "Rose Flower Fragrant",
+          "Jequirity",
+          "Indian liquorice root"
+        ],
+        "Gujarati": [
+          "Rati",
+          "Chanothee"
+        ],
+        "Hindi": [
+          "Ratti",
+          "Ghungchi"
+        ],
+        "Kannada": [
+          "Galuganji",
+          "Gulagunjee"
+        ],
+        "Malyalam": [
+          "Kunni",
+          "Cuvanna Kunni"
+        ],
+        "Marathi": [
+          "Gunja"
+        ],
+        "Oriya": [
+          "Kainch"
+        ],
+        "Punjabi": [
+          "Ratti"
+        ],
+        "Sanskrit": [
+          "Raktikā",
+          "Gunjja"
+        ],
+        "Tamil": [
+          "Kuntri",
+          "Kunrimani",
+          "Kundamani"
+        ],
+        "Telugu": [
+          "Guriginja",
+          "Gurivinda"
+        ],
+        "Urdu": [
+          "Ghongcha",
+          "Ratti"
+        ]
+      },
+      "etymology": [
+        {
+          "sanskrit_synonym": "गुञ्जा",
+          "sanskrit_diacritical": "Guñjā",
+          "reference": "",
+          "etymology_sanskrit": "गुञ्जति शब्दं करोति फलमस्य, ‘गुजि अव्यक्ते शब्दे’ ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "अङ्गारवल्लरी",
+          "sanskrit_diacritical": "Aṅgāravallarī",
+          "reference": "",
+          "etymology_sanskrit": "पुष्पिता सती वह्निलतेव प्रतिभाति ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "काकचिञ्चा",
+          "sanskrit_diacritical": "Kākaciñcā",
+          "reference": "",
+          "etymology_sanskrit": "काकानां चिञ्चेव शिम्बी अस्याः ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "काकणन्ती",
+          "sanskrit_diacritical": "Kākaṇantī",
+          "reference": "",
+          "etymology_sanskrit": "काकानां कृते नदति व्यक्तं शब्दं करोति, 'णद अव्यक्ते शब्दे' ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "कृष्णला",
+          "sanskrit_diacritical": "Kṛṣṇalā",
+          "reference": "",
+          "etymology_sanskrit": "कृष्णाक्षियुतं फलमस्याः ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "चक्रशल्या",
+          "sanskrit_diacritical": "Cakraśalyā",
+          "reference": "",
+          "etymology_sanskrit": "चक्रारोहिणी सती वर्धते, 'शल गतौ' ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "दुर्मोहा",
+          "sanskrit_diacritical": "Durmohā",
+          "reference": "",
+          "etymology_sanskrit": "अतिमात्रया मोहजनिका ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "बहुफला",
+          "sanskrit_diacritical": "Bahuphalā",
+          "reference": "",
+          "etymology_sanskrit": "बहूनि फलान्यस्याः ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "बहुवीर्या",
+          "sanskrit_diacritical": "Bahuvīryā",
+          "reference": "",
+          "etymology_sanskrit": "प्रकृष्टं वीर्यमस्याः ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "रक्तिका",
+          "sanskrit_diacritical": "Raktikā",
+          "reference": "",
+          "etymology_sanskrit": "रक्तवर्णं बीजमस्याः ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "वनवासिनी",
+          "sanskrit_diacritical": "Vanavāsinī",
+          "reference": "",
+          "etymology_sanskrit": "वने जाता।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "शिखण्डी",
+          "sanskrit_diacritical": "Śikhaṇḍī",
+          "reference": "",
+          "etymology_sanskrit": "शेखरवत् पुष्पमञ्जरीर्दधाति ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "शीतपाकी",
+          "sanskrit_diacritical": "Śītapākī",
+          "reference": "",
+          "etymology_sanskrit": "शीतकाले फलं पक्वं भवति ।",
+          "english_meaning": ""
+        }
+      ],
+      "parts_used": [
+        {
+          "name": "Leaf",
+          "उपयग_हससहनद": "पत्र",
+          "part_useddiacritical": "Patra",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Root",
+          "उपयग_हससहनद": "मूल",
+          "part_useddiacritical": "Mūla",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Seed",
+          "उपयग_हससहनद": "बीज",
+          "part_useddiacritical": "Bīja",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "guna": [
+        {
+          "name": "Laghu/ Aguru",
+          "गणहनद": "लघु",
+          "gunadiacritical": "Laghu",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Ruksha",
+          "गणहनद": "रुक्ष",
+          "gunadiacritical": "Rukṣa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Tikshna",
+          "गणहनद": "तीक्ष्ण",
+          "gunadiacritical": "Tīkṣṇa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "virya": [
+        {
+          "name": "Ushna Virya",
+          "वरय_हनद": "उष्ण वीर्य",
+          "virya_diacritical": "Uṣṇa vīrya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "vipaka": [
+        {
+          "name": "Katu vipaka",
+          "वपक_हनद": "Kaṭu vipāka",
+          "vipakadiacritical": "कटु विपाक",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "karma": [
+        {
+          "name": "Kushthaghna/ Kushthahara",
+          "करम_हनद": "कुष्ठघ्न/ कुष्ठहर",
+          "karma_diacritical": "kuṣṭhaghna/ kuṣṭhahara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shothahara/ Shophaghna/ Shothaghna/ Shvayathuhara",
+          "करम_हनद": "शोथहर/ शोफघ्न/शोथघ्न/ श्वयथुहर",
+          "karma_diacritical": "śothahara/ śophaghna/śothaghna/ śvayathuhara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vedanasthapana",
+          "करम_हनद": "वेदनास्थापन",
+          "karma_diacritical": "vedanāsthāpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vranaropana",
+          "करम_हनद": "व्रणरोपण",
+          "karma_diacritical": "vraṇaropaṇa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Balya",
+          "करम_हनद": "बल्य",
+          "karma_diacritical": "balya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Kaphanissaraka",
+          "करम_हनद": "कफनिस्सारक",
+          "karma_diacritical": "kaphanissāraka",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vajikara",
+          "करम_हनद": "वाजीकर",
+          "karma_diacritical": "vājīkara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "doshakarma": [
+        {
+          "name": "KaphaVatahara/KaphaVatashamana/ KaphaVstasaṃshamana",
+          "दषकरम_हनद": "कफवातहर/ कफवातशमन/ कफवातसंशमन",
+          "doshakarma_diacritical": "KaphaVātahara/KaphaVātaśamana/ KaphaVātasaṃśamana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "therapeutic_usage": [
+        {
+          "name": "charmaroga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "jirnajvara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "khālityam/khalati",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "kustha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vranashotha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Kāsa",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "pakṣāghāta/pakṣavadhaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "svarabhedaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Urustambha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Garbhanirodha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrakrichha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "jvaraḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "daurbalyam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "dosage": [
+        {
+          "name": "Seed Powder/Beeja churna-60-180mg",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Root or leaf Powder/Moola or patra churna-1-3gm",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "dosage_formulations": [
+        {
+          "name": "Nilibhringadi Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:26",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "classical_references": [
+        {
+          "name": "The Ayurvedic Pharmacopoeia of india,Part-I,Vol.-I,Pg.No.-44(Seed)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "The Ayurvedic Pharmacopoeia of india,Part-I,Vol.-II,Pg. No.-46(Root)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "mahakashaya": [],
+      "varga": [
+        {
+          "name": "Abhayadivarga",
+          "वरगहनद": "अभयादिवर्ग",
+          "vargadiacritical": "Abhayādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Guduchyadivarga",
+          "वरगहनद": "गुडूच्यादिवर्ग",
+          "vargadiacritical": "Gūdūchyādīvarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Guduchyadivarga",
+          "वरगहनद": "गुडूच्यादिवर्ग",
+          "vargadiacritical": "Guḍūcyādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Karviradivarga",
+          "वरगहनद": "करवीरादिवर्ग",
+          "vargadiacritical": "Karviradivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Oshadhivarga",
+          "वरगहनद": "ओषधिवर्ग",
+          "vargadiacritical": "Oṣadhivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "skandha": []
+    },
+    {
+      "plant_id": 3,
+      "url": "https://dravya.ccras.org.in/plant/3/abutilon-indicum",
+      "scientific_name": "Abutilon indicum (Linn.) Sweet",
+      "family": "Malvaceae, Malvaceae",
+      "vernacular_names": {
+        "Assamese": [
+          "Jayapateri",
+          "Jayavandha",
+          "Jayavandha",
+          "Jayapateri",
+          "Jayavandha",
+          "Jayapateri"
+        ],
+        "Bengali": [
+          "Badela"
+        ],
+        "English": [
+          "Jambul tree",
+          "Country Mallow",
+          "Indian Mallow"
+        ],
+        "Gujarati": [
+          "Kansaki",
+          "Khapat",
+          "Kansaki",
+          "Khapat"
+        ],
+        "Hindi": [
+          "Kanghi",
+          "Kanghi"
+        ],
+        "Kannada": [
+          "Shrimudrigida",
+          "Mudragida",
+          "Turube",
+          "Shrimudrigida",
+          "Mudragida",
+          "Turube"
+        ],
+        "Malyalam": [
+          "Katuvan",
+          "Oorpam",
+          "Tutti",
+          "Uram",
+          "Urubam",
+          "Vankuruntott"
+        ],
+        "Marathi": [
+          "Chakrabhendi",
+          "Petari",
+          "Mudra",
+          "Chakrabhendi",
+          "Petari",
+          "Mudra"
+        ],
+        "Oriya": [
+          "Pedipidika",
+          "Pedipidika"
+        ],
+        "Punjabi": [
+          "Kangi",
+          "Kangibooti",
+          "Kangi",
+          "Kangibooti"
+        ],
+        "Sanskrit": [
+          "Kaṅkatikā",
+          "Kakandaki",
+          "Kaṅkatikā",
+          "Atibalā",
+          "R̥ṣyaprōktā"
+        ],
+        "Tamil": [
+          "Tutti",
+          "Thuthi",
+          "Tutti",
+          "Thuthi"
+        ],
+        "Telugu": [
+          "Tutturubenda",
+          "Tutturubenda"
+        ]
+      },
+      "etymology": [
+        {
+          "sanskrit_synonym": "अतिबला",
+          "sanskrit_diacritical": "Atibalā",
+          "reference": "",
+          "etymology_sanskrit": "अतिशयितं बलमस्याः, अथवा बलामतिक्रान्ता, बलापेक्षया प्रकृष्टबलवर्धनीत्यर्थः ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "ऋष्यप्रोक्ता",
+          "sanskrit_diacritical": "Ṛṣyaproktā",
+          "reference": "",
+          "etymology_sanskrit": "ऋश्पैः मृगैः स्तुता, वने जायमानत्वात् । ‘ऋष्यगन्धा’ इति क्वचित् पाठः ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "कङ्कतिका",
+          "sanskrit_diacritical": "Kaṅkatikā",
+          "reference": "",
+          "etymology_sanskrit": "कङ्कतिकाकारदन्तुरफला ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "पीतपुष्पिका",
+          "sanskrit_diacritical": "Pītapuṣpikā",
+          "reference": "",
+          "etymology_sanskrit": "पीतानि पुष्पाण्यस्याः ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "पेटारिका",
+          "sanskrit_diacritical": "Peṭārikā",
+          "reference": "",
+          "etymology_sanskrit": "पेटारीसदृशफला । वंगदेशे प्रसिद्धं नाम् ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "वर्षपुष्पिका",
+          "sanskrit_diacritical": "Varṣapuṣpikā",
+          "reference": "",
+          "etymology_sanskrit": "वर्षाकले पुष्पितत्वात् ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "वाट्यपुष्पी",
+          "sanskrit_diacritical": "Vāṭyapuṣpī",
+          "reference": "",
+          "etymology_sanskrit": "वाट्या बला, तद्वत् पुष्पम् ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "वृष्या",
+          "sanskrit_diacritical": "Vṛṣyā",
+          "reference": "",
+          "etymology_sanskrit": "वाजीकरणे प्रयुक्ता ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "वृष्यगन्धिका",
+          "sanskrit_diacritical": "Vṛṣyagandhikā",
+          "reference": "",
+          "etymology_sanskrit": "वृष्या शुक्रवर्धनी, गन्धिका वेगजननी, वृष्या चासौ गन्धिका च ।",
+          "english_meaning": ""
+        },
+        {
+          "sanskrit_synonym": "सहा",
+          "sanskrit_diacritical": "Sahā",
+          "reference": "",
+          "etymology_sanskrit": "सहो बलं, तद्वर्धयतीति ।",
+          "english_meaning": ""
+        }
+      ],
+      "parts_used": [
+        {
+          "name": "Root",
+          "उपयग_हससहनद": "मूल",
+          "part_useddiacritical": "Mūla",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Seed",
+          "उपयग_हससहनद": "बीज",
+          "part_useddiacritical": "Bīja",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Root",
+          "उपयग_हससहनद": "मूल",
+          "part_useddiacritical": "Mūla",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Seed",
+          "उपयग_हससहनद": "बीज",
+          "part_useddiacritical": "Bīja",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "guna": [
+        {
+          "name": "Laghu/ Aguru",
+          "गणहनद": "लघु",
+          "gunadiacritical": "Laghu",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Pichchhila",
+          "गणहनद": "पिच्छिल",
+          "gunadiacritical": "Picchila",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Snigdha",
+          "गणहनद": "स्निग्ध",
+          "gunadiacritical": "Snigdha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Laghu/ Aguru",
+          "गणहनद": "लघु",
+          "gunadiacritical": "Laghu",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Pichchhila",
+          "गणहनद": "पिच्छिल",
+          "gunadiacritical": "Picchila",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Snigdha",
+          "गणहनद": "स्निग्ध",
+          "gunadiacritical": "Snigdha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "virya": [
+        {
+          "name": "Shita Virya",
+          "वरय_हनद": "शीत वीर्य",
+          "virya_diacritical": "Śīta vīrya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shita Virya",
+          "वरय_हनद": "शीत वीर्य",
+          "virya_diacritical": "Śīta vīrya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "vipaka": [
+        {
+          "name": "Madhura vipaka",
+          "वपक_हनद": "Madhura vipāka",
+          "vipakadiacritical": "मधुर विपाक",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Madhura vipaka",
+          "वपक_हनद": "Madhura vipāka",
+          "vipakadiacritical": "मधुर विपाक",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "karma": [
+        {
+          "name": "Brimhaniya",
+          "करम_हनद": "बृंहणीय",
+          "karma_diacritical": "bṛṃhaṇīya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Hridya/ Hridayam (Saumanasyakara)",
+          "करम_हनद": "हृद्य/ हृदयं (सौमनस्यकर)",
+          "karma_diacritical": "hṛdya/ hṛdayaṃ (saumanasyakara)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Jvarahara",
+          "करम_हनद": "ज्वरहर",
+          "karma_diacritical": "jvarahara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrajanana/ Mutrala/ Mutravirechaniya",
+          "करम_हनद": "मुत्रजनन/ मूत्रल/ मुत्रविरेचनीय",
+          "karma_diacritical": "mutrajanana/ mūtrala/ mutravirecanīya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Ojovardhaka",
+          "करम_हनद": "ओजोवर्धक",
+          "karma_diacritical": "ojovardhaka",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Prajasthapana",
+          "करम_हनद": "प्रजास्थापन",
+          "karma_diacritical": "prajāsthāpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shothahara/ Shophaghna/ Shothaghna/ Shvayathuhara",
+          "करम_हनद": "शोथहर/ शोफघ्न/शोथघ्न/ श्वयथुहर",
+          "karma_diacritical": "śothahara/ śophaghna/śothaghna/ śvayathuhara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shukrala",
+          "करम_हनद": "शुक्रल",
+          "karma_diacritical": "śukrala",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vedanasthapana",
+          "करम_हनद": "वेदनास्थापन",
+          "karma_diacritical": "vedanāsthāpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vatahara",
+          "करम_हनद": "वातहर",
+          "karma_diacritical": "vātahara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Balya",
+          "करम_हनद": "बल्य",
+          "karma_diacritical": "balya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vrishya",
+          "करम_हनद": "वृष्य",
+          "karma_diacritical": "vṛṣya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Brimhaniya",
+          "करम_हनद": "बृंहणीय",
+          "karma_diacritical": "bṛṃhaṇīya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Hridya/ Hridayam (Saumanasyakara)",
+          "करम_हनद": "हृद्य/ हृदयं (सौमनस्यकर)",
+          "karma_diacritical": "hṛdya/ hṛdayaṃ (saumanasyakara)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Jvarahara",
+          "करम_हनद": "ज्वरहर",
+          "karma_diacritical": "jvarahara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrajanana/ Mutrala/ Mutravirechaniya",
+          "करम_हनद": "मुत्रजनन/ मूत्रल/ मुत्रविरेचनीय",
+          "karma_diacritical": "mutrajanana/ mūtrala/ mutravirecanīya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Ojovardhaka",
+          "करम_हनद": "ओजोवर्धक",
+          "karma_diacritical": "ojovardhaka",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Prajasthapana",
+          "करम_हनद": "प्रजास्थापन",
+          "karma_diacritical": "prajāsthāpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shothahara/ Shophaghna/ Shothaghna/ Shvayathuhara",
+          "करम_हनद": "शोथहर/ शोफघ्न/शोथघ्न/ श्वयथुहर",
+          "karma_diacritical": "śothahara/ śophaghna/śothaghna/ śvayathuhara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shukrala",
+          "करम_हनद": "शुक्रल",
+          "karma_diacritical": "śukrala",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vedanasthapana",
+          "करम_हनद": "वेदनास्थापन",
+          "karma_diacritical": "vedanāsthāpana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Grahi",
+          "करम_हनद": "ग्राहि",
+          "karma_diacritical": "grāhi",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vatahara",
+          "करम_हनद": "वातहर",
+          "karma_diacritical": "vātahara",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Balya",
+          "करम_हनद": "बल्य",
+          "karma_diacritical": "balya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vrishya",
+          "करम_हनद": "वृष्य",
+          "karma_diacritical": "vṛṣya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "doshakarma": [
+        {
+          "name": "Vatapittahara/Vatapittashamana/ Vatapittashamana",
+          "दषकरम_हनद": "वातपित्तहर/वातपित्तशमन/ वातपित्तशमन",
+          "doshakarma_diacritical": "Vātapittahara/Vātapittaśamana/ Vātapittaśamana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Vatapittahara/Vatapittashamana/ Vatapittashamana",
+          "दषकरम_हनद": "वातपित्तहर/वातपित्तशमन/ वातपित्तशमन",
+          "doshakarma_diacritical": "Vātapittahara/Vātapittaśamana/ Vātapittaśamana",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "therapeutic_usage": [
+        {
+          "name": "arditaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "daurbalyam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "grahni",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "hriddaurblya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrakrichha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Stanyalpata",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "pakṣāghāta/pakṣavadhaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "raktapittam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "somarogaḥ/śvetapradaraḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "katishool",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "arditaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "daurbalyam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "grahni",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "hriddaurblya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mutrakrichha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "pakṣāghāta/pakṣavadhaḥ",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "raktapittam",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "dosage": [
+        {
+          "name": "Powder/ Curna- 3-6gm",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Powder/churna-3-6gm",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Powder/churna-3-6gm",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "dosage_formulations": [
+        {
+          "name": "Kumaryasava (A)",
+          "dosageform": "Asava",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 1:12",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Bala Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:33",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Brihat Guduchi Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:38",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Madhyama Narayana Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part II, 8:10",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Maha Narayana Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:45",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Maha Vishagarbha Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:46",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mushikadya Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part II, 8:13",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Narayana Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:23",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Prameha Mihira Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:31",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Lakshmivilasa Rasa (Naradiya)",
+          "dosageform": "Rasa Yoga",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 20:39",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Punarnavadyarishta",
+          "dosageform": "Arishta",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part II, 1:2",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Kumaryasava (A)",
+          "dosageform": "Asava",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 1:12",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Bala Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:33",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Brihat Guduchi Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:38",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Madhyama Narayana Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part II, 8:10",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Maha Narayana Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:45",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Maha Vishagarbha Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:46",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Mushikadya Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part II, 8:13",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Narayana Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:23",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Prameha Mihira Taila",
+          "dosageform": "Taila",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 8:31",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Lakshmivilasa Rasa (Naradiya)",
+          "dosageform": "Rasa Yoga",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part I, 20:39",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Punarnavadyarishta",
+          "dosageform": "Arishta",
+          "dosagereference": "Ayurvedic Formulary of India (AFI), Part II, 1:2",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "classical_references": [
+        {
+          "name": "The Ayurvedic Pharmacopoeia of India,Part-I,Vol.-I, Pg. No.-45(Rhizome)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "The Ayurvedic Pharmacopoeia of india,Part-I,Vol.-I,Pg.No.-20(Root)",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "mahakashaya": [
+        {
+          "name": "Balya Mahakashaya",
+          "महकषय_हनद": "बल्य महाकषाय",
+          "mahakashayadiacritical": "Balya mahākaṣāya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Brimhaniya Mahakashaya",
+          "महकषय_हनद": "बृंहणीय महाकषाय",
+          "mahakashayadiacritical": "Bṛṃhaṇīya mahākaṣāya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Balya Mahakashaya",
+          "महकषय_हनद": "बल्य महाकषाय",
+          "mahakashayadiacritical": "Balya mahākaṣāya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Brimhaniya Mahakashaya",
+          "महकषय_हनद": "बृंहणीय महाकषाय",
+          "mahakashayadiacritical": "Bṛṃhaṇīya mahākaṣāya",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "varga": [
+        {
+          "name": "Abhayadivarga",
+          "वरगहनद": "अभयादिवर्ग",
+          "vargadiacritical": "Abhayādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Guduchyadivarga",
+          "वरगहनद": "गुडूच्यादिवर्ग",
+          "vargadiacritical": "Guḍūcyādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Guduchyadivarga",
+          "वरगहनद": "गुडूच्यादिवर्ग",
+          "vargadiacritical": "Guduchyadivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Oshadhivarga",
+          "वरगहनद": "ओषधिवर्ग",
+          "vargadiacritical": "Oṣadhivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shatahvadivarga",
+          "वरगहनद": "शताह्वादिवर्ग",
+          "vargadiacritical": "Śatāhvādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Abhayadivarga",
+          "वरगहनद": "अभयादिवर्ग",
+          "vargadiacritical": "Abhayādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Guduchyadivarga",
+          "वरगहनद": "गुडूच्यादिवर्ग",
+          "vargadiacritical": "Guḍūcyādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Guduchyadivarga",
+          "वरगहनद": "गुडूच्यादिवर्ग",
+          "vargadiacritical": "Guduchyadivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Oshadhivarga",
+          "वरगहनद": "ओषधिवर्ग",
+          "vargadiacritical": "Oṣadhivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Shatahvadivarga",
+          "वरगहनद": "शताह्वादिवर्ग",
+          "vargadiacritical": "Śatāhvādivarga",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ],
+      "skandha": [
+        {
+          "name": "Madhuraskandha",
+          "सकधहनद": "मधुरस्कन्ध",
+          "skandhadiacritical": "Madhuraskandha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        },
+        {
+          "name": "Madhuraskandha",
+          "सकधहनद": "मधुरस्कन्ध",
+          "skandhadiacritical": "Madhuraskandha",
+          "title_ref_book": "",
+          "reference_remarks": ""
+        }
+      ]
+    }
+  ]
+}

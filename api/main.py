@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.core.config import PROJECT_ROOT, settings
 from api.core.database import init_db
-from api.routers import health, innovation, knowledge, patent, patent_analysis, ip_strategy, regulatory, plant_discovery, product_cases, jurisdiction_comparison, evidence, risk, decision, monitoring, knowledge_graph, source_router, security, review, analytics
+from api.routers import health, innovation, knowledge, patent, patent_analysis, ip_strategy, regulatory, plant_discovery, product_cases, jurisdiction_comparison, evidence, risk, decision, monitoring, knowledge_graph, source_router, security, review, analytics, ingredients, auth
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -51,10 +51,6 @@ app = FastAPI(
     redoc_url="/api/redoc",
 )
 
-# ---------------------------------------------------------------------------
-# CORS
-# ---------------------------------------------------------------------------
-
 allowed_origins = [
     o.strip()
     for o in settings.AYURINTEL_CORS_ALLOW_ORIGINS.split(",")
@@ -73,6 +69,7 @@ app.add_middleware(
 # Routers
 # ---------------------------------------------------------------------------
 
+app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(product_cases.router)
 app.include_router(plant_discovery.router)
@@ -92,6 +89,7 @@ app.include_router(source_router.router)
 app.include_router(security.router)
 app.include_router(review.router)
 app.include_router(analytics.router)
+app.include_router(ingredients.router)
 
 # ---------------------------------------------------------------------------
 # Security Headers Middleware

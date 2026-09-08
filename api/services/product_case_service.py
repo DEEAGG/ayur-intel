@@ -13,7 +13,15 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from api.models.models import ProductCase, User, CaseVersion
+from api.models import (
+    ProductCase, User, CaseVersion,
+    RegulatoryProfile, RegulatoryRequirement,
+    PatentAnalysis, PatentComparison, ClaimElement,
+    PlantDiscovery, ReviewHistory, KnowledgeFinding,
+    JurisdictionComparison, ComparisonJurisdiction, ComparisonItem, ComparisonValue,
+)
+
+
 
 logger = logging.getLogger("ayur_intel.product_case_service")
 
@@ -110,12 +118,12 @@ def create_product_case(
         owner_id=owner.id,
         name=name,
         stage=stage,
-        jurisdictions=_serialize_list(jurisdictions or ["IN"]),
+        jurisdictions=json.dumps(jurisdictions or ["IN"]),
         status="DRAFT",
-        ingredients=_serialize_list(ingredients) if ingredients else None,
+        ingredients=json.dumps(ingredients) if ingredients else None,
         form=form,
         intended_use=intended_use,
-        claims=_serialize_list(claims) if claims else None,
+        claims=json.dumps(claims) if claims else None,
         formulation=formulation,
         process=process,
         brand=brand,
@@ -137,6 +145,11 @@ def create_product_case(
             "name": name,
             "stage": stage,
             "jurisdictions": jurisdictions or ["IN"],
+            "ingredients": ingredients,
+            "form": form,
+            "intended_use": intended_use,
+            "process": process,
+            "claims": claims,
         }),
         created_at=now,
     )
@@ -203,14 +216,14 @@ def update_product_case(
         return None
 
     # Track which material fields changed
-    material_fields = {"name", "stage", "jurisdictions", "ingredients", "formulation", "process"}
+    material_fields = {"name", "stage", "jurisdictions", "ingredients", "formulation", "process", "form", "intended_use", "claims"}
     material_changed = False
 
     for field, value in updates.items():
-        if value is not None and hasattr(case, field):
-            old_value = getattr(case, field)
+        if hasattr(case, field):
             if field in ("jurisdictions", "ingredients", "claims"):
-                value = _serialize_list(value)
+                if value is not None and not isinstance(value, str):
+                    value = json.dumps(value)
             setattr(case, field, value)
             if field in material_fields:
                 material_changed = True
@@ -227,6 +240,10 @@ def update_product_case(
                 "name": case.name,
                 "stage": case.stage,
                 "jurisdictions": _deserialize_list(case.jurisdictions),
+                "ingredients": _deserialize_list(case.ingredients),
+                "form": case.form,
+                "intended_use": case.intended_use,
+                "process": case.process,
             }),
             created_at=case.updated_at,
         )
@@ -239,7 +256,8 @@ def update_product_case(
 
 
 def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
-    """Delete a Product Case and its versions."""
+    """Delete a Product Case and all associated child entities."""
+    from sqlalchemy import text
     case = (
         db.query(ProductCase)
         .filter(
@@ -250,10 +268,34 @@ def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
     )
     if case is None:
         return False
+    cid = case.id
+    db.expire_all()
 
-    # Delete versions first
-    db.query(CaseVersion).filter(CaseVersion.case_id == case.id).delete()
-    db.delete(case)
+
+
+    child_deletes = [
+        "DELETE FROM regulatory_requirements WHERE profile_id IN (SELECT id FROM regulatory_profiles WHERE product_case_id = :cid)",
+        "DELETE FROM regulatory_profiles WHERE product_case_id = :cid",
+        "DELETE FROM claim_elements WHERE analysis_id IN (SELECT id FROM patent_analyses WHERE product_case_id = :cid)",
+        "DELETE FROM patent_comparisons WHERE analysis_id IN (SELECT id FROM patent_analyses WHERE product_case_id = :cid)",
+        "DELETE FROM patent_analyses WHERE product_case_id = :cid",
+        "DELETE FROM comparison_jurisdictions WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+        "DELETE FROM comparison_items WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+        "DELETE FROM comparison_values WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+        "DELETE FROM jurisdiction_comparisons WHERE product_case_id = :cid",
+        "DELETE FROM plant_discoveries WHERE product_case_id = :cid",
+        "DELETE FROM knowledge_findings WHERE product_case_id = :cid",
+        "DELETE FROM case_versions WHERE case_id = :cid",
+        "DELETE FROM product_cases WHERE id = :cid",
+    ]
+
+    for stmt in child_deletes:
+        try:
+            db.execute(text(stmt), {"cid": cid})
+        except Exception as e:
+            logger.debug("Cascade delete query exception: %s", e)
+
     db.commit()
-    logger.info("Deleted product case: %s", public_id)
+    logger.info("Deleted product case: %s (id=%d)", public_id, cid)
     return True
+

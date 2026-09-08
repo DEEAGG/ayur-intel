@@ -39,9 +39,14 @@ class Settings(BaseSettings):
     AYURINTEL_PLANTNET_API_KEY: str = ""  # Get free key at https://my.plantnet.org/
     AYURINTEL_PLANTNET_PROJECT: str = "all"  # 'all', 'weurope', 'canada', etc.
 
+    # AI Settings
+    GEMINI_API_KEY: Optional[str] = None
+    AYURINTEL_GEMINI_API_KEY: Optional[str] = None
+
     class Config:
         env_file = str(PROJECT_ROOT / ".env")
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
 
 # Singleton — import this, don't create a new Settings each time.
