@@ -327,14 +327,27 @@ def _generate_requirements(
         "source_reference": None,
         "applicability": "POTENTIALLY_RELEVANT",
         "confidence": "MEDIUM",
-        "status": "FOUND",
         "evidence_type": "SYSTEM_DERIVED",
         "evidence_detail": "Documentation requirements vary by product category and jurisdiction.",
         "limitations": "Exact documentation requirements depend on product classification and registration pathway.",
         "next_action": "Identify specific documentation requirements for the product category.",
     })
 
-    return requirements
+    # Deduplicate requirements by semantic key preserving order
+    deduped_reqs = []
+    seen_keys = set()
+    for req in requirements:
+        key = (
+            (req.get("title") or "").strip().lower(),
+            (req.get("jurisdiction") or "").strip().upper(),
+            (req.get("category") or "").strip().upper(),
+            (req.get("authority") or "").strip().lower(),
+        )
+        if key not in seen_keys:
+            seen_keys.add(key)
+            deduped_reqs.append(req)
+
+    return deduped_reqs
 
 
 # -------------------------------------------------------------------
@@ -481,8 +494,8 @@ def generate_regulatory_analysis(
         .first()
     )
     if existing:
-        for req in existing.requirements:
-            db.delete(req)
+        db.query(RegulatoryRequirement).filter(RegulatoryRequirement.profile_id == existing.id).delete(synchronize_session="fetch")
+        db.expire(existing, ["requirements"])
         db.flush()
         profile = existing
         profile.updated_at = datetime.now(timezone.utc)
@@ -548,9 +561,19 @@ def generate_regulatory_analysis(
 # -------------------------------------------------------------------
 
 def profile_to_dict(profile: RegulatoryProfile) -> dict:
-    """Serialize a RegulatoryProfile to a JSON-safe dict."""
+    """Serialize a RegulatoryProfile to a JSON-safe dict with defensive deduplication."""
     requirements = []
+    seen_req_keys = set()
     for req in profile.requirements:
+        key = (
+            (req.title or "").strip().lower(),
+            (req.jurisdiction or "").strip().upper(),
+            (req.category or "").strip().upper(),
+            (req.authority or "").strip().lower(),
+        )
+        if key in seen_req_keys:
+            continue
+        seen_req_keys.add(key)
         requirements.append({
             "id": req.public_id,
             "title": req.title,

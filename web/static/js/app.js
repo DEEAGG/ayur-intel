@@ -688,7 +688,7 @@
         + '<span class="ws-icon">📋</span>'
         + '<h4>Regulatory Pathways</h4>'
         + '<p>Navigate AYUSH, FSSAI, and Indian regulatory requirements.</p>'
-        + '<button class="ws-btn" onclick="generateRegulatoryAnalysis()">Check →</button>'
+        + '<button class="ws-btn" onclick="event.stopPropagation(); generateRegulatoryAnalysis()">Check →</button>'
         + '</div>'
         + '<div class="workspace-card">'
         + '<span class="ws-icon">⚠️</span>'
@@ -2917,7 +2917,21 @@
   // ----------------------------------------------------------------
   // Regulatory Intelligence View (India-First AYUSH & FSSAI)
   // ----------------------------------------------------------------
-  async function generateRegulatoryAnalysis(caseId) {
+  function formatStatusLabel(status) {
+    if (!status) return 'Relevant';
+    var map = {
+      'RELEVANT': 'Relevant',
+      'POTENTIALLY_RELEVANT': 'Potentially Relevant',
+      'NEEDS_VERIFICATION': 'Needs Verification',
+      'INFORMATIONAL': 'Informational',
+      'COMPLIANT': 'Compliant',
+      'NON_COMPLIANT': 'Non-Compliant'
+    };
+    return map[status] || status.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, function(l){ return l.toUpperCase(); });
+  }
+
+  async function generateRegulatoryAnalysis(caseId, jurisdiction) {
+    var j = jurisdiction || "IN";
     var c = state.currentCase || (state.cases && state.cases.find(function(item) { return item.id === caseId; }));
     if (!c && state.cases && state.cases.length > 0) {
       c = state.cases[0];
@@ -2927,26 +2941,36 @@
       showToast('⚠️ No active product case found', 'error');
       return;
     }
-    var cached = getCachedModule(c.id, "regulatoryProfile");
-    if (cached) {
+    var cacheKey = "regulatoryProfile:" + j;
+    var cached = getCachedModule(c.id, cacheKey) || getCachedModule(c.id, "regulatoryProfile");
+    if (cached && (cached.jurisdiction === j || !j)) {
       state.regulatoryProfile = cached;
       state.view = "regulatory-intelligence";
       saveStateToLocalStorage();
       render();
+      scrollToTop();
       return;
     }
     state.loading = true;
     render();
     try {
-      var data = await api("/api/cases/" + c.id + "/regulatory-analysis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jurisdiction: "IN" })
-      });
-      setCachedModule(c.id, "regulatoryProfile", data);
-      state.regulatoryProfile = data;
-      state.view = "regulatory-intelligence";
-      saveStateToLocalStorage();
+      var data = null;
+      try {
+        data = await api("/api/cases/" + c.id + "/regulatory-analysis?jurisdiction=" + encodeURIComponent(j));
+      } catch (getErr) {
+        data = await api("/api/cases/" + c.id + "/regulatory-analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jurisdiction: j })
+        });
+      }
+      if (data) {
+        setCachedModule(c.id, cacheKey, data);
+        setCachedModule(c.id, "regulatoryProfile", data);
+        state.regulatoryProfile = data;
+        state.view = "regulatory-intelligence";
+        saveStateToLocalStorage();
+      }
     } catch (e) {
       console.error("Regulatory analysis failed:", e);
       state.error = "Failed to generate regulatory analysis.";
@@ -2965,6 +2989,18 @@
     var fssai = rp.fssai_details || {};
 
     var confColor = rp.category_confidence === 'HIGH' ? '#2ecc71' : (rp.category_confidence === 'MEDIUM' ? '#f39c12' : '#e74c3c');
+
+    var rawReqs = rp.requirements || [];
+    var requirements = [];
+    var seenReqKeys = {};
+    for (var i = 0; i < rawReqs.length; i++) {
+      var reqItem = rawReqs[i];
+      var rKey = ((reqItem.title || '') + '|' + (reqItem.jurisdiction || '') + '|' + (reqItem.category || '')).toLowerCase().trim();
+      if (!seenReqKeys[rKey]) {
+        seenReqKeys[rKey] = true;
+        requirements.push(reqItem);
+      }
+    }
 
     var html = ''
       + '<div class="view-header">'
@@ -3111,23 +3147,26 @@
       + '<h3 style="margin:0;font-size:16px;color:#e0eee8;display:flex;align-items:center;gap:8px">' + icon('checklist', 18) + ' Compliance Requirements &amp; Evidence Checklist</h3>'
       + '</div>'
       + '<div class="card-body" style="padding:20px">'
-      + (rp.requirements && rp.requirements.length > 0 ? rp.requirements.map(function(req){
-          var statusBg = req.applicability === 'RELEVANT' ? 'rgba(46,204,113,0.15)' : 'rgba(241,196,15,0.15)';
-          var statusColor = req.applicability === 'RELEVANT' ? '#2ecc71' : '#f1c40f';
-          return '<div style="margin-bottom:12px;padding:14px 16px;background:var(--color-surface-container-low);border:1px solid var(--color-outline-variant);border-radius:var(--radius-md);border-left:4px solid ' + statusColor + '">'
-            + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px">'
-            + '<h4 style="margin:0;font-size:14.5px;font-weight:700;color:#ffffff;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
-            + '<span>' + escapeHtml(req.title) + '</span>'
-            + (req.title && req.title.indexOf('Ingredient Eligibility') !== -1 ? '<button class="eligibility-check-btn" onclick="event.stopPropagation(); openEligibilityPopup()">' + icon('search', 13) + ' Check Eligibility</button>' : '')
-            + '</h4>'
-            + '<span class="chip" style="background:' + statusBg + ';color:' + statusColor + ';font-size:10px;font-weight:700">' + escapeHtml(req.applicability) + '</span>'
+      + (requirements.length > 0 ? requirements.map(function(req){
+          var app = (req.applicability || 'RELEVANT').toUpperCase();
+          var statusBg = app === 'RELEVANT' ? 'rgba(46,204,113,0.15)' : (app === 'NEEDS_VERIFICATION' ? 'rgba(230,126,34,0.15)' : 'rgba(241,196,15,0.15)');
+          var statusColor = app === 'RELEVANT' ? '#2ecc71' : (app === 'NEEDS_VERIFICATION' ? '#e67e22' : '#f1c40f');
+          var isIngEligibility = req.title && req.title.indexOf('Ingredient Eligibility') !== -1;
+
+          return '<div style="margin-bottom:14px;padding:16px 18px;background:var(--color-surface-container-low);border:1px solid var(--color-outline-variant);border-radius:var(--radius-md);border-left:4px solid ' + statusColor + '">'
+            + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px">'
+            + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+            + '<h4 style="margin:0;font-size:15px;font-weight:700;color:#ffffff">' + escapeHtml(req.title) + '</h4>'
+            + (isIngEligibility ? '<button class="btn btn-xs" style="background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.35);padding:4px 10px;font-size:12px;font-weight:600;border-radius:var(--radius-sm);cursor:pointer;display:inline-flex;align-items:center;gap:4px" onclick="event.stopPropagation(); openEligibilityPopup()">' + icon('search', 13) + ' Check Eligibility</button>' : '')
             + '</div>'
-            + '<p style="margin:0 0 8px;font-size:13.5px;color:#b0c8c0;line-height:1.5">' + escapeHtml(req.description) + '</p>'
-            + '<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:#b0c8c0">'
-            + '<span><strong style="color:#7dba9a">Authority:</strong> <span style="color:#e0eee8">' + escapeHtml(req.authority || 'N/A') + '</span></span>'
-            + '<span><strong style="color:#7dba9a">Source:</strong> <span style="color:#e0eee8">' + escapeHtml(req.source_name || 'N/A') + '</span></span>'
+            + '<span class="chip" style="background:' + statusBg + ';color:' + statusColor + ';border:1px solid ' + statusColor + '40;font-size:11px;font-weight:700;padding:3px 10px;white-space:nowrap">' + escapeHtml(formatStatusLabel(req.applicability)) + '</span>'
             + '</div>'
-            + (req.next_action ? '<div style="margin-top:8px;font-size:12.5px;color:#2ecc71;font-weight:600">➡️ Next Step: ' + escapeHtml(req.next_action) + '</div>' : '')
+            + '<p style="margin:0 0 10px;font-size:13.5px;color:#b0c8c0;line-height:1.55">' + escapeHtml(req.description) + '</p>'
+            + '<div style="display:flex;flex-wrap:wrap;gap:8px;font-size:12px;margin-bottom:' + (req.next_action ? '8px' : '0') + '">'
+            + '<span class="chip" style="background:var(--color-surface-container);color:#b0c8c0;border:1px solid var(--color-outline-variant);padding:3px 8px"><strong style="color:#7dba9a">Authority:</strong>&nbsp;<span style="color:#e0eee8">' + escapeHtml(req.authority || 'N/A') + '</span></span>'
+            + '<span class="chip" style="background:var(--color-surface-container);color:#b0c8c0;border:1px solid var(--color-outline-variant);padding:3px 8px"><strong style="color:#7dba9a">Source:</strong>&nbsp;<span style="color:#e0eee8">' + escapeHtml(req.source_name || 'N/A') + '</span></span>'
+            + '</div>'
+            + (req.next_action ? '<div style="margin-top:6px;font-size:12.5px;color:#2ecc71;font-weight:600;display:flex;align-items:center;gap:6px">' + icon('arrow_forward', 14) + ' <span>Next Step: ' + escapeHtml(req.next_action) + '</span></div>' : '')
             + '</div>';
         }).join('') : '<p style="color:#b0c8c0">No specific requirements found.</p>')
       + '</div>'
