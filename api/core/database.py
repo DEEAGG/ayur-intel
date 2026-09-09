@@ -115,4 +115,10 @@ def init_db() -> None:
             except Exception as e:
                 logger.debug("Index creation note (%s): %s", idx_sql, e)
 
+        # 3. Atomic Uniqueness Constraint (owner_id + normalized product name + is_demo)
+        try:
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_product_cases_owner_name_demo ON product_cases (owner_id, lower(trim(name)), is_demo)"))
+        except Exception as e:
+            logger.warning("Unique index creation deferred (duplicate cleanup required first): %s", e)
+
     logger.info("Database initialized with performance indexes successfully")

@@ -13,6 +13,7 @@ import time
 from typing import List, Optional
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.models import (
@@ -139,9 +140,8 @@ def create_product_case(
         existing_demo = (
             db.query(ProductCase)
             .filter(
-                ProductCase.owner_id == owner.id,
-                ProductCase.is_demo == True,
-                func.lower(ProductCase.name) == clean_name.lower(),
+                (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
+                func.lower(func.trim(ProductCase.name)) == clean_name.lower(),
             )
             .first()
         )
@@ -154,7 +154,7 @@ def create_product_case(
             .filter(
                 ProductCase.owner_id == owner.id,
                 ProductCase.is_demo == False,
-                func.lower(ProductCase.name) == clean_name.lower(),
+                func.lower(func.trim(ProductCase.name)) == clean_name.lower(),
             )
             .first()
         )
@@ -185,8 +185,36 @@ def create_product_case(
         updated_at=now,
     )
     db.add(case)
-    db.commit()
-    db.refresh(case)
+
+    # Atomic insert with race condition fallback
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        # Concurrent insert occurred: fetch and return canonical record
+        if is_demo:
+            canonical = (
+                db.query(ProductCase)
+                .filter(
+                    (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
+                    func.lower(func.trim(ProductCase.name)) == clean_name.lower(),
+                )
+                .first()
+            )
+        else:
+            canonical = (
+                db.query(ProductCase)
+                .filter(
+                    ProductCase.owner_id == owner.id,
+                    ProductCase.is_demo == False,
+                    func.lower(func.trim(ProductCase.name)) == clean_name.lower(),
+                )
+                .first()
+            )
+        if canonical:
+            logger.info("Concurrent insert handled: returning canonical product case %s", canonical.public_id)
+            return _case_to_dict(canonical)
+        raise
 
     # Create initial version snapshot
     version = CaseVersion(
@@ -205,7 +233,35 @@ def create_product_case(
         created_at=now,
     )
     db.add(version)
-    db.commit()
+
+    try:
+        db.commit()
+        db.refresh(case)
+    except IntegrityError:
+        db.rollback()
+        if is_demo:
+            canonical = (
+                db.query(ProductCase)
+                .filter(
+                    (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
+                    func.lower(func.trim(ProductCase.name)) == clean_name.lower(),
+                )
+                .first()
+            )
+        else:
+            canonical = (
+                db.query(ProductCase)
+                .filter(
+                    ProductCase.owner_id == owner.id,
+                    ProductCase.is_demo == False,
+                    func.lower(func.trim(ProductCase.name)) == clean_name.lower(),
+                )
+                .first()
+            )
+        if canonical:
+            logger.info("Concurrent commit handled: returning canonical product case %s", canonical.public_id)
+            return _case_to_dict(canonical)
+        raise
 
     _invalidate_product_cache(owner.id)
     logger.info("Created product case: %s (%s, is_demo=%s)", case.public_id, clean_name, is_demo)
@@ -348,31 +404,68 @@ def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
     db.expire_all()
 
     child_deletes = [
+        # Decision snapshots
+        "DELETE FROM decision_dashboard_snapshots WHERE product_case_id = :cid",
+        # Monitoring
+        "DELETE FROM monitoring_sources WHERE config_id IN (SELECT id FROM monitoring_configs WHERE product_case_id = :cid)",
+        "DELETE FROM monitoring_alerts WHERE product_case_id = :cid",
+        "DELETE FROM change_records WHERE product_case_id = :cid",
+        "DELETE FROM monitoring_runs WHERE product_case_id = :cid",
+        "DELETE FROM monitoring_configs WHERE product_case_id = :cid",
+        # Review
+        "DELETE FROM review_history WHERE review_request_id IN (SELECT id FROM review_requests WHERE product_case_id = :cid)",
+        "DELETE FROM review_decisions WHERE review_request_id IN (SELECT id FROM review_requests WHERE product_case_id = :cid)",
+        "DELETE FROM review_items WHERE review_request_id IN (SELECT id FROM review_requests WHERE product_case_id = :cid)",
+        "DELETE FROM review_requests WHERE product_case_id = :cid",
+        # Unified Evidence & Findings
+        "DELETE FROM case_finding_evidence WHERE finding_id IN (SELECT id FROM case_findings WHERE product_case_id = :cid)",
+        "DELETE FROM case_findings WHERE product_case_id = :cid",
+        # Risks & Self Extension
+        "DELETE FROM risk_evidence WHERE risk_id IN (SELECT id FROM risks WHERE product_case_id = :cid)",
+        "DELETE FROM risk_resolutions WHERE risk_id IN (SELECT id FROM risks WHERE product_case_id = :cid)",
+        "DELETE FROM risks WHERE product_case_id = :cid",
+        "DELETE FROM self_extension_requests WHERE product_case_id = :cid",
+        # Regulatory
         "DELETE FROM regulatory_requirements WHERE profile_id IN (SELECT id FROM regulatory_profiles WHERE product_case_id = :cid)",
         "DELETE FROM regulatory_profiles WHERE product_case_id = :cid",
+        # Patents
         "DELETE FROM claim_elements WHERE analysis_id IN (SELECT id FROM patent_analyses WHERE product_case_id = :cid)",
         "DELETE FROM patent_comparisons WHERE analysis_id IN (SELECT id FROM patent_analyses WHERE product_case_id = :cid)",
         "DELETE FROM patent_analyses WHERE product_case_id = :cid",
-        "DELETE FROM comparison_jurisdictions WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+        "DELETE FROM patent_relevances WHERE product_case_id = :cid",
+        "DELETE FROM patent_searches WHERE product_case_id = :cid",
+        # IP Strategy
+        "DELETE FROM ip_strategy_items WHERE strategy_id IN (SELECT id FROM ip_strategies WHERE product_case_id = :cid)",
+        "DELETE FROM ip_strategies WHERE product_case_id = :cid",
+        # Innovation
+        "DELETE FROM innovation_components WHERE analysis_id IN (SELECT id FROM innovation_analyses WHERE product_case_id = :cid)",
+        "DELETE FROM innovation_analyses WHERE product_case_id = :cid",
+        # Jurisdiction Comparisons
+        "DELETE FROM comparison_values WHERE comparison_item_id IN (SELECT id FROM comparison_items WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid))",
         "DELETE FROM comparison_items WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
-        "DELETE FROM comparison_values WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+        "DELETE FROM comparison_jurisdictions WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
         "DELETE FROM jurisdiction_comparisons WHERE product_case_id = :cid",
-        "DELETE FROM plant_discoveries WHERE product_case_id = :cid",
+        # Plant Discoveries & Knowledge Findings
+        "DELETE FROM knowledge_evidence WHERE finding_id IN (SELECT id FROM knowledge_findings WHERE product_case_id = :cid)",
         "DELETE FROM knowledge_findings WHERE product_case_id = :cid",
+        "DELETE FROM plant_discoveries WHERE product_case_id = :cid",
+        # Case Versions
         "DELETE FROM case_versions WHERE case_id = :cid",
+        # The Product Case itself
         "DELETE FROM product_cases WHERE id = :cid",
     ]
 
-    for stmt in child_deletes:
-        try:
+    try:
+        for stmt in child_deletes:
             db.execute(text(stmt), {"cid": cid})
-        except Exception as e:
-            logger.debug("Cascade delete query exception: %s", e)
-
-    db.commit()
-    _invalidate_product_cache(owner.id)
-    logger.info("Deleted product case: %s (id=%d)", public_id, cid)
-    return True
+        db.commit()
+        _invalidate_product_cache(owner.id)
+        logger.info("Deleted product case: %s (id=%d)", public_id, cid)
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error("Failed to delete product case %s (id=%d), rolled back: %s", public_id, cid, e)
+        return False
 
 
 def get_or_create_demo_case(db: Session, owner: User) -> dict:

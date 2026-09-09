@@ -1747,10 +1747,27 @@
   // ----------------------------------------------------------------
   // Save Passport & Transition to Case Intelligence
   // ----------------------------------------------------------------
+  var _isSavingPassport = false;
 
   async function saveProductPassportAndStartAnalysis() {
+    if (_isSavingPassport) {
+      console.warn("⚠️ Save already in progress, ignoring duplicate click");
+      return;
+    }
+
     var pd = (window.AYUR && window.AYUR.state && window.AYUR.state.passportData) || state.passportData;
     if (!pd) return;
+
+    _isSavingPassport = true;
+    var saveBtn = document.getElementById("passport-save-and-analyze");
+    var origBtnText = "";
+    if (saveBtn) {
+      origBtnText = saveBtn.innerHTML;
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = "0.7";
+      saveBtn.style.pointerEvents = "none";
+      saveBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;margin-right:8px;vertical-align:middle;"></span> Saving & Running Intelligence...';
+    }
 
     // CRITICAL: Ensure ingredients are properly formatted
     var ingredients = pd.ingredients || [];
@@ -1834,11 +1851,25 @@
         var errMsg = '❌ Failed to save: ' + (data.detail || 'Unknown error');
         if (typeof showToast === 'function') showToast(errMsg, 'error');
         else if (typeof toast === 'function') toast(errMsg, 'error');
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.style.opacity = "";
+          saveBtn.style.pointerEvents = "";
+          saveBtn.innerHTML = origBtnText;
+        }
       }
     } catch (error) {
       console.error('Save error:', error);
       if (typeof showToast === 'function') showToast('❌ Failed to save product', 'error');
       else if (typeof toast === 'function') toast('❌ Failed to save product', 'error');
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.style.opacity = "";
+        saveBtn.style.pointerEvents = "";
+        saveBtn.innerHTML = origBtnText;
+      }
+    } finally {
+      _isSavingPassport = false;
     }
   }
 

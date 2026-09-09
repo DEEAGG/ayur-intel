@@ -925,43 +925,52 @@
 
 
   async function deleteCase(caseId, caseName) {
-    console.log('🗑 deleteCase called with:', caseId, caseName);
-    if (!confirm(`Delete "${caseName}"? This cannot be undone.`)) {
-      console.log('🗑 deleteCase cancelled by user');
+    if (!caseId) return;
+    if (!confirm(`Delete "${caseName || 'this product'}"? This cannot be undone.`)) {
       return;
     }
     
     try {
-        console.log('🗑 Sending DELETE request for:', caseId);
         invalidateClientApiCache('/api/cases');
         invalidateCaseModuleCache(caseId);
         const response = await fetch(`/api/cases/${caseId}`, { method: 'DELETE' });
-        console.log('🗑 DELETE response status:', response.status, response.ok);
-        if (response.ok) {
+        if (response.ok || response.status === 204) {
             invalidateClientApiCache('/api/cases');
             invalidateCaseModuleCache(caseId);
-            if (typeof showToast === 'function') showToast(`✅ "${caseName}" deleted`, 'success');
-            else if (typeof toast === 'function') toast(`✅ "${caseName}" deleted`, 'success');
-            await loadCases();
-            console.log('🗑 cases after reload:', state.cases.length);
-            if (state.currentCase && state.currentCase.id === caseId) {
+
+            // Optimistically remove from state immediately
+            state.cases = (state.cases || []).filter(function (c) {
+                return String(c.id) !== String(caseId);
+            });
+
+            if (state.currentCase && String(state.currentCase.id) === String(caseId)) {
                 state.currentCase = null;
                 if (window.AYUR && window.AYUR.state) window.AYUR.state.currentCase = null;
-                if (typeof saveStateToLocalStorage === 'function') {
-                    saveStateToLocalStorage();
+                if (state.view !== "product-cases" && state.view !== "dashboard") {
+                    state.view = "dashboard";
                 }
-                updateTopbarUI();
             }
+            saveStateToLocalStorage();
+            updateTopbarUI();
             render();
+
+            if (typeof showToast === 'function') showToast(`✅ "${caseName}" deleted`, 'success');
+            else if (typeof toast === 'function') toast(`✅ "${caseName}" deleted`, 'success');
+
+            loadCases().then(function () {
+                render();
+            });
         } else {
-            console.error('🗑 DELETE failed:', response.status, await response.text());
-            if (typeof showToast === 'function') showToast('❌ Delete failed', 'error');
-            else if (typeof toast === 'function') toast('❌ Delete failed', 'error');
+            var errText = "";
+            try { errText = await response.text(); } catch (e) {}
+            console.error('🗑 DELETE failed:', response.status, errText);
+            if (typeof showToast === 'function') showToast('❌ Delete failed: ' + (errText || 'Server error'), 'error');
+            else if (typeof toast === 'function') toast('❌ Delete failed: ' + (errText || 'Server error'), 'error');
         }
     } catch (error) {
         console.error('🗑 DELETE catch error:', error);
-        if (typeof showToast === 'function') showToast('❌ Error deleting', 'error');
-        else if (typeof toast === 'function') toast('❌ Error deleting', 'error');
+        if (typeof showToast === 'function') showToast('❌ Error deleting product', 'error');
+        else if (typeof toast === 'function') toast('❌ Error deleting product', 'error');
     }
   }
 
