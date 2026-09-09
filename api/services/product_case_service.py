@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+import time
 from typing import List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from api.models import (
@@ -21,9 +23,25 @@ from api.models import (
     JurisdictionComparison, ComparisonJurisdiction, ComparisonItem, ComparisonValue,
 )
 
-
-
 logger = logging.getLogger("ayur_intel.product_case_service")
+
+# ---------------------------------------------------------------------------
+# In-Memory Product List Cache
+# ---------------------------------------------------------------------------
+_PRODUCT_LIST_CACHE: dict = {}
+CACHE_TTL_SECONDS = 30
+
+
+def _invalidate_product_cache(owner_id: Optional[int] = None) -> None:
+    """Invalidate product list cache for a user or all users."""
+    global _PRODUCT_LIST_CACHE
+    if owner_id is None:
+        _PRODUCT_LIST_CACHE.clear()
+    else:
+        prefix = f"{owner_id}_"
+        keys_to_del = [k for k in _PRODUCT_LIST_CACHE if k.startswith(prefix)]
+        for k in keys_to_del:
+            _PRODUCT_LIST_CACHE.pop(k, None)
 
 
 # ---------------------------------------------------------------------------
@@ -113,12 +131,42 @@ def create_product_case(
     notes: Optional[str] = None,
     is_demo: bool = False,
 ) -> dict:
-    """Create a new Product Case and its initial version snapshot."""
+    """Create a new Product Case or reuse existing to prevent duplicates."""
+    clean_name = name.strip()
+
+    # 1. Duplicate Check
+    if is_demo:
+        existing_demo = (
+            db.query(ProductCase)
+            .filter(
+                ProductCase.owner_id == owner.id,
+                ProductCase.is_demo == True,
+                func.lower(ProductCase.name) == clean_name.lower(),
+            )
+            .first()
+        )
+        if existing_demo:
+            logger.info("Reusing existing demo product case: %s", existing_demo.public_id)
+            return _case_to_dict(existing_demo)
+    else:
+        existing_case = (
+            db.query(ProductCase)
+            .filter(
+                ProductCase.owner_id == owner.id,
+                ProductCase.is_demo == False,
+                func.lower(ProductCase.name) == clean_name.lower(),
+            )
+            .first()
+        )
+        if existing_case:
+            logger.info("Product case with name '%s' already exists (%s), returning existing.", clean_name, existing_case.public_id)
+            return _case_to_dict(existing_case)
+
     now = datetime.now(timezone.utc)
 
     case = ProductCase(
         owner_id=owner.id,
-        name=name,
+        name=clean_name,
         stage=stage,
         jurisdictions=json.dumps(jurisdictions or ["IN"]),
         status="DRAFT",
@@ -145,7 +193,7 @@ def create_product_case(
         case_id=case.id,
         version_number=1,
         snapshot=json.dumps({
-            "name": name,
+            "name": clean_name,
             "stage": stage,
             "jurisdictions": jurisdictions or ["IN"],
             "ingredients": ingredients,
@@ -159,7 +207,8 @@ def create_product_case(
     db.add(version)
     db.commit()
 
-    logger.info("Created product case: %s (%s)", case.public_id, name)
+    _invalidate_product_cache(owner.id)
+    logger.info("Created product case: %s (%s, is_demo=%s)", case.public_id, clean_name, is_demo)
     return _case_to_dict(case)
 
 
@@ -167,9 +216,16 @@ def list_product_cases(
     db: Session,
     owner: User,
     skip: int = 0,
-    limit: int = 50,
+    limit: int = 20,
 ) -> dict:
-    """List all Product Cases for a user, excluding demo products."""
+    """List all Product Cases for a user, excluding demo products, with 30s cache."""
+    cache_key = f"{owner.id}_{skip}_{limit}"
+    now_ts = time.time()
+    if cache_key in _PRODUCT_LIST_CACHE:
+        cached_ts, cached_data = _PRODUCT_LIST_CACHE[cache_key]
+        if now_ts - cached_ts < CACHE_TTL_SECONDS:
+            return cached_data
+
     query = (
         db.query(ProductCase)
         .filter(
@@ -185,10 +241,14 @@ def list_product_cases(
         .limit(limit)
         .all()
     )
-    return {
+    result = {
         "cases": [_case_to_dict(c) for c in cases],
         "total": total,
+        "skip": skip,
+        "limit": limit,
     }
+    _PRODUCT_LIST_CACHE[cache_key] = (now_ts, result)
+    return result
 
 
 def get_product_case(db: Session, owner: User, public_id: str) -> Optional[dict]:
@@ -260,6 +320,7 @@ def update_product_case(
 
     db.commit()
     db.refresh(case)
+    _invalidate_product_cache(owner.id)
     logger.info("Updated product case: %s (v%d)", case.public_id, case.current_version)
     return _case_to_dict(case)
 
@@ -309,6 +370,7 @@ def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
             logger.debug("Cascade delete query exception: %s", e)
 
     db.commit()
+    _invalidate_product_cache(owner.id)
     logger.info("Deleted product case: %s (id=%d)", public_id, cid)
     return True
 

@@ -169,6 +169,64 @@
   }
 
   // ----------------------------------------------------------------
+  // Demo Product Data Definition (Ashwagandha & Brahmi Cognitive Capsules)
+  // ----------------------------------------------------------------
+
+  var DEMO_PASSPORT_DATA = {
+    name: "Ashwagandha & Brahmi Cognitive Wellness Capsules",
+    product_type: "Ayurvedic Product",
+    formulation: "Ayurvedic Product",
+    form: "Capsule Formulation",
+    description: "A classical Ayurvedic formulation combining Ashwagandha (Withania somnifera) and Brahmi (Bacopa monnieri) in a modern capsule delivery system. Standardized extracts with 5% withanolides and 20% bacosides for optimal cognitive support and stress management.",
+    normalized_description: "A classical Ayurvedic formulation combining Ashwagandha (Withania somnifera) and Brahmi (Bacopa monnieri) in a modern capsule delivery system. Standardized extracts with 5% withanolides and 20% bacosides for optimal cognitive support and stress management.",
+    ingredients: [
+      {
+        name: "Ashwagandha",
+        botanical: "Withania somnifera",
+        quantity: "500 mg",
+        status: "VERIFIED",
+        source: "Charaka Samhita Chikitsa Sthana Rasayana",
+        verification_status: "VERIFIED",
+        therapeutic_indication: "Stress Management, Neuroprotection & Rasayana"
+      },
+      {
+        name: "Brahmi",
+        botanical: "Bacopa monnieri",
+        quantity: "300 mg",
+        status: "VERIFIED",
+        source: "Charaka Samhita Sutra Sthana Medhya",
+        verification_status: "VERIFIED",
+        therapeutic_indication: "Cognitive Enhancement & Memory Support"
+      },
+      {
+        name: "Tulsi",
+        botanical: "Ocimum sanctum",
+        quantity: "100 mg",
+        status: "VERIFIED",
+        source: "Sushruta Samhita Sutra Sthana",
+        verification_status: "VERIFIED",
+        therapeutic_indication: "Adaptogen, Respiratory Health & Bio-enhancement"
+      }
+    ],
+    intended_use: [
+      "Cognitive Health & Focus",
+      "Stress Relief & Relaxation",
+      "Memory Enhancement"
+    ],
+    process: "Standardized extraction process with HPLC verification. Each ingredient is individually extracted and standardized to ensure consistent potency (5% withanolides, 20% bacosides). Blended in GMP-certified facility with quality control testing for heavy metals, microbial contamination, and aflatoxins.",
+    claims: [
+      "Supports cognitive function and mental clarity",
+      "Helps manage stress and promote relaxation",
+      "Traditional Ayurvedic adaptogen formula"
+    ],
+    brand: "Cognitive Wellness",
+    packaging: "Blister pack in outer carton with moisture barrier",
+    notes: "A classical Ayurvedic formulation combining Ashwagandha (Withania somnifera) and Brahmi (Bacopa monnieri) in a modern capsule delivery system. Standardized extracts with 5% withanolides and 20% bacosides for optimal cognitive support and stress management.",
+    is_demo: true,
+    ai_normalized: true
+  };
+
+  // ----------------------------------------------------------------
   // Initialize Passport Data — ZERO DEFAULT SELECTIONS
   // ----------------------------------------------------------------
 
@@ -204,13 +262,18 @@
       jurisdictions: ["IN"], // INDIA ONLY
       regulatory_pathway: c.regulatory_pathway || null,
       notes: c.notes || "",
+      is_demo: Boolean(c.is_demo),
       is_normalizing: false,
-      ai_normalized: false,
+      ai_normalized: Boolean(c.ai_normalized),
       activeBotanicalCard: null, // Holds botanical currently selected for quantity popup modal
       activeSuggestionModal: null // Holds suggestion currently displayed in detail popup modal
     };
 
     state.passportStep = 0;
+  }
+
+  function initDemoPassport() {
+    initPassportData(DEMO_PASSPORT_DATA);
   }
 
   // Helper to generate dynamic formulation / product suggestions based on ingredients
@@ -1712,7 +1775,8 @@
       process: pd.process || null,
       brand: pd.brand || null,
       packaging: pd.packaging || null,
-      notes: pd.reference_context || pd.notes || null
+      notes: pd.reference_context || pd.notes || null,
+      is_demo: Boolean(pd.is_demo)
     };
 
     console.log('💾 SAVING WITH PAYLOAD:', payload);
@@ -1770,6 +1834,8 @@
   // Expose
   window.AYUR.renderPassportWizard = renderPassportWizard;
   window.AYUR.initPassportData = initPassportData;
+  window.AYUR.initDemoPassport = initDemoPassport;
+  window.AYUR.DEMO_PASSPORT_DATA = DEMO_PASSPORT_DATA;
   window.AYUR.bindPassportEvents = bindPassportEvents;
   window.AYUR.triggerAiNormalize = triggerAiNormalize;
   window.AYUR.fallbackNormalize = fallbackNormalize;

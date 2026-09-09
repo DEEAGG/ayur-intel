@@ -7339,6 +7339,26 @@ input:checked + .ios-slider:before {
   border-radius: 6px;
 }
 
+/* Growth Tree Canvas & Smooth Hardware Acceleration */
+.growth-tree-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.65;
+  will-change: transform;
+}
+
+.modal-overlay,
+.conv-option-card,
+.case-card,
+.intel-module-card {
+  will-change: transform, opacity;
+}
+
 
 
 

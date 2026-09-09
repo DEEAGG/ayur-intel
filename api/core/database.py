@@ -23,13 +23,17 @@ logger = logging.getLogger("ayur_intel.database")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # Vercel Production: PostgreSQL
+    # Production: PostgreSQL (Supabase / Render)
     engine = create_engine(
         DATABASE_URL,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=30,
+        pool_recycle=1800,
         pool_pre_ping=True,
         echo=False,
     )
-    logger.info("🔗 Using PostgreSQL (Production)")
+    logger.info("🔗 Using PostgreSQL with connection pooling (Production)")
 else:
     # Development: SQLite
     from api.core.config import settings
@@ -76,15 +80,39 @@ def init_db() -> None:
 
     models.Base.metadata.create_all(bind=engine)
 
-    # Auto-migration: ensure is_demo column exists in product_cases for existing PostgreSQL/SQLite DBs
+    # Auto-migration & performance indexes for existing SQLite/PostgreSQL databases
     with engine.begin() as conn:
+        is_sqlite = "sqlite" in str(engine.url)
+        
+        # 1. Ensure is_demo column exists
         try:
-            if "sqlite" in str(engine.url):
+            if is_sqlite:
                 conn.execute(text("ALTER TABLE product_cases ADD COLUMN is_demo BOOLEAN DEFAULT 0"))
             else:
                 conn.execute(text("ALTER TABLE product_cases ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT FALSE"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_product_cases_is_demo ON product_cases (is_demo)"))
         except Exception as e:
-            logger.debug("Column migration note: %s", e)
+            logger.debug("Column migration note (is_demo): %s", e)
 
-    logger.info("Database initialized successfully")
+        # 2. Performance indexes
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS ix_product_cases_public_id ON product_cases (public_id)",
+            "CREATE INDEX IF NOT EXISTS ix_product_cases_owner_id ON product_cases (owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_product_cases_status ON product_cases (status)",
+            "CREATE INDEX IF NOT EXISTS ix_product_cases_is_demo ON product_cases (is_demo)",
+            "CREATE INDEX IF NOT EXISTS ix_product_cases_created_at ON product_cases (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_product_cases_updated_at ON product_cases (updated_at)",
+            "CREATE INDEX IF NOT EXISTS ix_product_cases_owner_demo_status ON product_cases (owner_id, is_demo, status)",
+            "CREATE INDEX IF NOT EXISTS ix_case_versions_case_id ON case_versions (case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plant_discoveries_owner_id ON plant_discoveries (owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_plant_discoveries_product_case_id ON plant_discoveries (product_case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_knowledge_findings_owner_id ON knowledge_findings (owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_knowledge_findings_product_case_id ON knowledge_findings (product_case_id)",
+        ]
+
+        for idx_sql in indexes:
+            try:
+                conn.execute(text(idx_sql))
+            except Exception as e:
+                logger.debug("Index creation note (%s): %s", idx_sql, e)
+
+    logger.info("Database initialized with performance indexes successfully")

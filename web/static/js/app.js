@@ -5574,34 +5574,26 @@
     }
     state.currentCase = null;
     state.view = "passport-wizard";
+    state.passportStep = 0;
+    updateTopbarUI();
     saveStateToLocalStorage();
     render();
   }
 
-  async function exploreDemoCase() {
-    state.loading = true;
-    render();
-    try {
-      showToast("🌿 Opening official Ayurvedic Demo Case...", "info");
-      var demoCase = await api("/api/cases/demo");
-      if (demoCase && demoCase.id) {
-        state.currentCase = demoCase;
-        state.view = "case-detail";
-        state.error = null;
-        updateTopbarUI();
-        saveStateToLocalStorage();
-        showToast("✨ Loaded: " + demoCase.name, "success");
-      } else {
-        throw new Error("Demo case not found");
-      }
-    } catch (e) {
-      console.error("Failed to load demo case:", e);
-      showToast("⚠️ Could not load demo case. Opening case creator.", "error");
-      createCase();
-    } finally {
-      state.loading = false;
-      render();
+  function exploreDemoCase() {
+    showToast("🌿 Opening official Ayurvedic Demo Case in Product Passport...", "info");
+    state.currentCase = null;
+    if (window.AYUR && typeof window.AYUR.initDemoPassport === "function") {
+      window.AYUR.initDemoPassport();
+    } else if (window.AYUR && typeof window.AYUR.initPassportData === "function" && window.AYUR.DEMO_PASSPORT_DATA) {
+      window.AYUR.initPassportData(window.AYUR.DEMO_PASSPORT_DATA);
     }
+    state.view = "passport-wizard";
+    state.passportStep = 0;
+    state.error = null;
+    updateTopbarUI();
+    saveStateToLocalStorage();
+    render();
   }
 
   // ----------------------------------------------------------------
@@ -5611,22 +5603,10 @@
     bindNavigation();
     await loadCases();
 
-    // Load saved state from localStorage on refresh
-    var savedState = localStorage.getItem('ayur_intel_state');
-    if (savedState) {
-      try {
-        var parsed = JSON.parse(savedState);
-        if (parsed.currentCase) {
-          state.currentCase = parsed.currentCase;
-          if (parsed.view === 'case-detail' || !state.view || state.view === 'dashboard') {
-            state.view = 'case-detail';
-          }
-          console.log('🔄 Restored case from localStorage:', parsed.currentCase.name);
-        }
-      } catch (e) {
-        console.warn('Could not restore state:', e);
-      }
-    }
+    // Default state: Always start clean on dashboard with No Active Case
+    state.currentCase = null;
+    state.view = "dashboard";
+    state.passportData = null;
 
     updateTopbarUI();
     render();

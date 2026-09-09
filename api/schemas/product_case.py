@@ -49,6 +49,7 @@ class ProductCaseCreate(BaseModel):
     brand: Optional[str] = None
     packaging: Optional[str] = None
     notes: Optional[str] = None
+    is_demo: Optional[bool] = False
 
     def model_post_init(self, __context) -> None:
         """Validate stage and jurisdictions after initialization."""
@@ -116,6 +117,8 @@ class ProductCaseListResponse(BaseModel):
 
     cases: List[ProductCaseResponse]
     total: int
+    skip: Optional[int] = 0
+    limit: Optional[int] = 20
 
 
 class ErrorResponse(BaseModel):

@@ -87,6 +87,7 @@ def create_case(
             brand=payload.brand,
             packaging=payload.packaging,
             notes=payload.notes,
+            is_demo=bool(payload.is_demo),
         )
         log_action(
             db, action="CREATE", resource_type="PRODUCT_CASE",
@@ -109,7 +110,7 @@ def create_case(
 )
 def list_cases(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

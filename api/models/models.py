@@ -26,6 +26,7 @@ from sqlalchemy import (
     String,
     Text,
     Boolean,
+    Index,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -122,6 +123,12 @@ class ProductCase(Base):
 
     # Versioning
     current_version = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        Index("ix_product_cases_owner_demo_status", "owner_id", "is_demo", "status"),
+        Index("ix_product_cases_created_at_desc", created_at.desc()),
+        Index("ix_product_cases_updated_at_desc", updated_at.desc()),
+    )
 
     # Relationships
     owner = relationship("User", back_populates="product_cases", lazy="selectin")

@@ -243,6 +243,17 @@
     resizeTimeout = setTimeout(resize, 200);
   });
 
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      if (animId) { cancelAnimationFrame(animId); animId = null; }
+    } else {
+      if (!animId) {
+        if (isGrowthComplete) runSwayLoop();
+        else animate();
+      }
+    }
+  });
+
   window.addEventListener("DOMContentLoaded", resize);
   if (document.readyState === "complete" || document.readyState === "interactive") {
     resize();
