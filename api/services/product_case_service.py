@@ -56,6 +56,7 @@ def _case_to_dict(case: ProductCase) -> dict:
         "stage": case.stage,
         "jurisdictions": _deserialize_list(case.jurisdictions),
         "status": case.status,
+        "is_demo": bool(getattr(case, "is_demo", False)),
         "owner_id": case.owner.public_id if case.owner else "",
         "ingredients": _deserialize_list(case.ingredients) if case.ingredients else None,
         "form": case.form,
@@ -110,6 +111,7 @@ def create_product_case(
     brand: Optional[str] = None,
     packaging: Optional[str] = None,
     notes: Optional[str] = None,
+    is_demo: bool = False,
 ) -> dict:
     """Create a new Product Case and its initial version snapshot."""
     now = datetime.now(timezone.utc)
@@ -120,6 +122,7 @@ def create_product_case(
         stage=stage,
         jurisdictions=json.dumps(jurisdictions or ["IN"]),
         status="DRAFT",
+        is_demo=is_demo,
         ingredients=json.dumps(ingredients) if ingredients else None,
         form=form,
         intended_use=intended_use,
@@ -166,8 +169,14 @@ def list_product_cases(
     skip: int = 0,
     limit: int = 50,
 ) -> dict:
-    """List all Product Cases for a user."""
-    query = db.query(ProductCase).filter(ProductCase.owner_id == owner.id)
+    """List all Product Cases for a user, excluding demo products."""
+    query = (
+        db.query(ProductCase)
+        .filter(
+            ProductCase.owner_id == owner.id,
+            ProductCase.is_demo == False,
+        )
+    )
     total = query.count()
     cases = (
         query
@@ -183,12 +192,12 @@ def list_product_cases(
 
 
 def get_product_case(db: Session, owner: User, public_id: str) -> Optional[dict]:
-    """Get a single Product Case by public ID, scoped to owner."""
+    """Get a single Product Case by public ID, scoped to owner or demo."""
     case = (
         db.query(ProductCase)
         .filter(
             ProductCase.public_id == public_id,
-            ProductCase.owner_id == owner.id,
+            (ProductCase.owner_id == owner.id) | (ProductCase.is_demo == True),
         )
         .first()
     )
@@ -256,7 +265,7 @@ def update_product_case(
 
 
 def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
-    """Delete a Product Case and all associated child entities."""
+    """Delete a Product Case and all associated child entities (demo cases protected)."""
     from sqlalchemy import text
     case = (
         db.query(ProductCase)
@@ -268,10 +277,14 @@ def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
     )
     if case is None:
         return False
+
+    # Block deletion of demo products
+    if getattr(case, "is_demo", False) or case.public_id == "demo-001":
+        logger.warning("Blocked attempt to delete demo case: %s", public_id)
+        return False
+
     cid = case.id
     db.expire_all()
-
-
 
     child_deletes = [
         "DELETE FROM regulatory_requirements WHERE profile_id IN (SELECT id FROM regulatory_profiles WHERE product_case_id = :cid)",
@@ -298,4 +311,140 @@ def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
     db.commit()
     logger.info("Deleted product case: %s (id=%d)", public_id, cid)
     return True
+
+
+def get_or_create_demo_case(db: Session, owner: User) -> dict:
+    """Get or create the pre-filled official Ayurvedic Demo Product Case."""
+    demo_case = (
+        db.query(ProductCase)
+        .filter(
+            (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001")
+        )
+        .first()
+    )
+    if demo_case is not None:
+        return _case_to_dict(demo_case)
+
+    # Pre-filled Demo Product Specifications
+    now = datetime.now(timezone.utc)
+    demo_ingredients = [
+        {
+            "name": "Ashwagandha",
+            "botanical": "Withania somnifera",
+            "quantity": "500 mg",
+            "status": "VERIFIED",
+            "source": "Charaka Samhita Chikitsa Sthana Rasayana",
+            "verification_status": "VERIFIED",
+            "therapeutic_indication": "Stress Management, Neuroprotection & Rasayana",
+        },
+        {
+            "name": "Brahmi",
+            "botanical": "Bacopa monnieri",
+            "quantity": "300 mg",
+            "status": "VERIFIED",
+            "source": "Charaka Samhita Sutra Sthana Medhya",
+            "verification_status": "VERIFIED",
+            "therapeutic_indication": "Cognitive Enhancement & Memory Support",
+        },
+        {
+            "name": "Tulsi",
+            "botanical": "Ocimum sanctum",
+            "quantity": "100 mg",
+            "status": "VERIFIED",
+            "source": "Sushruta Samhita Sutra Sthana",
+            "verification_status": "VERIFIED",
+            "therapeutic_indication": "Adaptogen, Respiratory Health & Bio-enhancement",
+        },
+    ]
+
+    demo_claims = [
+        "Supports cognitive function and mental clarity",
+        "Helps manage stress and promote relaxation",
+        "Traditional Ayurvedic adaptogen formula",
+    ]
+
+    demo_process = (
+        "Standardized extraction process with HPLC verification. Each ingredient is "
+        "individually extracted and standardized to ensure consistent potency (5% withanolides, "
+        "20% bacosides). Blended in GMP-certified facility with quality control testing "
+        "for heavy metals, microbial contamination, and aflatoxins."
+    )
+
+    demo_notes = (
+        "A classical Ayurvedic formulation combining Ashwagandha (Withania somnifera) and "
+        "Brahmi (Bacopa monnieri) in a modern capsule delivery system. Standardized extracts "
+        "with 5% withanolides and 20% bacosides for optimal cognitive support and stress management."
+    )
+
+    demo_case = ProductCase(
+        public_id="demo-001",
+        owner_id=owner.id,
+        name="Ashwagandha & Brahmi Cognitive Wellness Capsules",
+        stage="IDEA",
+        jurisdictions=json.dumps(["IN"]),
+        status="DRAFT",
+        is_demo=True,
+        ingredients=json.dumps(demo_ingredients),
+        form="Capsule Formulation",
+        formulation="Ayurvedic Product",
+        intended_use="Cognitive Health & Focus\nStress Relief & Relaxation\nMemory Enhancement",
+        claims=json.dumps(demo_claims),
+        process=demo_process,
+        brand="Cognitive Wellness",
+        packaging="Blister pack in outer carton with moisture barrier",
+        notes=demo_notes,
+        current_version=1,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(demo_case)
+    db.commit()
+    db.refresh(demo_case)
+
+    # Create initial version snapshot
+    version = CaseVersion(
+        case_id=demo_case.id,
+        version_number=1,
+        snapshot=json.dumps({
+            "name": demo_case.name,
+            "stage": demo_case.stage,
+            "jurisdictions": ["IN"],
+            "ingredients": demo_ingredients,
+            "form": demo_case.form,
+            "intended_use": demo_case.intended_use,
+            "process": demo_case.process,
+            "claims": demo_claims,
+        }),
+        created_at=now,
+    )
+    db.add(version)
+    db.commit()
+
+    # Pre-generate analytical components for instant sub-second response
+    try:
+        from api.services.innovation_service import analyze_innovation
+        analyze_innovation(db=db, owner=owner, case_public_id=demo_case.public_id)
+    except Exception as e:
+        logger.debug("Demo innovation analysis pre-seed note: %s", e)
+
+    try:
+        from api.services.regulatory_service import generate_regulatory_profile
+        generate_regulatory_profile(db=db, owner=owner, case_public_id=demo_case.public_id, jurisdiction="IN")
+    except Exception as e:
+        logger.debug("Demo regulatory pre-seed note: %s", e)
+
+    try:
+        from api.services.ip_strategy_service import generate_ip_strategy
+        generate_ip_strategy(db=db, owner=owner, case_public_id=demo_case.public_id)
+    except Exception as e:
+        logger.debug("Demo IP strategy pre-seed note: %s", e)
+
+    try:
+        from api.services.risk_service import generate_risk_analysis
+        generate_risk_analysis(db=db, owner=owner, case_public_id=demo_case.public_id)
+    except Exception as e:
+        logger.debug("Demo risk analysis pre-seed note: %s", e)
+
+    logger.info("Successfully created and pre-analyzed demo product case: %s", demo_case.public_id)
+    return _case_to_dict(demo_case)
 

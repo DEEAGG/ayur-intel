@@ -4590,17 +4590,9 @@
     // Explore demo
     var demoBtn = document.getElementById("explore-demo-btn");
     if (demoBtn) {
-      demoBtn.addEventListener("click", async function () {
-        if (state.cases && state.cases.length > 0) {
-          await loadCase(state.cases[0].id);
-        } else {
-          await loadCases();
-          if (state.cases && state.cases.length > 0) {
-            await loadCase(state.cases[0].id);
-          } else {
-            createCase();
-          }
-        }
+      demoBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        exploreDemoCase();
       });
     }
 
@@ -5586,6 +5578,32 @@
     render();
   }
 
+  async function exploreDemoCase() {
+    state.loading = true;
+    render();
+    try {
+      showToast("🌿 Opening official Ayurvedic Demo Case...", "info");
+      var demoCase = await api("/api/cases/demo");
+      if (demoCase && demoCase.id) {
+        state.currentCase = demoCase;
+        state.view = "case-detail";
+        state.error = null;
+        updateTopbarUI();
+        saveStateToLocalStorage();
+        showToast("✨ Loaded: " + demoCase.name, "success");
+      } else {
+        throw new Error("Demo case not found");
+      }
+    } catch (e) {
+      console.error("Failed to load demo case:", e);
+      showToast("⚠️ Could not load demo case. Opening case creator.", "error");
+      createCase();
+    } finally {
+      state.loading = false;
+      render();
+    }
+  }
+
   // ----------------------------------------------------------------
   // Init
   // ----------------------------------------------------------------
@@ -5695,7 +5713,8 @@
     editProductPassport: editProductPassport,
     scrollToTop: scrollToTop,
     navigateTo: navigateTo,
-    renderProfilePage: renderProfilePage
+    renderProfilePage: renderProfilePage,
+    exploreDemoCase: exploreDemoCase
   };
 
   // Boot

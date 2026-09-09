@@ -7302,6 +7302,44 @@ input:checked + .ios-slider:before {
   box-shadow: 0 4px 14px rgba(255, 80, 80, 0.25), 0 0 10px rgba(255, 80, 80, 0.15);
 }
 
+/* Skeleton Loading Shimmer Animations */
+.skeleton {
+  background: linear-gradient(90deg, rgba(20, 34, 27, 0.6) 25%, rgba(45, 139, 106, 0.15) 50%, rgba(20, 34, 27, 0.6) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-card {
+  height: 180px;
+  margin-bottom: 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(45, 139, 106, 0.1);
+}
+
+.skeleton-text {
+  height: 14px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+}
+
+.skeleton-title {
+  height: 24px;
+  width: 60%;
+  margin-bottom: 14px;
+  border-radius: 6px;
+}
+
+
 
 
 

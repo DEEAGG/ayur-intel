@@ -85,10 +85,10 @@ class ProductCase(Base):
     __tablename__ = "product_cases"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    public_id = Column(String(32), unique=True, nullable=False, default=_uuid)
+    public_id = Column(String(32), unique=True, nullable=False, default=_uuid, index=True)
 
     # Ownership
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
     # Product identity
     name = Column(String(300), nullable=False)
@@ -99,8 +99,11 @@ class ProductCase(Base):
     jurisdictions = Column(Text, nullable=False, default="[]")
 
     # Status
-    status = Column(String(50), nullable=False, default="DRAFT")
+    status = Column(String(50), nullable=False, default="DRAFT", index=True)
     # Statuses: DRAFT, ANALYZING, COMPLETED, ARCHIVED
+
+    # Flag for pre-filled demo products (hidden from Active Products list)
+    is_demo = Column(Boolean, nullable=False, default=False, index=True)
 
     # Product details (filled in Phase 1+; nullable in Phase 1)
     ingredients = Column(Text, nullable=True, default="[]")  # JSON
@@ -114,8 +117,8 @@ class ProductCase(Base):
     notes = Column(Text, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, nullable=False, default=_now_utc)
-    updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)
+    created_at = Column(DateTime, nullable=False, default=_now_utc, index=True)
+    updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc, index=True)
 
     # Versioning
     current_version = Column(Integer, nullable=False, default=1)

@@ -93,6 +93,7 @@ class ProductCaseResponse(BaseModel):
     stage: str
     jurisdictions: List[str]
     status: str
+    is_demo: bool = False
     owner_id: str
     ingredients: Optional[List[dict]] = None
     form: Optional[str] = None

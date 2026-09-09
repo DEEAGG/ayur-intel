@@ -152,6 +152,20 @@ def normalize_case(
 
 
 @router.get(
+    "/demo",
+    response_model=ProductCaseResponse,
+    summary="Get or initialize pre-filled Demo Product Case",
+)
+def get_demo_case_route(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get the pre-filled official Ayurvedic Demo Product Case."""
+    from api.services.product_case_service import get_or_create_demo_case
+    return get_or_create_demo_case(db=db, owner=user)
+
+
+@router.get(
     "/{case_id}",
     response_model=ProductCaseResponse,
     responses={404: {"model": ErrorResponse}},
