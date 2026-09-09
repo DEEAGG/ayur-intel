@@ -67,9 +67,9 @@ class User(Base):
     updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)
 
     # Relationships
-    product_cases = relationship("ProductCase", back_populates="owner", lazy="selectin")
-    plant_discoveries = relationship("PlantDiscovery", back_populates="owner", lazy="selectin")
-    knowledge_findings = relationship("KnowledgeFinding", back_populates="owner", lazy="selectin")
+    product_cases = relationship("ProductCase", back_populates="owner", lazy="select")
+    plant_discoveries = relationship("PlantDiscovery", back_populates="owner", lazy="select")
+    knowledge_findings = relationship("KnowledgeFinding", back_populates="owner", lazy="select")
 
 
 # ---------------------------------------------------------------------------
@@ -131,11 +131,11 @@ class ProductCase(Base):
     )
 
     # Relationships
-    owner = relationship("User", back_populates="product_cases", lazy="selectin")
-    versions = relationship("CaseVersion", back_populates="case", lazy="selectin",
+    owner = relationship("User", back_populates="product_cases", lazy="joined")
+    versions = relationship("CaseVersion", back_populates="case", lazy="select",
                             order_by="CaseVersion.version_number.desc()")
-    plant_discoveries = relationship("PlantDiscovery", back_populates="product_case", lazy="selectin")
-    knowledge_findings = relationship("KnowledgeFinding", back_populates="product_case", lazy="selectin")
+    plant_discoveries = relationship("PlantDiscovery", back_populates="product_case", lazy="select")
+    knowledge_findings = relationship("KnowledgeFinding", back_populates="product_case", lazy="select")
 
 
 # ---------------------------------------------------------------------------

@@ -80,34 +80,48 @@
     ctx.stroke();
   }
 
-  function animate() {
-    ctx.clearRect(0, 0, width, height);
+  var lastFrameTime = 0;
+  var frameInterval = 1000 / 25; // 25 FPS cap for ambient drift
 
-    var isMobile = width <= 600;
-    var activeCount = isMobile ? 4 : paths.length;
-
-    for (var i = 0; i < activeCount; i++) {
-      var p = paths[i];
-
-      // Strict Left -> Right slow movement with subtle velocity desynchronization
-      p.x += baseSpeed * p.velMultiplier;
-
-      // Draw the path
-      drawPath(p);
-
-      // Recycling: When path tail clears the right edge, seamlessly restart at left edge
-      if (p.x > width + 100) {
-        p.x = -width * 0.5 - Math.random() * 80;
-      }
-    }
-
-    // Respect prefers-reduced-motion
+  function animate(timestamp) {
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return; // Static frame for reduced motion
     }
 
+    if (!timestamp || timestamp - lastFrameTime >= frameInterval) {
+      lastFrameTime = timestamp || performance.now();
+
+      ctx.clearRect(0, 0, width, height);
+
+      var isMobile = width <= 600;
+      var activeCount = isMobile ? 3 : paths.length;
+
+      for (var i = 0; i < activeCount; i++) {
+        var p = paths[i];
+
+        // Strict Left -> Right slow movement with subtle velocity desynchronization
+        p.x += baseSpeed * p.velMultiplier * 1.5;
+
+        // Draw the path
+        drawPath(p);
+
+        // Recycling: When path tail clears the right edge, seamlessly restart at left edge
+        if (p.x > width + 100) {
+          p.x = -width * 0.5 - Math.random() * 80;
+        }
+      }
+    }
+
     animId = requestAnimationFrame(animate);
   }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      if (animId) { cancelAnimationFrame(animId); animId = null; }
+    } else {
+      if (!animId) animId = requestAnimationFrame(animate);
+    }
+  });
 
   window.addEventListener("resize", resize);
   resize();

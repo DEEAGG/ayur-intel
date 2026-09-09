@@ -30,22 +30,28 @@
   // Wind Sway Controls
   window.targetWind = 0;
   window.currentWind = 0;
+  var mouseThrottled = false;
 
   window.addEventListener("mousemove", function (e) {
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      window.targetWind = 0;
-      return;
-    }
-    var relX = (e.clientX / window.innerWidth) - 0.5;
-    window.targetWind = relX * 0.12; // Responsive wind angle offset
-  });
+    if (mouseThrottled) return;
+    mouseThrottled = true;
+    requestAnimationFrame(function () {
+      mouseThrottled = false;
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        window.targetWind = 0;
+        return;
+      }
+      var relX = (e.clientX / window.innerWidth) - 0.5;
+      window.targetWind = relX * 0.12; // Responsive wind angle offset
+    });
+  }, { passive: true });
 
   window.addEventListener("mouseleave", function () {
     window.targetWind = 0;
   });
 
   function resize() {
-    dpr = window.devicePixelRatio || 1;
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     width = window.innerWidth;
     height = window.innerHeight;
     canvas.width = width * dpr;
@@ -229,11 +235,20 @@
     }
   }
 
-  function runSwayLoop() {
-    renderTreeFrame();
+  var lastSwayTime = 0;
+  var swayInterval = 1000 / 30; // 30 FPS cap for sway animation
+
+  function runSwayLoop(timestamp) {
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      renderTreeFrame();
       return; // Static frame for reduced motion
     }
+
+    if (!timestamp || timestamp - lastSwayTime >= swayInterval) {
+      lastSwayTime = timestamp || performance.now();
+      renderTreeFrame();
+    }
+
     animId = requestAnimationFrame(runSwayLoop);
   }
 

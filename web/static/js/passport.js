@@ -1793,6 +1793,17 @@
       if (response.ok) {
         console.log('✅ Case saved:', data);
 
+        // Invalidate API cache and module cache for this case
+        if (window.AYUR && typeof window.AYUR.invalidateClientApiCache === 'function') {
+          window.AYUR.invalidateClientApiCache('/api/cases');
+        }
+        if (window.AYUR && typeof window.AYUR.invalidateCaseModuleCache === 'function' && data.id) {
+          window.AYUR.invalidateCaseModuleCache(data.id);
+        }
+        if (window.AYUR && typeof window.AYUR.loadCases === 'function') {
+          window.AYUR.loadCases();
+        }
+
         // Update state
         window.AYUR.state.currentCase = data;
         window.AYUR.state.passportData = null;

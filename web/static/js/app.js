@@ -143,17 +143,114 @@
   }
 
   // ----------------------------------------------------------------
-  // API helpers
+  // API helpers with In-Flight Deduplication & Client Cache
   // ----------------------------------------------------------------
-  async function api(url, opts) {
-    try {
-      var resp = await fetch(url, opts || {});
-      if (!resp.ok) { var err = await resp.text(); throw new Error(err); }
-      return await resp.json();
-    } catch (e) {
-      console.error("API error:", url, e);
-      throw e;
+  var _clientApiCache = new Map(); // url -> { ts, data }
+  var _inFlightApiRequests = new Map(); // url -> Promise
+  var CLIENT_CACHE_TTL = 15000; // 15 seconds client cache for GET
+
+  function invalidateClientApiCache(urlPrefix) {
+    if (!urlPrefix) {
+      _clientApiCache.clear();
+      return;
     }
+    for (var key of _clientApiCache.keys()) {
+      if (key.indexOf(urlPrefix) !== -1) {
+        _clientApiCache.delete(key);
+      }
+    }
+  }
+
+  async function api(url, opts) {
+    var method = (opts && opts.method ? opts.method : "GET").toUpperCase();
+    var isGet = method === "GET";
+
+    if (!isGet) {
+      // Invalidate relevant cache on mutation
+      invalidateClientApiCache("/api/cases");
+    } else {
+      // Check client memory cache
+      var cached = _clientApiCache.get(url);
+      if (cached && (Date.now() - cached.ts < CLIENT_CACHE_TTL)) {
+        return cached.data;
+      }
+      // Deduplicate concurrent in-flight requests for identical GET url
+      if (_inFlightApiRequests.has(url)) {
+        return _inFlightApiRequests.get(url);
+      }
+    }
+
+    var requestPromise = (async function () {
+      try {
+        var resp = await fetch(url, opts || {});
+        if (!resp.ok) { var err = await resp.text(); throw new Error(err); }
+        var json = await resp.json();
+        if (isGet) {
+          _clientApiCache.set(url, { ts: Date.now(), data: json });
+        }
+        return json;
+      } catch (e) {
+        console.error("API error:", url, e);
+        throw e;
+      } finally {
+        if (isGet) {
+          _inFlightApiRequests.delete(url);
+        }
+      }
+    })();
+
+    if (isGet) {
+      _inFlightApiRequests.set(url, requestPromise);
+    }
+
+    return await requestPromise;
+  }
+
+  // ----------------------------------------------------------------
+  // Per-Case Intelligence Module Cache
+  // ----------------------------------------------------------------
+  var _caseModuleCache = new Map();
+  function getCachedModule(caseId, key) {
+    return _caseModuleCache.get(String(caseId) + ":" + key);
+  }
+  function setCachedModule(caseId, key, data) {
+    _caseModuleCache.set(String(caseId) + ":" + key, data);
+  }
+
+  function invalidateCaseModuleCache(caseId) {
+    if (!caseId) {
+      _caseModuleCache.clear();
+      return;
+    }
+    var prefix = String(caseId) + ":";
+    for (var key of _caseModuleCache.keys()) {
+      if (key.indexOf(prefix) === 0) {
+        _caseModuleCache.delete(key);
+      }
+    }
+  }
+
+  async function openCaseModule(key, endpoint, targetView, httpOptions) {
+    if (!state.currentCase) return;
+    var cached = getCachedModule(state.currentCase.id, key);
+    if (cached) {
+      state[key] = cached;
+      state.view = targetView;
+      render();
+      return;
+    }
+    state.loading = true;
+    render();
+    try {
+      var data = await api(endpoint, httpOptions);
+      setCachedModule(state.currentCase.id, key, data);
+      state[key] = data;
+      state.view = targetView;
+    } catch (e) {
+      state.error = "Failed to load " + targetView + ".";
+    }
+    state.loading = false;
+    render();
   }
 
   // ----------------------------------------------------------------
@@ -836,9 +933,13 @@
     
     try {
         console.log('🗑 Sending DELETE request for:', caseId);
+        invalidateClientApiCache('/api/cases');
+        invalidateCaseModuleCache(caseId);
         const response = await fetch(`/api/cases/${caseId}`, { method: 'DELETE' });
         console.log('🗑 DELETE response status:', response.status, response.ok);
         if (response.ok) {
+            invalidateClientApiCache('/api/cases');
+            invalidateCaseModuleCache(caseId);
             if (typeof showToast === 'function') showToast(`✅ "${caseName}" deleted`, 'success');
             else if (typeof toast === 'function') toast(`✅ "${caseName}" deleted`, 'success');
             await loadCases();
@@ -2817,6 +2918,14 @@
       showToast('⚠️ No active product case found', 'error');
       return;
     }
+    var cached = getCachedModule(c.id, "regulatoryProfile");
+    if (cached) {
+      state.regulatoryProfile = cached;
+      state.view = "regulatory-intelligence";
+      saveStateToLocalStorage();
+      render();
+      return;
+    }
     state.loading = true;
     render();
     try {
@@ -2825,6 +2934,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jurisdiction: "IN" })
       });
+      setCachedModule(c.id, "regulatoryProfile", data);
       state.regulatoryProfile = data;
       state.view = "regulatory-intelligence";
       saveStateToLocalStorage();
@@ -3718,16 +3828,20 @@
   function bindNavigation() {
     var navItems = document.querySelectorAll(".nav-item[data-view]");
     navItems.forEach(function (item) {
-      item.addEventListener("click", async function () {
+      item.addEventListener("click", function () {
         var view = item.getAttribute("data-view");
         if (item.classList.contains("disabled")) return;
         state.view = view;
         state.error = null;
+        render();
 
         if (view === "dashboard" || view === "product-cases") {
-          await loadCases();
+          loadCases().then(function () {
+            if (state.view === view) {
+              render();
+            }
+          });
         }
-        render();
       });
     });
 
@@ -4413,15 +4527,9 @@
     // Intelligence Module Cards
     var cardInnovation = document.getElementById("card-intel-innovation");
     if (cardInnovation) {
-      cardInnovation.addEventListener("click", async function () {
+      cardInnovation.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/innovation-analysis", { method: "POST" });
-          state.innovationAnalysis = data;
-          state.view = "innovation-analysis";
-        } catch (e) { state.error = "Failed to generate innovation analysis."; }
-        state.loading = false; render();
+        openCaseModule("innovationAnalysis", "/api/cases/" + state.currentCase.id + "/innovation-analysis", "innovation-analysis", { method: "POST" });
       });
     }
 
@@ -4435,15 +4543,9 @@
 
     var cardIp = document.getElementById("card-intel-ip");
     if (cardIp) {
-      cardIp.addEventListener("click", async function () {
+      cardIp.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/ip-strategy", { method: "POST" });
-          state.ipStrategy = data;
-          state.view = "ip-strategy";
-        } catch (e) { state.error = "Failed to generate IP strategy."; }
-        state.loading = false; render();
+        openCaseModule("ipStrategy", "/api/cases/" + state.currentCase.id + "/ip-strategy", "ip-strategy", { method: "POST" });
       });
     }
 
@@ -4456,71 +4558,41 @@
 
     var cardRisk = document.getElementById("card-intel-risk");
     if (cardRisk) {
-      cardRisk.addEventListener("click", async function () {
+      cardRisk.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/risk-analysis", { method: "POST" });
-          state.riskData = data;
-          state.view = "risk";
-        } catch (e) { state.error = "Failed to generate risk analysis."; }
-        state.loading = false; render();
+        openCaseModule("riskData", "/api/cases/" + state.currentCase.id + "/risk-analysis", "risk", { method: "POST" });
       });
     }
 
     var cardEvidence = document.getElementById("card-intel-evidence");
     if (cardEvidence) {
-      cardEvidence.addEventListener("click", async function () {
+      cardEvidence.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/evidence");
-          state.evidenceData = data;
-          state.view = "evidence";
-        } catch (e) { state.error = "Failed to load evidence data."; }
-        state.loading = false; render();
+        openCaseModule("evidenceData", "/api/cases/" + state.currentCase.id + "/evidence", "evidence");
       });
     }
 
     var cardDecision = document.getElementById("card-intel-decision");
     if (cardDecision) {
-      cardDecision.addEventListener("click", async function () {
+      cardDecision.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/decision-dashboard");
-          state.dashboardData = data;
-          state.view = "dashboard-detail";
-        } catch (e) { state.error = "Failed to load decision dashboard."; }
-        state.loading = false; render();
+        openCaseModule("dashboardData", "/api/cases/" + state.currentCase.id + "/decision-dashboard", "dashboard-detail");
       });
     }
 
     var cardGraph = document.getElementById("card-intel-graph");
     if (cardGraph) {
-      cardGraph.addEventListener("click", async function () {
+      cardGraph.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/knowledge-graph");
-          state.knowledgeGraphData = data;
-          state.view = "knowledge-graph";
-        } catch (e) { state.error = "Failed to load knowledge graph."; }
-        state.loading = false; render();
+        openCaseModule("knowledgeGraphData", "/api/cases/" + state.currentCase.id + "/knowledge-graph", "knowledge-graph");
       });
     }
 
     var cardMonitoring = document.getElementById("card-intel-monitoring");
     if (cardMonitoring) {
-      cardMonitoring.addEventListener("click", async function () {
+      cardMonitoring.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/monitoring");
-          state.monitoringData = data;
-          state.view = "monitoring-center";
-        } catch (e) { state.error = "Failed to load monitoring data."; }
-        state.loading = false; render();
+        openCaseModule("monitoringData", "/api/cases/" + state.currentCase.id + "/monitoring", "monitoring-center");
       });
     }
 
@@ -4629,15 +4701,9 @@
 
     var innovationBtn = document.getElementById("open-innovation-btn");
     if (innovationBtn) {
-      innovationBtn.addEventListener("click", async function () {
+      innovationBtn.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/innovation-analysis", { method: "POST" });
-          state.innovationAnalysis = data;
-          state.view = "innovation-analysis";
-        } catch (e) { state.error = "Failed to generate innovation analysis."; }
-        state.loading = false; render();
+        openCaseModule("innovationAnalysis", "/api/cases/" + state.currentCase.id + "/innovation-analysis", "innovation-analysis", { method: "POST" });
       });
     }
 
@@ -4648,15 +4714,9 @@
 
     var ipStrategyBtn = document.getElementById("open-ip-strategy-btn");
     if (ipStrategyBtn) {
-      ipStrategyBtn.addEventListener("click", async function () {
+      ipStrategyBtn.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/ip-strategy", { method: "POST" });
-          state.ipStrategy = data;
-          state.view = "ip-strategy";
-        } catch (e) { state.error = "Failed to generate IP strategy."; }
-        state.loading = false; render();
+        openCaseModule("ipStrategy", "/api/cases/" + state.currentCase.id + "/ip-strategy", "ip-strategy", { method: "POST" });
       });
     }
 
@@ -4668,15 +4728,9 @@
     // --- Evidence & Citation (Phase 11) ---
     var evidenceBtn = document.getElementById("open-evidence-btn");
     if (evidenceBtn) {
-      evidenceBtn.addEventListener("click", async function () {
+      evidenceBtn.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/evidence");
-          state.evidenceData = data;
-          state.view = "evidence";
-        } catch (e) { state.error = "Failed to load evidence data."; }
-        state.loading = false; render();
+        openCaseModule("evidenceData", "/api/cases/" + state.currentCase.id + "/evidence", "evidence");
       });
     }
 
@@ -4684,7 +4738,6 @@
     if (backFromEvidence) {
       backFromEvidence.addEventListener("click", function () {
         state.view = "case-detail";
-        state.evidenceData = null;
         render();
       });
     }
@@ -4692,15 +4745,9 @@
     // --- Risk + Self-Extension (Phase 12) ---
     var riskBtn = document.getElementById("open-risk-btn");
     if (riskBtn) {
-      riskBtn.addEventListener("click", async function () {
+      riskBtn.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/risk-analysis", { method: "POST" });
-          state.riskData = data;
-          state.view = "risk";
-        } catch (e) { state.error = "Failed to generate risk analysis."; }
-        state.loading = false; render();
+        openCaseModule("riskData", "/api/cases/" + state.currentCase.id + "/risk-analysis", "risk", { method: "POST" });
       });
     }
 
@@ -4708,7 +4755,6 @@
     if (backFromRisk) {
       backFromRisk.addEventListener("click", function () {
         state.view = "case-detail";
-        state.riskData = null;
         render();
       });
     }
@@ -4716,15 +4762,9 @@
     // --- Decision Dashboard (Phase 13) ---
     var dashboardBtn = document.getElementById("open-dashboard-btn");
     if (dashboardBtn) {
-      dashboardBtn.addEventListener("click", async function () {
+      dashboardBtn.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/decision-dashboard");
-          state.dashboardData = data;
-          state.view = "dashboard-detail";
-        } catch (e) { state.error = "Failed to load decision dashboard."; }
-        state.loading = false; render();
+        openCaseModule("dashboardData", "/api/cases/" + state.currentCase.id + "/decision-dashboard", "dashboard-detail");
       });
     }
 
@@ -4732,7 +4772,6 @@
     if (backFromDashboard) {
       backFromDashboard.addEventListener("click", function () {
         state.view = "case-detail";
-        state.dashboardData = null;
         render();
       });
     }
@@ -4740,15 +4779,9 @@
     // --- Continuous Monitoring (Phase 14) ---
     var monitoringBtn = document.getElementById("open-monitoring-btn");
     if (monitoringBtn) {
-      monitoringBtn.addEventListener("click", async function () {
+      monitoringBtn.addEventListener("click", function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/monitoring");
-          state.monitoringData = data;
-          state.view = "monitoring-center";
-        } catch (e) { state.error = "Failed to load monitoring data."; }
-        state.loading = false; render();
+        openCaseModule("monitoringData", "/api/cases/" + state.currentCase.id + "/monitoring", "monitoring-center");
       });
     }
 
@@ -4756,7 +4789,6 @@
     if (backFromMonitoring) {
       backFromMonitoring.addEventListener("click", function () {
         state.view = "case-detail";
-        state.monitoringData = null;
         render();
       });
     }
@@ -5558,14 +5590,38 @@
   }
 
   async function loadCase(id) {
+    var existing = (state.cases || []).find(function (c) { return String(c.id) === String(id); });
+    // Reset active module transient states so they do not bleed between cases
+    state.innovationAnalysis = null;
+    state.ipStrategy = null;
+    state.regulatoryProfile = null;
+    state.riskData = null;
+    state.evidenceData = null;
+    state.dashboardData = null;
+    state.knowledgeGraphData = null;
+    state.monitoringData = null;
+
+    if (existing) {
+      state.currentCase = existing;
+      state.view = "case-detail";
+      state.error = null;
+      updateTopbarUI();
+      render();
+    }
     try {
       var data = await api("/api/cases/" + id);
       state.currentCase = data;
       state.view = "case-detail";
       state.error = null;
       saveStateToLocalStorage();
-    } catch (e) { state.error = "Failed to load case."; }
-    render();
+      updateTopbarUI();
+      render();
+    } catch (e) {
+      if (!existing) {
+        state.error = "Failed to load case.";
+        render();
+      }
+    }
   }
 
   function createCase() {
@@ -5601,7 +5657,6 @@
   // ----------------------------------------------------------------
   async function init() {
     bindNavigation();
-    await loadCases();
 
     // Default state: Always start clean on dashboard with No Active Case
     state.currentCase = null;
@@ -5610,6 +5665,12 @@
 
     updateTopbarUI();
     render();
+
+    loadCases().then(function () {
+      if (state.view === "dashboard" || state.view === "product-cases") {
+        render();
+      }
+    });
   }
 
   window.AYUR = {};
@@ -5694,7 +5755,9 @@
     scrollToTop: scrollToTop,
     navigateTo: navigateTo,
     renderProfilePage: renderProfilePage,
-    exploreDemoCase: exploreDemoCase
+    exploreDemoCase: exploreDemoCase,
+    invalidateClientApiCache: invalidateClientApiCache,
+    invalidateCaseModuleCache: invalidateCaseModuleCache
   };
 
   // Boot
