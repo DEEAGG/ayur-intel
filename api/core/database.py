@@ -1,4 +1,4 @@
-﻿"""AYUR-INTEL — Database engine and session management.
+"""AYUR-INTEL — Database engine and session management.
 
 Uses SQLAlchemy with SQLite for local development.
 To switch to PostgreSQL: change DATABASE_URL in .env.
@@ -10,7 +10,7 @@ import logging
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 logger = logging.getLogger("ayur_intel.database")
@@ -75,4 +75,16 @@ def init_db() -> None:
         Path(settings.AYURINTEL_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
     models.Base.metadata.create_all(bind=engine)
+
+    # Auto-migration: ensure is_demo column exists in product_cases for existing PostgreSQL/SQLite DBs
+    with engine.begin() as conn:
+        try:
+            if "sqlite" in str(engine.url):
+                conn.execute(text("ALTER TABLE product_cases ADD COLUMN is_demo BOOLEAN DEFAULT 0"))
+            else:
+                conn.execute(text("ALTER TABLE product_cases ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT FALSE"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_product_cases_is_demo ON product_cases (is_demo)"))
+        except Exception as e:
+            logger.debug("Column migration note: %s", e)
+
     logger.info("Database initialized successfully")
