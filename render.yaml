@@ -15,3 +15,7 @@ services:
         value: "*"
       - key: AYURINTEL_SESSION_SECRET
         generateValue: true
+      - key: AYURINTEL_PLANT_ID_PROVIDER
+        value: plantnet
+      - key: AYURINTEL_PLANTNET_PROJECT
+        value: all

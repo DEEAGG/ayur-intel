@@ -13,6 +13,9 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
+!data/ayur_intel.db
+!data/dravya.db
+!data/*.db
 
 # IDE
 .vscode/
