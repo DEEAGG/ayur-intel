@@ -222,6 +222,8 @@
     brand: "Cognitive Wellness",
     packaging: "Blister pack in outer carton with moisture barrier",
     notes: "A classical Ayurvedic formulation combining Ashwagandha (Withania somnifera) and Brahmi (Bacopa monnieri) in a modern capsule delivery system. Standardized extracts with 5% withanolides and 20% bacosides for optimal cognitive support and stress management.",
+    id: "demo-001",
+    public_id: "demo-001",
     is_demo: true,
     ai_normalized: true
   };
@@ -247,7 +249,7 @@
     }
 
     state.passportData = {
-      id: c.id || null,
+      id: c.id || c.public_id || null,
       name: c.name || "",
       product_type: c.product_type || null, // ZERO DEFAULT
       description: c.description || "",
@@ -272,8 +274,10 @@
     state.passportStep = 0;
   }
 
-  function initDemoPassport() {
-    initPassportData(DEMO_PASSPORT_DATA);
+  function initDemoPassport(demoCase) {
+    var data = demoCase || DEMO_PASSPORT_DATA;
+    initPassportData(data);
+    state.passportStep = CONV_STEPS.length - 1; // Direct jump to Review / Completed Passport screen
   }
 
   // Helper to generate dynamic formulation / product suggestions based on ingredients
@@ -958,7 +962,7 @@
       + '<button class="conv-btn-back" id="passport-back-to-questions">' + icon("arrow_back", 16) + ' Edit Questions</button>'
       + '<div style="display:flex;gap:12px;align-items:center;">'
       + '<button class="passport-btn-cta" id="passport-save-and-analyze">'
-      + icon("analytics", 18) + ' Save & Run Indian Patent Intelligence →'
+      + icon("analytics", 18) + (pd.is_demo ? ' Run Indian Patent Intelligence →' : ' Save & Run Indian Patent Intelligence →')
       + '</button>'
       + '</div>'
       + '</div>'
@@ -1757,6 +1761,50 @@
 
     var pd = (window.AYUR && window.AYUR.state && window.AYUR.state.passportData) || state.passportData;
     if (!pd) return;
+
+    // If this is an existing demo case, reuse directly without creating another case
+    if (pd.is_demo && pd.id) {
+      _isSavingPassport = true;
+      var saveBtn = document.getElementById("passport-save-and-analyze");
+      var origBtnText = "";
+      if (saveBtn) {
+        origBtnText = saveBtn.innerHTML;
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = "0.7";
+        saveBtn.style.pointerEvents = "none";
+        saveBtn.innerHTML = '<span class="spinner-sm" style="display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;margin-right:8px;vertical-align:middle;"></span> Loading Intelligence...';
+      }
+      try {
+        var caseData = null;
+        try {
+          caseData = await api("/api/cases/" + pd.id);
+        } catch (e) {
+          caseData = pd;
+        }
+        window.AYUR.state.currentCase = caseData || pd;
+        window.AYUR.state.passportData = null;
+        if (typeof window.AYUR.saveStateToLocalStorage === 'function') {
+          window.AYUR.saveStateToLocalStorage();
+        }
+        if (typeof window.AYUR.updateTopbarUI === 'function') {
+          window.AYUR.updateTopbarUI();
+        } else if (typeof updateTopbarUI === 'function') {
+          updateTopbarUI();
+        }
+        if (typeof showToast === 'function') {
+          showToast('🌿 Opening Case Intelligence for Demo Case...', 'success');
+        } else if (typeof toast === 'function') {
+          toast('🌿 Opening Case Intelligence for Demo Case...', 'success');
+        }
+        window.AYUR.state.view = 'case-detail';
+        window.AYUR.render();
+        return;
+      } catch (err) {
+        console.warn("Direct demo navigation fallback:", err);
+      } finally {
+        _isSavingPassport = false;
+      }
+    }
 
     _isSavingPassport = true;
     var saveBtn = document.getElementById("passport-save-and-analyze");

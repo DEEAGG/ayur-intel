@@ -5645,16 +5645,27 @@
     render();
   }
 
-  function exploreDemoCase() {
+  async function exploreDemoCase() {
     showToast("🌿 Opening official Ayurvedic Demo Case in Product Passport...", "info");
     state.currentCase = null;
+    var demoData = null;
+    try {
+      demoData = await api("/api/cases/demo");
+    } catch (err) {
+      console.warn("Could not fetch /api/cases/demo, using local template:", err);
+    }
+    if (!demoData && window.AYUR && window.AYUR.DEMO_PASSPORT_DATA) {
+      demoData = window.AYUR.DEMO_PASSPORT_DATA;
+    }
+
     if (window.AYUR && typeof window.AYUR.initDemoPassport === "function") {
-      window.AYUR.initDemoPassport();
-    } else if (window.AYUR && typeof window.AYUR.initPassportData === "function" && window.AYUR.DEMO_PASSPORT_DATA) {
-      window.AYUR.initPassportData(window.AYUR.DEMO_PASSPORT_DATA);
+      window.AYUR.initDemoPassport(demoData);
+    } else if (window.AYUR && typeof window.AYUR.initPassportData === "function") {
+      window.AYUR.initPassportData(demoData);
+      state.passportStep = 7;
     }
     state.view = "passport-wizard";
-    state.passportStep = 0;
+    state.passportStep = 7; // Review / Completed Passport view
     state.error = null;
     updateTopbarUI();
     saveStateToLocalStorage();
