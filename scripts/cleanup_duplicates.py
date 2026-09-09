@@ -53,31 +53,43 @@ def audit_and_clean_duplicates(dry_run: bool = False) -> dict:
                 keep_case = sorted_cases[0]
                 remove_cases = sorted_cases[1:]
 
+                # Snapshot primitive values before any database modifications
+                keep_id = keep_case.id
+                keep_public_id = keep_case.public_id
+                keep_name = keep_case.name
+                remove_items = [
+                    {"id": c.id, "public_id": c.public_id, "name": c.name}
+                    for c in remove_cases
+                ]
+
                 dup_info = {
                     "owner_id": owner_id,
                     "normalized_name": norm_name,
                     "is_demo": is_demo,
-                    "retained": {"id": keep_case.id, "public_id": keep_case.public_id, "name": keep_case.name},
-                    "duplicates": [{"id": c.id, "public_id": c.public_id, "name": c.name} for c in remove_cases]
+                    "retained": {"id": keep_id, "public_id": keep_public_id, "name": keep_name},
+                    "duplicates": remove_items
                 }
                 report.append(dup_info)
 
                 logger.info(
                     f"Duplicate group found: '{norm_name}' ({len(case_list)} copies). "
-                    f"Retaining ID={keep_case.id} ({keep_case.public_id}), "
-                    f"removing {len(remove_cases)} duplicate(s)..."
+                    f"Retaining ID={keep_id} ({keep_public_id}), "
+                    f"removing {len(remove_items)} duplicate(s)..."
                 )
 
                 if not dry_run:
-                    for c in remove_cases:
-                        if c.public_id == "demo-001":
+                    owner_obj = db.query(models.User).filter(models.User.id == owner_id).first()
+                    for item in remove_items:
+                        case_id = item["id"]
+                        public_id = item["public_id"]
+                        if public_id == "demo-001":
                             continue
-                        success = delete_product_case(db=db, owner=keep_case.owner, public_id=c.public_id)
+                        success = delete_product_case(db=db, owner=owner_obj, public_id=public_id)
                         if success:
                             deleted_count += 1
-                            logger.info(f"  [OK] Deleted duplicate case ID={c.id} ({c.public_id})")
+                            logger.info(f"  [OK] Deleted duplicate case ID={case_id} ({public_id})")
                         else:
-                            logger.warning(f"  [FAIL] Failed to delete duplicate case ID={c.id} ({c.public_id})")
+                            logger.warning(f"  [FAIL] Failed to delete duplicate case ID={case_id} ({public_id})")
 
         logger.info(
             f"Audit complete. Duplicate records found: {duplicates_found}, "
