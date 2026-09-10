@@ -77,6 +77,62 @@
   function showToast(msg, type) {
     toast(msg, type);
   }
+  // ----------------------------------------------------------------
+  // Centralized Navigation & Scroll Preservation System
+  // ----------------------------------------------------------------
+  var _viewScrollPositions = {};
+
+  function getScrollPosition() {
+    var content = document.getElementById("content");
+    var main = document.querySelector(".main");
+    var app = document.querySelector(".app");
+    return {
+      windowY: window.scrollY || window.pageYOffset || (document.documentElement && document.documentElement.scrollTop) || (document.body && document.body.scrollTop) || 0,
+      windowX: window.scrollX || window.pageXOffset || (document.documentElement && document.documentElement.scrollLeft) || (document.body && document.body.scrollLeft) || 0,
+      contentY: content ? content.scrollTop : 0,
+      mainY: main ? main.scrollTop : 0,
+      appY: app ? app.scrollTop : 0
+    };
+  }
+
+  function saveCurrentViewScrollPosition() {
+    var view = state.view;
+    if (!view) return;
+    var caseKey = (state.currentCase && (state.currentCase.public_id || state.currentCase.id)) || "global";
+    _viewScrollPositions[caseKey + ":" + view] = getScrollPosition();
+  }
+
+  function getSavedViewScrollPosition(viewName) {
+    var targetView = viewName || state.view;
+    var caseKey = (state.currentCase && (state.currentCase.public_id || state.currentCase.id)) || "global";
+    return _viewScrollPositions[caseKey + ":" + targetView] || null;
+  }
+
+  function restoreScrollPosition(pos) {
+    if (!pos) return;
+    requestAnimationFrame(function () {
+      try {
+        window.scrollTo({ top: pos.windowY, left: pos.windowX, behavior: 'instant' });
+      } catch (e) {
+        window.scrollTo(pos.windowX, pos.windowY);
+      }
+      if (document.documentElement) {
+        document.documentElement.scrollTop = pos.windowY;
+        document.documentElement.scrollLeft = pos.windowX;
+      }
+      if (document.body) {
+        document.body.scrollTop = pos.windowY;
+        document.body.scrollLeft = pos.windowX;
+      }
+      var content = document.getElementById("content");
+      if (content && typeof pos.contentY === "number") content.scrollTop = pos.contentY;
+      var main = document.querySelector(".main");
+      if (main && typeof pos.mainY === "number") main.scrollTop = pos.mainY;
+      var app = document.querySelector(".app");
+      if (app && typeof pos.appY === "number") app.scrollTop = pos.appY;
+    });
+  }
+
   function scrollToTop() {
     try {
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -93,6 +149,18 @@
     if (app) app.scrollTop = 0;
   }
   window.scrollToTop = scrollToTop;
+  window.getScrollPosition = getScrollPosition;
+  window.restoreScrollPosition = restoreScrollPosition;
+  window.saveCurrentViewScrollPosition = saveCurrentViewScrollPosition;
+
+  function navigateBackToCaseDetail() {
+    state.view = "case-detail";
+    saveStateToLocalStorage();
+    var caseKey = (state.currentCase && (state.currentCase.public_id || state.currentCase.id)) || "global";
+    var savedPos = _viewScrollPositions[caseKey + ":case-detail"];
+    render({ scroll: savedPos ? "restore" : "preserve", savedPos: savedPos });
+  }
+  window.navigateBackToCaseDetail = navigateBackToCaseDetail;
 
   window.showToast = showToast;
 
@@ -232,15 +300,16 @@
 
   async function openCaseModule(key, endpoint, targetView, httpOptions) {
     if (!state.currentCase) return;
+    saveCurrentViewScrollPosition();
     var cached = getCachedModule(state.currentCase.id, key);
     if (cached) {
       state[key] = cached;
       state.view = targetView;
-      render();
+      render({ scroll: "preserve" });
       return;
     }
     state.loading = true;
-    render();
+    render({ scroll: "preserve" });
     try {
       var data = await api(endpoint, httpOptions);
       setCachedModule(state.currentCase.id, key, data);
@@ -250,15 +319,18 @@
       state.error = "Failed to load " + targetView + ".";
     }
     state.loading = false;
-    render();
+    render({ scroll: "preserve" });
   }
 
   // ----------------------------------------------------------------
   // Render dispatcher
   // ----------------------------------------------------------------
-  function render() {
+  function render(options) {
     var content = document.getElementById("content");
     if (!content) return;
+
+    var opt = options || {};
+    var prevScroll = opt.scroll === "preserve" ? getScrollPosition() : null;
 
     var view = state.view || "dashboard";
 
@@ -271,11 +343,17 @@
 
     if (state.loading) {
       content.innerHTML = '<div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>';
+      if (opt.scroll === "preserve" && prevScroll) {
+        restoreScrollPosition(prevScroll);
+      }
       return;
     }
 
     if (state.error) {
       content.innerHTML = '<div class="error-panel">' + icon("error", 20) + '<div><h4>Error</h4><p>' + escapeHtml(state.error) + '</p></div></div>';
+      if (opt.scroll === "preserve" && prevScroll) {
+        restoreScrollPosition(prevScroll);
+      }
       return;
     }
 
@@ -287,7 +365,7 @@
       content.innerHTML = renderCaseIntelligence();
     } else if (state.view === "knowledge-hub") {
       content.innerHTML = renderKnowledgeHub();
-    } else if ((state.view === "passport-wizard" || state.view === "passport") && state.passportData) {
+    } else if (state.view === "passport-wizard" || state.view === "passport") {
       // passport.js renders the wizard
       if (window.AYUR && window.AYUR.renderPassportWizard) {
         content.innerHTML = window.AYUR.renderPassportWizard();
@@ -298,34 +376,31 @@
       content.innerHTML = renderPlantDiscovery();
     } else if (state.view === "knowledge-engine") {
       content.innerHTML = renderKnowledgeEngine();
-    } else if (state.view === "innovation-analysis" && state.innovationAnalysis) {
+    } else if (state.view === "innovation-analysis") {
       content.innerHTML = renderInnovationAnalysis();
     } else if (state.view === "patent-intelligence") {
       content.innerHTML = renderPatentIntelligence();
-    } else if (state.view === "patent-deep-analysis" && state.patentDeepAnalysis) {
+    } else if (state.view === "patent-deep-analysis") {
       content.innerHTML = renderPatentDeepAnalysis();
-    } else if (state.view === "ip-strategy" && state.ipStrategy) {
+    } else if (state.view === "ip-strategy") {
       content.innerHTML = renderIPStrategy();
     } else if (state.view === "regulatory-select") {
       content.innerHTML = renderRegulatorySelect();
-    } else if (state.view === "regulatory-intelligence" && state.regulatoryProfile) {
+    } else if (state.view === "regulatory-intelligence") {
       content.innerHTML = renderRegulatoryIntelligence();
-    } else if (state.view === "jurisdiction-comparison" && state.jurisdictionComparison) {
+    } else if (state.view === "jurisdiction-comparison") {
       content.innerHTML = renderJurisdictionComparison();
     } else if (state.view === "evidence") {
       content.innerHTML = renderEvidenceView();
-    } else if (state.view === "risk" && state.riskData) {
+    } else if (state.view === "risk") {
       content.innerHTML = renderRiskView();
-    } else if (state.view === "dashboard-detail" && state.dashboardData) {
+    } else if (state.view === "dashboard-detail") {
       content.innerHTML = renderDecisionDashboard();
-    } else if (state.view === "monitoring-center" && state.monitoringData) {
+    } else if (state.view === "monitoring-center") {
       content.innerHTML = renderMonitoringCenter();
-    } else if (state.view === "knowledge-graph" && state.knowledgeGraphData) {
+    } else if (state.view === "knowledge-graph") {
       content.innerHTML = renderKnowledgeGraph();
-    } else if (state.view === "source-router" && state.sourceRouterData) {
-      content.innerHTML = renderSourceRouter();
     } else if (state.view === "source-router") {
-      // Sidebar nav to source-router without case data
       content.innerHTML = renderSourceRouter();
     } else if (state.view === "review-queue") {
       content.innerHTML = renderReviewQueue();
@@ -333,8 +408,6 @@
       content.innerHTML = renderSettings();
     } else if (state.view === "profile") {
       content.innerHTML = renderProfilePage();
-    } else if (state.view === "monitoring-center") {
-      content.innerHTML = renderMonitoringCenter();
     } else {
       content.innerHTML = renderDashboard();
     }
@@ -343,7 +416,19 @@
     bindEvents();
     if ((state.view === 'passport-wizard' || state.view === 'passport') && window.AYUR && window.AYUR.bindPassportEvents) { window.AYUR.bindPassportEvents(); }
 
-    scrollToTop();
+    // Intentional Scroll Rules
+    if (opt.scroll === "preserve" && prevScroll) {
+      restoreScrollPosition(prevScroll);
+    } else if (opt.scroll === "restore" && opt.savedPos) {
+      restoreScrollPosition(opt.savedPos);
+    } else if (opt.scroll === "top") {
+      scrollToTop();
+    } else {
+      var topLevelViews = ["dashboard", "product-cases", "knowledge-hub", "settings", "profile"];
+      if (topLevelViews.indexOf(state.view) !== -1) {
+        scrollToTop();
+      }
+    }
 
     // Initialize graph visualization if on knowledge-graph view
     if (state.view === 'knowledge-graph' && state.knowledgeGraphData) {
@@ -1101,7 +1186,7 @@
                 <h2>💡 Innovation Analysis · ${escapeHtml(result.product_name || 'Product')}</h2>
                 <div class="ci-meta">
                     <span class="ci-badge stage">${escapeHtml(result.confidence || 'Medium')} Confidence</span>
-                    <button class="ci-close-btn" onclick="window.AYUR.state.view='case-detail';window.AYUR.render();">← Back to Case</button>
+                    <button class="ci-close-btn" onclick="if(window.AYUR){window.AYUR.navigateBackToCaseDetail();}">← Back to Case</button>
                 </div>
             </div>
             
@@ -1243,7 +1328,6 @@
     `;
 
     if (content) content.innerHTML = html;
-    scrollToTop();
     return html;
   }
 
@@ -1604,7 +1688,7 @@
         <div class="ip-disclaimer"><p>⚠️ ${escapeHtml(result.disclaimer || '')}</p></div>
         
         <div class="ip-actions">
-          <button onclick="window.AYUR.state.view='case-detail';window.AYUR.render();" class="ip-action-btn secondary">← Back to Case</button>
+          <button onclick="if(window.AYUR){window.AYUR.navigateBackToCaseDetail();}" class="ip-action-btn secondary">← Back to Case</button>
           <button onclick="showToast('📄 Export coming soon!', 'info')" class="ip-action-btn primary">📄 Export Roadmap</button>
           <button onclick="saveIndicatorStatus();showToast('💾 Progress saved!', 'success')" class="ip-action-btn primary">💾 Save Progress</button>
         </div>
@@ -1612,7 +1696,6 @@
     `;
 
     if (content) content.innerHTML = html;
-    scrollToTop();
     return html;
   }
 
@@ -2319,15 +2402,18 @@
       return;
     }
 
+    // Save scroll position of Case Intelligence before opening Risk
+    saveCurrentViewScrollPosition();
+
     var cacheKey = "riskAssessment";
     if (!forceReassess) {
       var cached = getCachedModule(c.id, cacheKey) || getCachedModule(c.id, "riskData");
       if (cached) {
         state.riskData = cached;
+        state.riskLoading = false;
         state.view = "risk";
         saveStateToLocalStorage();
-        render();
-        scrollToTop();
+        render({ scroll: "preserve" });
         return;
       }
     }
@@ -2336,18 +2422,17 @@
     state.riskLoading = true;
     state.riskLoadingStep = 1;
     state.view = "risk";
-    render();
-    scrollToTop();
+    render({ scroll: "preserve" });
 
     // Visual step sequence
     var stepTimer1 = setTimeout(function() {
-      if (state.riskLoading) { state.riskLoadingStep = 2; render(); }
+      if (state.riskLoading) { state.riskLoadingStep = 2; render({ scroll: "preserve" }); }
     }, 450);
     var stepTimer2 = setTimeout(function() {
-      if (state.riskLoading) { state.riskLoadingStep = 3; render(); }
+      if (state.riskLoading) { state.riskLoadingStep = 3; render({ scroll: "preserve" }); }
     }, 900);
     var stepTimer3 = setTimeout(function() {
-      if (state.riskLoading) { state.riskLoadingStep = 4; render(); }
+      if (state.riskLoading) { state.riskLoadingStep = 4; render({ scroll: "preserve" }); }
     }, 1400);
 
     try {
@@ -2385,8 +2470,7 @@
       clearTimeout(stepTimer3);
       _isRiskAssessmentGenerating = false;
       state.riskLoading = false;
-      render();
-      scrollToTop();
+      render({ scroll: "preserve" });
     }
   }
   window.generateRiskAssessment = generateRiskAssessment;
@@ -2395,7 +2479,7 @@
     var s = step || 1;
     var html = ''
       + '<div class="view-header">'
-      + '<button class="btn btn-ghost btn-sm" onclick="if(window.AYUR){window.AYUR.state.view=\'case-detail\';window.AYUR.render();window.AYUR.scrollToTop();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
+      + '<button class="btn btn-ghost btn-sm" onclick="if(window.AYUR){window.AYUR.navigateBackToCaseDetail();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
       + '</div>'
       + '<div class="risk-loading-shell">'
       + '<div style="font-size:36px;margin-bottom:12px">⚠️</div>'
@@ -2438,7 +2522,7 @@
     if (!rd) {
       return ''
         + '<div class="view-header">'
-        + '<button class="btn btn-ghost btn-sm" onclick="if(window.AYUR){window.AYUR.state.view=\'case-detail\';window.AYUR.render();window.AYUR.scrollToTop();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
+        + '<button class="btn btn-ghost btn-sm" onclick="if(window.AYUR){window.AYUR.navigateBackToCaseDetail();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
         + '</div>'
         + '<div class="card"><div class="card-body" style="text-align:center;padding:40px">'
         + '<p style="color:#b0c8c0;font-size:16px;margin-bottom:16px">No Risk Assessment has been generated yet for this product case.</p>'
@@ -2472,7 +2556,7 @@
 
     var html = ''
       + '<div class="view-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">'
-      + '<button class="btn btn-ghost btn-sm" id="back-from-risk" onclick="if(window.AYUR){window.AYUR.state.view=\'case-detail\';window.AYUR.render();window.AYUR.scrollToTop();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
+      + '<button class="btn btn-ghost btn-sm" id="back-from-risk" onclick="if(window.AYUR){window.AYUR.navigateBackToCaseDetail();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
       + '<button class="btn btn-outline btn-sm" id="refresh-risk-btn" onclick="generateRiskAssessment(null, true)" title="Run a fresh AI assessment with latest case evidence">' + icon('refresh', 16) + ' Refresh AI Assessment</button>'
       + '</div>';
 
@@ -3303,18 +3387,18 @@
       showToast('⚠️ No active product case found', 'error');
       return;
     }
+    saveCurrentViewScrollPosition();
     var cacheKey = "regulatoryProfile:" + j;
     var cached = getCachedModule(c.id, cacheKey) || getCachedModule(c.id, "regulatoryProfile");
     if (cached && (cached.jurisdiction === j || !j)) {
       state.regulatoryProfile = cached;
       state.view = "regulatory-intelligence";
       saveStateToLocalStorage();
-      render();
-      scrollToTop();
+      render({ scroll: "preserve" });
       return;
     }
     state.loading = true;
-    render();
+    render({ scroll: "preserve" });
     try {
       var data = null;
       try {
@@ -3338,8 +3422,7 @@
       state.error = "Failed to generate regulatory analysis.";
     }
     state.loading = false;
-    render();
-    scrollToTop();
+    render({ scroll: "preserve" });
   }
   window.generateRegulatoryAnalysis = generateRegulatoryAnalysis;
 
@@ -3366,7 +3449,7 @@
 
     var html = ''
       + '<div class="view-header">'
-      + '<button class="btn btn-ghost btn-sm" id="back-from-regulatory-intel" onclick="if(window.AYUR){window.AYUR.state.view=\'case-detail\';window.AYUR.render();window.AYUR.scrollToTop();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
+      + '<button class="btn btn-ghost btn-sm" id="back-from-regulatory-intel" onclick="if(window.AYUR){window.AYUR.navigateBackToCaseDetail();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
       + '</div>'
 
       // Header Card
@@ -4243,12 +4326,12 @@
         if (item.classList.contains("disabled")) return;
         state.view = view;
         state.error = null;
-        render();
+        render({ scroll: "top" });
 
         if (view === "dashboard" || view === "product-cases") {
           loadCases().then(function () {
             if (state.view === view) {
-              render();
+              render({ scroll: "preserve" });
             }
           });
         }
@@ -4263,7 +4346,7 @@
     if (tbNewBtn) tbNewBtn.addEventListener("click", createCase);
 
     var tbSettingsBtn = document.getElementById("topbar-settings-btn");
-    if (tbSettingsBtn) tbSettingsBtn.addEventListener("click", function () { state.view = "settings"; render(); });
+    if (tbSettingsBtn) tbSettingsBtn.addEventListener("click", function () { state.view = "settings"; render({ scroll: "top" }); });
 
     // Topbar Case Context Switcher
     var tbContext = document.getElementById("topbar-case-context");
@@ -5394,22 +5477,25 @@
 
     // Back buttons
     var backInnovation = document.getElementById("back-from-innovation");
-    if (backInnovation) backInnovation.addEventListener("click", function () { state.view = "case-detail"; state.innovationAnalysis = null; render(); });
+    if (backInnovation) backInnovation.addEventListener("click", function () { state.innovationAnalysis = null; navigateBackToCaseDetail(); });
 
     var backPatent = document.getElementById("back-from-patent");
-    if (backPatent) backPatent.addEventListener("click", function () { state.view = "case-detail"; state.patentSearchResults = null; state.patentSavedResults = null; render(); });
+    if (backPatent) backPatent.addEventListener("click", function () { state.patentSearchResults = null; state.patentSavedResults = null; navigateBackToCaseDetail(); });
 
     var backDeepAnalysis = document.getElementById("back-from-deep-analysis");
-    if (backDeepAnalysis) backDeepAnalysis.addEventListener("click", function () { state.view = "patent-intelligence"; state.patentDeepAnalysis = null; render(); });
+    if (backDeepAnalysis) backDeepAnalysis.addEventListener("click", function () { state.view = "patent-intelligence"; state.patentDeepAnalysis = null; render({ scroll: "preserve" }); });
 
     var backIP = document.getElementById("back-from-ip-strategy");
-    if (backIP) backIP.addEventListener("click", function () { state.view = "case-detail"; state.ipStrategy = null; render(); });
+    if (backIP) backIP.addEventListener("click", function () { state.ipStrategy = null; navigateBackToCaseDetail(); });
 
     var backFromRegSelect = document.getElementById("back-from-regulatory-select");
-    if (backFromRegSelect) backFromRegSelect.addEventListener("click", function () { state.view = "case-detail"; render(); });
+    if (backFromRegSelect) backFromRegSelect.addEventListener("click", function () { navigateBackToCaseDetail(); });
 
     var backFromReg = document.getElementById("back-from-regulatory");
-    if (backFromReg) backFromReg.addEventListener("click", function () { state.view = "case-detail"; state.regulatoryProfile = null; render(); });
+    if (backFromReg) backFromReg.addEventListener("click", function () { state.regulatoryProfile = null; navigateBackToCaseDetail(); });
+
+    var backFromDashboard = document.getElementById("back-from-dashboard");
+    if (backFromDashboard) backFromDashboard.addEventListener("click", function () { navigateBackToCaseDetail(); });
 
     // Regulatory jurisdiction selection
     document.querySelectorAll(".reg-jur-btn").forEach(function (btn) {
@@ -5963,10 +6049,29 @@
     }
   };
 
-  function navigateTo(viewName) {
+  function navigateTo(viewName, options) {
+    var opt = options || {};
+    var topLevelViews = ["dashboard", "product-cases", "knowledge-hub", "settings", "profile"];
+    var isTopLevel = topLevelViews.indexOf(viewName) !== -1;
+
+    // Save current view scroll position if leaving an active view
+    if (state.view) {
+      saveCurrentViewScrollPosition();
+    }
+
     state.view = viewName;
     saveStateToLocalStorage();
-    render();
+
+    if (opt.scroll) {
+      render(opt);
+    } else if (isTopLevel) {
+      render({ scroll: "top" });
+    } else if (viewName === "case-detail" && opt.restorePrevious) {
+      var savedPos = getSavedViewScrollPosition("case-detail");
+      render({ scroll: savedPos ? "restore" : "preserve", savedPos: savedPos });
+    } else {
+      render({ scroll: "preserve" });
+    }
   }
 
   // ----------------------------------------------------------------
@@ -6014,7 +6119,7 @@
       state.view = "case-detail";
       state.error = null;
       updateTopbarUI();
-      render();
+      render({ scroll: "top" });
     }
     try {
       var data = await api("/api/cases/" + id);
@@ -6023,11 +6128,11 @@
       state.error = null;
       saveStateToLocalStorage();
       updateTopbarUI();
-      render();
+      render(existing ? { scroll: "preserve" } : { scroll: "top" });
     } catch (e) {
       if (!existing) {
         state.error = "Failed to load case.";
-        render();
+        render({ scroll: "top" });
       }
     }
   }
@@ -6041,7 +6146,7 @@
     state.passportStep = 0;
     updateTopbarUI();
     saveStateToLocalStorage();
-    render();
+    render({ scroll: "top" });
   }
 
   async function exploreDemoCase() {
@@ -6068,7 +6173,7 @@
     state.error = null;
     updateTopbarUI();
     saveStateToLocalStorage();
-    render();
+    render({ scroll: "top" });
   }
 
   // ----------------------------------------------------------------
@@ -6083,11 +6188,11 @@
     state.passportData = null;
 
     updateTopbarUI();
-    render();
+    render({ scroll: "top" });
 
     loadCases().then(function () {
       if (state.view === "dashboard" || state.view === "product-cases") {
-        render();
+        render({ scroll: "preserve" });
       }
     });
   }
@@ -6176,6 +6281,10 @@
     openRegulatoryGuide: openRegulatoryGuide,
     editProductPassport: editProductPassport,
     scrollToTop: scrollToTop,
+    getScrollPosition: getScrollPosition,
+    restoreScrollPosition: restoreScrollPosition,
+    saveCurrentViewScrollPosition: saveCurrentViewScrollPosition,
+    navigateBackToCaseDetail: navigateBackToCaseDetail,
     navigateTo: navigateTo,
     renderProfilePage: renderProfilePage,
     exploreDemoCase: exploreDemoCase,
