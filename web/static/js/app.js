@@ -81,6 +81,7 @@
   // Centralized Navigation & Scroll Preservation System
   // ----------------------------------------------------------------
   var _viewScrollPositions = {};
+  var _currentActiveView = null;
 
   function getScrollPosition() {
     var content = document.getElementById("content");
@@ -154,11 +155,12 @@
   window.saveCurrentViewScrollPosition = saveCurrentViewScrollPosition;
 
   function navigateBackToCaseDetail() {
+    saveCurrentViewScrollPosition();
     state.view = "case-detail";
     saveStateToLocalStorage();
     var caseKey = (state.currentCase && (state.currentCase.public_id || state.currentCase.id)) || "global";
     var savedPos = _viewScrollPositions[caseKey + ":case-detail"];
-    render({ scroll: savedPos ? "restore" : "preserve", savedPos: savedPos });
+    render({ scroll: savedPos ? "restore" : "top", savedPos: savedPos });
   }
   window.navigateBackToCaseDetail = navigateBackToCaseDetail;
 
@@ -181,6 +183,8 @@
       return;
     }
     
+    saveCurrentViewScrollPosition();
+
     // Initialize passport data with existing case data
     if (window.AYUR && typeof window.AYUR.initPassportData === 'function') {
       window.AYUR.initPassportData(caseData);
@@ -196,7 +200,7 @@
       window.AYUR.updateTopbarUI();
     }
     if (typeof window.AYUR.render === 'function') {
-      window.AYUR.render();
+      window.AYUR.render({ scroll: "top" });
     }
     showToast('✏️ Editing product: ' + (caseData.name || 'Product'), 'info');
   }
@@ -300,26 +304,31 @@
 
   async function openCaseModule(key, endpoint, targetView, httpOptions) {
     if (!state.currentCase) return;
-    saveCurrentViewScrollPosition();
+    var isNewView = state.view !== targetView;
+    if (isNewView) {
+      saveCurrentViewScrollPosition();
+    }
     var cached = getCachedModule(state.currentCase.id, key);
     if (cached) {
       state[key] = cached;
       state.view = targetView;
-      render({ scroll: "preserve" });
+      saveStateToLocalStorage();
+      render({ scroll: isNewView ? "top" : "preserve" });
       return;
     }
     state.loading = true;
-    render({ scroll: "preserve" });
+    render({ scroll: isNewView ? "top" : "preserve" });
     try {
       var data = await api(endpoint, httpOptions);
       setCachedModule(state.currentCase.id, key, data);
       state[key] = data;
       state.view = targetView;
+      saveStateToLocalStorage();
     } catch (e) {
       state.error = "Failed to load " + targetView + ".";
     }
     state.loading = false;
-    render({ scroll: "preserve" });
+    render({ scroll: isNewView ? "top" : "preserve" });
   }
 
   // ----------------------------------------------------------------
@@ -330,12 +339,12 @@
     if (!content) return;
 
     var opt = options || {};
-    var prevScroll = opt.scroll === "preserve" ? getScrollPosition() : null;
-
-    var view = state.view || "dashboard";
+    var prevView = _currentActiveView;
+    var targetView = state.view || "dashboard";
+    var prevScroll = (opt.scroll === "preserve" || (opt.scroll === undefined && prevView === targetView)) ? getScrollPosition() : null;
 
     // Clear active case when going to dashboard
-    if (view === "dashboard") {
+    if (targetView === "dashboard") {
       state.currentCase = null;
       updateTopbarUI();
       saveStateToLocalStorage();
@@ -345,6 +354,8 @@
       content.innerHTML = '<div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>';
       if (opt.scroll === "preserve" && prevScroll) {
         restoreScrollPosition(prevScroll);
+      } else if (opt.scroll === "top" || (opt.scroll === undefined && prevView !== targetView)) {
+        scrollToTop();
       }
       return;
     }
@@ -353,6 +364,8 @@
       content.innerHTML = '<div class="error-panel">' + icon("error", 20) + '<div><h4>Error</h4><p>' + escapeHtml(state.error) + '</p></div></div>';
       if (opt.scroll === "preserve" && prevScroll) {
         restoreScrollPosition(prevScroll);
+      } else if (opt.scroll === "top" || (opt.scroll === undefined && prevView !== targetView)) {
+        scrollToTop();
       }
       return;
     }
@@ -412,21 +425,31 @@
       content.innerHTML = renderDashboard();
     }
 
+    _currentActiveView = targetView;
+
     updateTopBarAndActiveNav(state.view);
     bindEvents();
     if ((state.view === 'passport-wizard' || state.view === 'passport') && window.AYUR && window.AYUR.bindPassportEvents) { window.AYUR.bindPassportEvents(); }
 
-    // Intentional Scroll Rules
-    if (opt.scroll === "preserve" && prevScroll) {
-      restoreScrollPosition(prevScroll);
+    // Intentional Scroll Rules:
+    // RULE 1: EVERY NEW PAGE / VIEW / MODULE MUST OPEN AT TOP
+    // RULE 2: ACTIONS INSIDE THE SAME PAGE MUST PRESERVE POSITION
+    // RULE 3: BACK RESTORES PARENT POSITION
+    if (opt.scroll === "preserve") {
+      if (prevScroll) restoreScrollPosition(prevScroll);
     } else if (opt.scroll === "restore" && opt.savedPos) {
       restoreScrollPosition(opt.savedPos);
+    } else if (opt.scroll === "restore") {
+      var savedPos = getSavedViewScrollPosition(targetView);
+      if (savedPos) restoreScrollPosition(savedPos);
+      else scrollToTop();
     } else if (opt.scroll === "top") {
       scrollToTop();
     } else {
-      var topLevelViews = ["dashboard", "product-cases", "knowledge-hub", "settings", "profile"];
-      if (topLevelViews.indexOf(state.view) !== -1) {
+      if (prevView !== targetView) {
         scrollToTop();
+      } else if (prevScroll) {
+        restoreScrollPosition(prevScroll);
       }
     }
 
@@ -1065,13 +1088,18 @@
   }
 
   async function runInnovationAnalysis() {
-    const state = (window.AYUR && window.AYUR.state) || state;
-    const caseData = state.currentCase;
+    const s = (window.AYUR && window.AYUR.state) || state;
+    const caseData = s.currentCase;
 
     if (!caseData || !caseData.id) {
       if (typeof showToast === 'function') showToast('⚠️ Please select a product case first', 'warning');
       else if (typeof toast === 'function') toast('⚠️ Please select a product case first', 'warning');
       return;
+    }
+
+    var isNewView = s.view !== 'innovation-analysis';
+    if (isNewView) {
+      saveCurrentViewScrollPosition();
     }
 
     if (typeof showToast === 'function') showToast('🔬 Analyzing innovation...', 'info');
@@ -1088,9 +1116,13 @@
       }
 
       const result = await response.json();
-      state.innovationAnalysis = result;
-      state.view = 'innovation-analysis';
+      s.innovationAnalysis = result;
+      s.view = 'innovation-analysis';
+      if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
       renderInnovationResults(result);
+      if (isNewView) {
+        scrollToTop();
+      }
       if (typeof showToast === 'function') showToast('✅ Innovation analysis complete!', 'success');
       else if (typeof toast === 'function') toast('✅ Innovation analysis complete!', 'success');
 
@@ -1560,11 +1592,15 @@
   loadIndicatorStatus();
 
   async function generateIPStrategy() {
-    const state = window.AYUR.state;
-    const caseData = state.currentCase;
+    const s = (window.AYUR && window.AYUR.state) || state;
+    const caseData = s.currentCase;
     if (!caseData || !caseData.id) {
       showToast('⚠️ Please select a product case first', 'warning');
       return;
+    }
+    var isNewView = s.view !== 'ip-strategy';
+    if (isNewView) {
+      saveCurrentViewScrollPosition();
     }
     showToast('🗺️ Generating IP Strategy Roadmap...', 'info');
     try {
@@ -1574,9 +1610,13 @@
       });
       if (!response.ok) throw new Error('IP Strategy generation failed');
       const result = await response.json();
-      state.ipStrategy = result;
-      state.view = 'ip-strategy';
+      s.ipStrategy = result;
+      s.view = 'ip-strategy';
+      if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
       renderIPStrategyResult(result);
+      if (isNewView) {
+        scrollToTop();
+      }
       showToast('✅ IP Strategy Roadmap generated!', 'success');
     } catch (error) {
       console.error('IP Strategy error:', error);
@@ -1643,7 +1683,7 @@
             <h2>🗺️ IP Strategy Roadmap</h2>
             <p>${escapeHtml(result.product_name || 'Product')} · India-Specific IP Protection Plan</p>
           </div>
-          <button onclick="window.AYUR.state.view='case-detail';window.AYUR.render();" class="ip-strategy-back">← Back</button>
+          <button onclick="if(window.AYUR){window.AYUR.navigateBackToCaseDetail();}" class="ip-strategy-back">← Back</button>
         </div>
         
         <div class="ip-readiness-card ${result.readiness_color || 'medium'}">
@@ -2402,8 +2442,11 @@
       return;
     }
 
-    // Save scroll position of Case Intelligence before opening Risk
-    saveCurrentViewScrollPosition();
+    var isNewView = state.view !== "risk";
+    if (isNewView) {
+      // Save scroll position of Case Intelligence before opening Risk
+      saveCurrentViewScrollPosition();
+    }
 
     var cacheKey = "riskAssessment";
     if (!forceReassess) {
@@ -2413,7 +2456,7 @@
         state.riskLoading = false;
         state.view = "risk";
         saveStateToLocalStorage();
-        render({ scroll: "preserve" });
+        render({ scroll: isNewView ? "top" : "preserve" });
         return;
       }
     }
@@ -2422,7 +2465,7 @@
     state.riskLoading = true;
     state.riskLoadingStep = 1;
     state.view = "risk";
-    render({ scroll: "preserve" });
+    render({ scroll: isNewView ? "top" : "preserve" });
 
     // Visual step sequence
     var stepTimer1 = setTimeout(function() {
@@ -3387,18 +3430,21 @@
       showToast('⚠️ No active product case found', 'error');
       return;
     }
-    saveCurrentViewScrollPosition();
+    var isNewView = state.view !== "regulatory-intelligence";
+    if (isNewView) {
+      saveCurrentViewScrollPosition();
+    }
     var cacheKey = "regulatoryProfile:" + j;
     var cached = getCachedModule(c.id, cacheKey) || getCachedModule(c.id, "regulatoryProfile");
     if (cached && (cached.jurisdiction === j || !j)) {
       state.regulatoryProfile = cached;
       state.view = "regulatory-intelligence";
       saveStateToLocalStorage();
-      render({ scroll: "preserve" });
+      render({ scroll: isNewView ? "top" : "preserve" });
       return;
     }
     state.loading = true;
-    render({ scroll: "preserve" });
+    render({ scroll: isNewView ? "top" : "preserve" });
     try {
       var data = null;
       try {
@@ -3422,7 +3468,7 @@
       state.error = "Failed to generate regulatory analysis.";
     }
     state.loading = false;
-    render({ scroll: "preserve" });
+    render({ scroll: isNewView ? "top" : "preserve" });
   }
   window.generateRegulatoryAnalysis = generateRegulatoryAnalysis;
 
@@ -5029,8 +5075,11 @@
     var cardPatent = document.getElementById("card-intel-patent");
     if (cardPatent) {
       cardPatent.addEventListener("click", function () {
+        if (state.view !== "patent-intelligence") {
+          saveCurrentViewScrollPosition();
+        }
         state.view = "patent-intelligence";
-        render();
+        render({ scroll: "top" });
       });
     }
 
@@ -5091,13 +5140,16 @@
     var cardRouter = document.getElementById("card-intel-router");
     if (cardRouter) {
       cardRouter.addEventListener("click", async function () {
-        state.loading = true; render();
+        if (state.view !== "source-router") {
+          saveCurrentViewScrollPosition();
+        }
+        state.loading = true; render({ scroll: "top" });
         try {
           var data = await api("/api/source-router/sources");
           state.sourceRouterData = { sources: data, routingResult: null, question: '' };
           state.view = "source-router";
         } catch (e) { state.error = "Failed to load source router."; }
-        state.loading = false; render();
+        state.loading = false; render({ scroll: "top" });
       });
     }
 
@@ -5201,7 +5253,13 @@
 
     var patentBtn = document.getElementById("open-patent-btn");
     if (patentBtn) {
-      patentBtn.addEventListener("click", function () { state.view = "patent-intelligence"; render(); });
+      patentBtn.addEventListener("click", function () {
+        if (state.view !== "patent-intelligence") {
+          saveCurrentViewScrollPosition();
+        }
+        state.view = "patent-intelligence";
+        render({ scroll: "top" });
+      });
     }
 
     var ipStrategyBtn = document.getElementById("open-ip-strategy-btn");
@@ -5214,7 +5272,13 @@
 
     var regulatoryBtn = document.getElementById("open-regulatory-btn");
     if (regulatoryBtn) {
-      regulatoryBtn.addEventListener("click", function () { state.view = "regulatory-select"; render(); });
+      regulatoryBtn.addEventListener("click", function () {
+        if (state.view !== "regulatory-select") {
+          saveCurrentViewScrollPosition();
+        }
+        state.view = "regulatory-select";
+        render({ scroll: "top" });
+      });
     }
 
     // --- Evidence & Citation (Phase 11) ---
@@ -5229,8 +5293,7 @@
     var backFromEvidence = document.getElementById("back-from-evidence");
     if (backFromEvidence) {
       backFromEvidence.addEventListener("click", function () {
-        state.view = "case-detail";
-        render();
+        navigateBackToCaseDetail();
       });
     }
 
@@ -5245,8 +5308,7 @@
     var backFromRisk = document.getElementById("back-from-risk");
     if (backFromRisk) {
       backFromRisk.addEventListener("click", function () {
-        state.view = "case-detail";
-        render();
+        navigateBackToCaseDetail();
       });
     }
 
@@ -5262,8 +5324,7 @@
     var backFromDashboard = document.getElementById("back-from-dashboard");
     if (backFromDashboard) {
       backFromDashboard.addEventListener("click", function () {
-        state.view = "case-detail";
-        render();
+        navigateBackToCaseDetail();
       });
     }
 
@@ -5279,8 +5340,7 @@
     var backFromMonitoring = document.getElementById("back-from-monitoring");
     if (backFromMonitoring) {
       backFromMonitoring.addEventListener("click", function () {
-        state.view = "case-detail";
-        render();
+        navigateBackToCaseDetail();
       });
     }
 
@@ -5288,14 +5348,14 @@
     if (checkNowBtn) {
       checkNowBtn.addEventListener("click", async function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
+        state.loading = true; render({ scroll: "preserve" });
         try {
           var runResult = await api("/api/cases/" + state.currentCase.id + "/monitoring/run", { method: "POST" });
           toast('Monitoring check complete. ' + (runResult.alerts_created || 0) + ' alerts created.', 'success');
           var data = await api("/api/cases/" + state.currentCase.id + "/monitoring");
           state.monitoringData = data;
         } catch (e) { state.error = "Monitoring check failed."; }
-        state.loading = false; render();
+        state.loading = false; render({ scroll: "preserve" });
       });
     }
 
@@ -5314,7 +5374,7 @@
           state.monitoringData = data;
           toast('Monitoring ' + (!config.enabled ? 'resumed' : 'paused'), 'success');
         } catch (e) { state.error = "Failed to update monitoring."; }
-        state.loading = false; render();
+        state.loading = false; render({ scroll: "preserve" });
       });
     }
 
@@ -5333,7 +5393,7 @@
           toast('Alert updated to ' + action, 'success');
           var data = await api("/api/cases/" + state.currentCase.id + "/monitoring");
           state.monitoringData = data;
-          render();
+          render({ scroll: "preserve" });
         } catch (e) { state.error = "Failed to update alert."; }
       });
     });
@@ -5343,22 +5403,15 @@
     if (knowledgeGraphBtn) {
       knowledgeGraphBtn.addEventListener("click", async function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/knowledge-graph");
-          state.knowledgeGraphData = data;
-          state.view = "knowledge-graph";
-        } catch (e) { state.error = "Failed to load knowledge graph."; }
-        state.loading = false; render();
+        openCaseModule("knowledgeGraphData", "/api/cases/" + state.currentCase.id + "/knowledge-graph", "knowledge-graph");
       });
     }
 
     var backFromKnowledgeGraph = document.getElementById("back-from-knowledge-graph");
     if (backFromKnowledgeGraph) {
       backFromKnowledgeGraph.addEventListener("click", function () {
-        state.view = "case-detail";
         state.knowledgeGraphData = null;
-        render();
+        navigateBackToCaseDetail();
       });
     }
 
@@ -5368,7 +5421,7 @@
       graphSearchBtn.addEventListener("click", async function () {
         var q = document.getElementById("graph-search-input");
         if (!q || !q.value.trim() || !state.currentCase) return;
-        state.loading = true; render();
+        state.loading = true; render({ scroll: "preserve" });
         try {
           var data = await api("/api/cases/" + state.currentCase.id + "/knowledge-graph/search?q=" + encodeURIComponent(q.value.trim()));
           if (data.matching_nodes && data.matching_nodes.length > 0) {
@@ -5379,7 +5432,7 @@
             toast('No matches found', 'info');
           }
         } catch (e) { state.error = "Search failed."; }
-        state.loading = false; render();
+        state.loading = false; render({ scroll: "preserve" });
       });
     }
 
@@ -5413,22 +5466,24 @@
     if (sourceRouterBtn) {
       sourceRouterBtn.addEventListener("click", async function () {
         if (!state.currentCase) return;
-        state.loading = true; render();
+        if (state.view !== "source-router") {
+          saveCurrentViewScrollPosition();
+        }
+        state.loading = true; render({ scroll: "top" });
         try {
           var data = await api("/api/source-router/sources");
           state.sourceRouterData = { sources: data, routingResult: null, question: '' };
           state.view = "source-router";
         } catch (e) { state.error = "Failed to load source router."; }
-        state.loading = false; render();
+        state.loading = false; render({ scroll: "top" });
       });
     }
 
     var backFromSourceRouter = document.getElementById("back-from-source-router");
     if (backFromSourceRouter) {
       backFromSourceRouter.addEventListener("click", function () {
-        state.view = "case-detail";
         state.sourceRouterData = null;
-        render();
+        navigateBackToCaseDetail();
       });
     }
 
@@ -6051,11 +6106,9 @@
 
   function navigateTo(viewName, options) {
     var opt = options || {};
-    var topLevelViews = ["dashboard", "product-cases", "knowledge-hub", "settings", "profile"];
-    var isTopLevel = topLevelViews.indexOf(viewName) !== -1;
 
     // Save current view scroll position if leaving an active view
-    if (state.view) {
+    if (state.view && state.view !== viewName) {
       saveCurrentViewScrollPosition();
     }
 
@@ -6064,13 +6117,11 @@
 
     if (opt.scroll) {
       render(opt);
-    } else if (isTopLevel) {
-      render({ scroll: "top" });
     } else if (viewName === "case-detail" && opt.restorePrevious) {
       var savedPos = getSavedViewScrollPosition("case-detail");
-      render({ scroll: savedPos ? "restore" : "preserve", savedPos: savedPos });
+      render({ scroll: savedPos ? "restore" : "top", savedPos: savedPos });
     } else {
-      render({ scroll: "preserve" });
+      render({ scroll: "top" });
     }
   }
 
