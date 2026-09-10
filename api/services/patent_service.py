@@ -149,12 +149,7 @@ def _relevance_to_dict(rel: PatentRelevance) -> dict:
         "relevance_score": score,
         "evidence_basis": rel.evidence_basis or "TITLE_ABSTRACT",
         "evidence_coverage": rel.evidence_coverage or "STANDARD",
-        "score_breakdown": score_breakdown or {
-            "technological_overlap": 0,
-            "ingredient_overlap": 0,
-            "formulation_process_overlap": 0,
-            "claim_concept_overlap": 0,
-        },
+        "score_breakdown": score_breakdown if score is not None else None,
         "matched_components": matched_components,
         "matched_queries": matched_queries,
         "why_relevant": rel.why_relevant or rel.explanation or "",
@@ -533,7 +528,9 @@ def _analyze_patents_with_gemini(
         import google.generativeai as genai
 
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+        logger.info("Calling Gemini API (%s) for Patent Intelligence candidate analysis...", model_name)
+        model = genai.GenerativeModel(model_name)
 
         patent_payloads = []
         for item in candidates:
@@ -592,7 +589,16 @@ Return ONLY a JSON array with objects containing:
 ]
 """
 
-        response = model.generate_content(prompt)
+        try:
+            response = model.generate_content(prompt)
+        except Exception as model_err:
+            if "404" in str(model_err) or "NotFound" in type(model_err).__name__ or "not found" in str(model_err).lower():
+                logger.info("Model %s unavailable; falling back to gemini-1.5-flash...", model_name)
+                model_name = "gemini-1.5-flash"
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+            else:
+                raise model_err
         text_resp = response.text.strip()
         if text_resp.startswith("```json"):
             text_resp = text_resp[7:]
@@ -1081,3 +1087,150 @@ def save_patent(
     db.refresh(relevance)
 
     return _relevance_to_dict(relevance)
+
+
+def retry_patent_ai_analysis(
+    db: Session,
+    owner: User,
+    case_public_id: str,
+) -> Optional[dict]:
+    """Re-run AI semantic evaluation on existing persisted shortlisted candidates without re-querying Europe PMC."""
+    case = (
+        db.query(ProductCase)
+        .filter(
+            ProductCase.public_id == case_public_id,
+            ProductCase.owner_id == owner.id,
+        )
+        .first()
+    )
+    if case is None:
+        return None
+
+    existing_search = (
+        db.query(PatentSearch)
+        .filter(PatentSearch.product_case_id == case.id)
+        .order_by(PatentSearch.created_at.desc())
+        .first()
+    )
+    if not existing_search:
+        return None
+
+    relevances = (
+        db.query(PatentRelevance)
+        .filter(PatentRelevance.search_id == existing_search.id)
+        .all()
+    )
+    if not relevances:
+        return None
+
+    candidates = []
+    for rel in relevances:
+        rec = rel.patent_record
+        if not rec:
+            continue
+
+        inventors = None
+        if rec.inventors:
+            try:
+                inventors = json.loads(rec.inventors)
+            except Exception:
+                inventors = [rec.inventors]
+
+        family_members = []
+        if rec.family_members_json:
+            try:
+                family_members = json.loads(rec.family_members_json)
+            except Exception:
+                family_members = []
+
+        res = PatentResult(
+            provider_record_id=rec.provider_record_id,
+            source_name=rec.source_name or "EUROPE_PMC",
+            authority=rec.authority or "EPO",
+            jurisdiction=rec.jurisdiction or "EP",
+            source_url=rec.source_url or "",
+            publication_number=rec.publication_number,
+            application_number=rec.application_number,
+            patent_type=rec.patent_type or "PATENT",
+            title=rec.title or "",
+            abstract=rec.abstract or "",
+            applicant=rec.applicant or "",
+            inventors=inventors,
+            priority_date=rec.priority_date or "",
+            filing_date=rec.filing_date or "",
+            publication_date=rec.publication_date or "",
+            status=rec.status or "PUBLISHED",
+            family_id=rec.family_id,
+            family_members=family_members,
+            matched_queries=_deserialize_list(rel.matched_queries_json),
+        )
+
+        candidates.append({
+            "result": res,
+            "matched_queries": res.matched_queries,
+            "ing_matches": _deserialize_list(rel.matched_components_json),
+            "relevance_record": rel,
+        })
+
+    if not candidates:
+        return None
+
+    analyzed_candidates = _analyze_patents_with_gemini(candidates, case)
+    now = datetime.now(timezone.utc)
+
+    for item in analyzed_candidates:
+        res: PatentResult = item["result"]
+        rec_key = res.publication_number or res.application_number or res.provider_record_id
+
+        target_rel = None
+        for cand in candidates:
+            c_res: PatentResult = cand["result"]
+            c_key = c_res.publication_number or c_res.application_number or c_res.provider_record_id
+            if c_key == rec_key:
+                target_rel = cand["relevance_record"]
+                break
+
+        if target_rel:
+            target_rel.relevance_level = item["relevance_level"]
+            target_rel.relevance_score = item["relevance_score"]
+            target_rel.explanation = item["why_relevant"]
+            target_rel.score_breakdown_json = json.dumps(item["score_breakdown"]) if item.get("score_breakdown") else None
+            target_rel.matched_components_json = json.dumps(item["matched_components"])
+            target_rel.matched_queries_json = json.dumps(item["matched_queries"])
+            target_rel.why_relevant = item["why_relevant"]
+            target_rel.important_difference = item["important_difference"]
+            target_rel.limitations = item["limitations"]
+            target_rel.overlap_component = item["matched_components"][0] if item["matched_components"] else None
+            target_rel.overlap_description = item["why_relevant"]
+            target_rel.updated_at = now
+            db.commit()
+
+    updated_relevances = (
+        db.query(PatentRelevance)
+        .filter(PatentRelevance.search_id == existing_search.id)
+        .all()
+    )
+    items = [_relevance_to_dict(r) for r in updated_relevances]
+    items.sort(key=lambda x: (x["relevance_score"] is not None, x["relevance_score"] if x["relevance_score"] is not None else -1), reverse=True)
+
+    query_plan = _deserialize_list(existing_search.search_concepts)
+    metrics = {
+        "total_retrieved": len(items),
+        "very_high_count": sum(1 for i in items if i.get("relevance_level") == "VERY_HIGH"),
+        "high_count": sum(1 for i in items if i.get("relevance_level") == "HIGH"),
+        "moderate_count": sum(1 for i in items if i.get("relevance_level") == "MODERATE"),
+        "low_count": sum(1 for i in items if i.get("relevance_level") == "LOW"),
+        "not_analyzed_count": sum(1 for i in items if i.get("relevance_level") == "NOT_ANALYZED"),
+        "evidence_basis": "ABSTRACT-LEVEL SCREENING",
+    }
+
+    return {
+        "search_id": existing_search.public_id,
+        "product_case_id": case.public_id,
+        "query_plan": query_plan,
+        "summary_metrics": metrics,
+        "results": items,
+        "patents": items,
+        "has_searched": True,
+        "created_at": existing_search.created_at.isoformat() if existing_search.created_at else "",
+    }

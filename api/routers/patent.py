@@ -18,6 +18,7 @@ from api.schemas.patent import (
 from api.services.patent_service import (
     get_or_run_patent_intelligence,
     get_saved_patents,
+    retry_patent_ai_analysis,
     save_patent,
 )
 from api.services.product_case_service import get_or_create_demo_user
@@ -69,6 +70,23 @@ def search_patents(
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Product Case not found")
+    return result
+
+
+@router.post(
+    "/{case_id}/patents/retry-analysis",
+    responses={404: {"description": "Product Case or Patent Search not found"}},
+    summary="Re-run AI semantic evaluation on existing shortlisted candidate patents without re-querying Europe PMC",
+)
+def retry_patent_ai_analysis_route(
+    case_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Re-run AI semantic comparison on persisted shortlisted patents without re-triggering Europe PMC provider queries."""
+    result = retry_patent_ai_analysis(db=db, owner=user, case_public_id=case_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No existing patent search findings found for this Product Case")
     return result
 
 

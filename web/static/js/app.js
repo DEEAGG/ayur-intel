@@ -1547,7 +1547,31 @@
       showToast("⚠️ Could not save patent", "error");
     }
   }
-  window.savePatentToCase = savePatentToCase;
+  async function retryPatentAiAnalysis() {
+    var s = (window.AYUR && window.AYUR.state) || state;
+    if (!s.currentCase) return;
+    s.loading = true;
+    render({ scroll: "top" });
+    try {
+      var data = await api("/api/cases/" + s.currentCase.id + "/patents/retry-analysis", {
+        method: "POST"
+      });
+      setCachedModule(s.currentCase.id, "patentSearchResults", data);
+      s.patentSearchResults = data;
+      showToast("✅ AI semantic analysis retry complete", "success");
+    } catch (e) {
+      showToast("⚠️ Could not retry AI analysis", "error");
+    }
+    s.loading = false;
+    render({ scroll: "top" });
+  }
+  window.retryPatentAiAnalysis = retryPatentAiAnalysis;
+
+  function toggleShowAllPatents() {
+    window._showAllPatents = !window._showAllPatents;
+    render();
+  }
+  window.toggleShowAllPatents = toggleShowAllPatents;
 
   function renderPatentIntelligence() {
     var data = state.patentSearchResults;
@@ -1588,20 +1612,24 @@
 
     var queryPlan = data.query_plan || [];
     var differentiators = data.potential_differentiators || [];
+    var unanalyzedCount = metrics.not_analyzed_count || 0;
 
     html += '<div class="patent-intel-header">'
       + '<div class="patent-intel-title-row">'
       + '<div class="patent-intel-title-area">'
       + '<h2>AYUR-INTEL — Patent Intelligence & Prior-Art Screening</h2>'
-      + '<div class="patent-intel-subtitle">Public Patent Discovery: <strong>Europe PMC Patent Index</strong> (Public life-sciences patent literature index) for <strong>' + escapeHtml(caseName) + '</strong></div>'
+      + '<div class="patent-intel-subtitle">Public Patent Discovery: <strong>Europe PMC Patent Index</strong> for <strong>' + escapeHtml(caseName) + '</strong></div>'
       + '<div style="font-size:12px;color:#94a3b8;margin-top:6px;background:rgba(15,23,42,0.6);padding:8px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);">'
-      + '<strong>Jurisdiction Focus:</strong> India (Discovery includes international literature). Verification portals: <strong>Google Patents</strong> / <strong>IP India (InPASS)</strong> / <strong>WIPO PATENTSCOPE</strong>. <strong>TKDL</strong> is a manual traditional-knowledge research resource. Discovery is non-exhaustive.'
+      + '<strong>Jurisdiction Focus:</strong> India (Discovery includes international literature). Verification portals: <strong>Google Patents</strong> / <strong>IP India (InPASS)</strong> / <strong>WIPO PATENTSCOPE</strong>. <strong>TKDL</strong> is a manual research resource. Discovery is non-exhaustive.'
       + '</div>'
       + '</div>'
-      + '<button class="btn btn-primary btn-sm" onclick="rerunPatentSearch()">' + icon("refresh", 14) + ' Force Re-Run Prior-Art Search</button>'
+      + '<div style="display:flex;gap:8px;align-items:center;">'
+      + (unanalyzedCount > 0 ? ('<button class="btn btn-secondary btn-sm" onclick="retryPatentAiAnalysis()">' + icon("auto_renew", 14) + ' Retry AI Analysis (' + unanalyzedCount + ' Unanalyzed)</button>') : '')
+      + '<button class="btn btn-primary btn-sm" onclick="rerunPatentSearch()">' + icon("refresh", 14) + ' Force Re-Run Search</button>'
+      + '</div>'
       + '</div></div>';
 
-    // Judge-Ready Prior-Art Screening Summary Box
+    // Executive Summary Answer Box ("What This Means For Your Product")
     var signalColor = "#34d399";
     var signalLabel = "LOW PRIOR-ART PRESSURE";
     var signalBg = "rgba(52,211,153,0.12)";
@@ -1618,66 +1646,56 @@
     var covBadge = metrics.discovery_coverage || "PARTIAL";
     var covColor = covBadge === "FULL" ? "#34d399" : (covBadge === "PARTIAL" ? "#fbbf24" : "#94a3b8");
 
-    html += '<div class="card" style="margin-bottom:20px;background:rgba(15,23,42,0.7);border:1px solid rgba(52,211,153,0.25);padding:18px 24px;">'
-      + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px;">'
-      + '<h3 style="font-size:15px;font-weight:700;color:#f8fafc;display:flex;align-items:center;gap:8px;">📊 PRIOR-ART SCREENING SUMMARY</h3>'
+    html += '<div class="card" style="margin-bottom:20px;background:rgba(15,23,42,0.75);border:1px solid rgba(52,211,153,0.3);padding:20px 24px;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:14px;">'
+      + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;display:flex;align-items:center;gap:8px;">💡 Executive Summary — What This Means For Your Product</h3>'
       + '<div style="display:flex;gap:8px;align-items:center;">'
       + '<span style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;background:' + signalBg + ';color:' + signalColor + ';border:1px solid ' + signalColor + '40;">PRIOR-ART SIGNAL: ' + signalLabel + '</span>'
       + '<span style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,0.05);color:' + covColor + ';border:1px solid ' + covColor + '40;">COVERAGE: ' + covBadge + '</span>'
       + '</div></div>'
-      + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:12px;font-size:12px;color:#cbd5e1;">'
-      + '<div><strong>Patents Screened:</strong> ' + metrics.total_retrieved + '</div>'
-      + '<div><strong>Technically Relevant:</strong> ' + (metrics.very_high_count + metrics.high_count + metrics.moderate_count) + '</div>'
-      + '<div><strong>High / Very High Overlap:</strong> ' + (metrics.very_high_count + metrics.high_count) + '</div>'
-      + '<div><strong>Evidence Basis:</strong> Abstract-Level</div>'
-      + '<div><strong>Jurisdiction Focus:</strong> India</div>'
-      + '<div><strong>Discovery Scope:</strong> International Literature</div>'
+      + '<p style="font-size:13px;color:#e2e8f0;line-height:1.6;margin-bottom:14px;">'
+      + 'AYUR-INTEL screened <strong>' + metrics.total_retrieved + ' candidate patents</strong> from public literature. '
+      + 'Found <strong>' + (metrics.very_high_count + metrics.high_count + metrics.moderate_count) + ' technically overlapping patents</strong> (' + (metrics.very_high_count + metrics.high_count) + ' High/Very High overlap). '
+      + 'Prior-art density indicates <strong>' + signalLabel + '</strong> for this formulation concept.'
+      + '</p>'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px;background:rgba(0,0,0,0.25);padding:12px 16px;border-radius:8px;font-size:11px;color:#cbd5e1;margin-bottom:12px;">'
+      + '<div><strong style="color:#4ade80;">0–34 LOW:</strong> Distant category or single term match</div>'
+      + '<div><strong style="color:#facc15;">35–64 MODERATE:</strong> Partial ingredient / process overlap</div>'
+      + '<div><strong style="color:#fb923c;">65–79 HIGH:</strong> Multi-active botanical combination</div>'
+      + '<div><strong style="color:#f87171;">80–100 VERY HIGH:</strong> Direct formulation & claim concept match</div>'
       + '</div>'
-      + '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">* Prior-Art Signal is a deterministic indicator of literature density. It does NOT constitute a legal patentability opinion or guarantee of patent grant/rejection.</div>'
+      + '<div style="font-size:11px;color:#94a3b8;font-style:italic;">* Screened based on public title and abstract text. Does not constitute a formal freedom-to-operate (FTO) or legal patentability opinion.</div>'
+      + '</div>';
+
+    // Screened -> Shortlisted -> AI Analyzed Visual Funnel Pipeline
+    var analyzedCount = items.length - unanalyzedCount;
+    html += '<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px;margin-bottom:20px;text-align:center;">'
+      + '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);padding:14px;border-radius:8px;">'
+      + '<div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:0.05em;">1. SCREENED</div>'
+      + '<div style="font-size:22px;font-weight:700;color:#f8fafc;margin-top:2px;">' + metrics.total_retrieved + '</div>'
+      + '<div style="font-size:10px;color:#64748b;">Public Literature Records</div>'
+      + '</div>'
+      + '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(52,211,153,0.2);padding:14px;border-radius:8px;">'
+      + '<div style="font-size:11px;font-weight:700;color:#34d399;letter-spacing:0.05em;">2. SHORTLISTED</div>'
+      + '<div style="font-size:22px;font-weight:700;color:#34d399;margin-top:2px;">' + items.length + '</div>'
+      + '<div style="font-size:10px;color:#64748b;">Top Pre-Ranked Prior Art</div>'
+      + '</div>'
+      + '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(96,165,250,0.2);padding:14px;border-radius:8px;">'
+      + '<div style="font-size:11px;font-weight:700;color:#60a5fa;letter-spacing:0.05em;">3. AI ANALYZED</div>'
+      + '<div style="font-size:22px;font-weight:700;color:#60a5fa;margin-top:2px;">' + analyzedCount + '</div>'
+      + '<div style="font-size:10px;color:#64748b;">' + (unanalyzedCount > 0 ? (unanalyzedCount + ' Pending AI Retry') : 'Semantic Overlap Verified') + '</div>'
+      + '</div>'
       + '</div>';
 
     // Summary Metrics Strip
-    html += '<div class="patent-metrics-strip">'
+    html += '<div class="patent-metrics-strip" style="margin-bottom:20px;">'
       + '<div class="patent-metric-card"><div class="patent-metric-label">TOTAL PATENTS</div><div class="patent-metric-value">' + metrics.total_retrieved + '</div></div>'
       + '<div class="patent-metric-card" style="border-color:rgba(239,68,68,0.3);"><div class="patent-metric-label" style="color:#f87171;">VERY HIGH OVERLAP</div><div class="patent-metric-value" style="color:#f87171;">' + metrics.very_high_count + '</div></div>'
       + '<div class="patent-metric-card" style="border-color:rgba(249,115,22,0.3);"><div class="patent-metric-label" style="color:#fb923c;">HIGH OVERLAP</div><div class="patent-metric-value" style="color:#fb923c;">' + metrics.high_count + '</div></div>'
       + '<div class="patent-metric-card" style="border-color:rgba(234,179,8,0.3);"><div class="patent-metric-label" style="color:#facc15;">MODERATE OVERLAP</div><div class="patent-metric-value" style="color:#facc15;">' + metrics.moderate_count + '</div></div>'
       + '<div class="patent-metric-card" style="border-color:rgba(34,197,94,0.3);"><div class="patent-metric-label" style="color:#4ade80;">LOW OVERLAP</div><div class="patent-metric-value" style="color:#4ade80;">' + metrics.low_count + '</div></div>'
-      + '<div class="patent-metric-card"><div class="patent-metric-label">EVIDENCE BASIS</div><div style="font-size:12px;font-weight:700;color:#34d399;margin-top:6px;"><span class="patent-pub-badge">' + escapeHtml(metrics.evidence_basis || "ABSTRACT-LEVEL SCREENING") + '</span></div></div>'
+      + '<div class="patent-metric-card" style="border-color:rgba(148,163,184,0.3);"><div class="patent-metric-label" style="color:#cbd5e1;">NOT ANALYZED</div><div class="patent-metric-value" style="color:#cbd5e1;">' + unanalyzedCount + '</div></div>'
       + '</div>';
-
-    // Query Plan Cards
-    if (queryPlan.length > 0) {
-      html += '<div class="card" style="margin-bottom:24px;background:rgba(20,28,24,0.6);border:1px solid rgba(255,255,255,0.08);">'
-        + '<div class="card-head" style="padding:14px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">'
-        + '<h3 style="font-size:14px;font-weight:700;color:#f8fafc;display:flex;align-items:center;gap:8px;">🎯 Provider Query Plan (' + queryPlan.length + ' Categorized Structured Queries)</h3>'
-        + '</div>'
-        + '<div class="card-body" style="padding:16px 20px;">'
-        + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:10px;">';
-
-      queryPlan.forEach(function(q) {
-        var cat = q.category || "SEARCH";
-        var catBg = "rgba(52,211,153,0.12)";
-        var catColor = "#34d399";
-        if (cat === "BOTANICAL") { catBg = "rgba(168,85,247,0.12)"; catColor = "#c084fc"; }
-        else if (cat === "COMMON_NAMES") { catBg = "rgba(236,72,153,0.12)"; catColor = "#f472b6"; }
-        else if (cat === "COMBINATION") { catBg = "rgba(59,130,246,0.12)"; catColor = "#60a5fa"; }
-        else if (cat === "STANDARDIZATION") { catBg = "rgba(16,185,129,0.12)"; catColor = "#34d399"; }
-        else if (cat === "FORMULATION") { catBg = "rgba(245,158,11,0.12)"; catColor = "#fbbf24"; }
-        else if (cat === "PROCESS") { catBg = "rgba(234,179,8,0.12)"; catColor = "#facc15"; }
-
-        html += '<div style="background:rgba(15,23,42,0.5);padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.05);">'
-          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
-          + '<span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:' + catBg + ';color:' + catColor + ';">' + escapeHtml(cat) + '</span>'
-          + (q.signals ? ('<span style="font-size:10px;color:#94a3b8;">' + escapeHtml(q.signals) + '</span>') : '')
-          + '</div>'
-          + '<div style="font-family:monospace;font-size:12px;color:#f8fafc;font-weight:600;margin-bottom:4px;">Search: ' + escapeHtml(q.query) + '</div>'
-          + '<div style="font-size:11px;color:#94a3b8;">Purpose: ' + escapeHtml(q.rationale || "Screens literature for overlap.") + '</div>'
-          + '</div>';
-      });
-
-      html += '</div></div></div>';
-    }
 
     // Potential Differentiators Section
     if (differentiators.length > 0) {
@@ -1717,7 +1735,14 @@
         + '<div style="font-size:11px;color:#64748b;margin-top:10px;">* Zero search matches indicates no records were returned for these specific query terms in public index literature. It does NOT imply that no patents exist worldwide.</div>'
         + '</div></div></div>';
     } else {
-      items.forEach(function(item) {
+      var displayItems = window._showAllPatents ? items : items.slice(0, 5);
+
+      html += '<div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
+        + '<h3 style="font-size:15px;font-weight:700;color:#f8fafc;">📑 Candidate Prior-Art Evidence (' + (window._showAllPatents ? ('Showing all ' + items.length) : ('Top 5 of ' + items.length + ' candidates')) + ')</h3>'
+        + (items.length > 5 ? ('<button class="btn btn-ghost btn-sm" onclick="toggleShowAllPatents()">' + (window._showAllPatents ? 'Show Top 5 Only' : ('View All ' + items.length + ' Candidate Patents →')) + '</button>') : '')
+        + '</div>';
+
+      displayItems.forEach(function(item) {
         var rec = item.patent || {};
         var providerId = rec.provider_record_id || "";
         var pubNum = rec.publication_number || null;
@@ -1737,18 +1762,24 @@
         var sourceIdDisplay = providerId ? (' &nbsp;|&nbsp; <strong>Source Record ID:</strong> ' + escapeHtml(providerId)) : '';
 
         var level = item.relevance_level || "LOW";
+        var score = item.relevance_score;
+        var isNotAnalyzed = level === "NOT_ANALYZED" || score === null || score === undefined;
+
         var badgeCls = "badge-low";
         if (level === "VERY_HIGH") badgeCls = "badge-very-high";
         else if (level === "HIGH") badgeCls = "badge-high";
         else if (level === "MODERATE") badgeCls = "badge-moderate";
-        else if (level === "NOT_ANALYZED") badgeCls = "badge-not-analyzed";
+        else if (isNotAnalyzed) badgeCls = "badge-not-analyzed";
 
-        var score = item.relevance_score;
-        var scoreLabel = (score !== null && score !== undefined) ? (level.replace("_", " ") + ' (' + score + ' / 100)') : 'NOT ANALYZED (AI Unavailable)';
+        var scoreLabel = !isNotAnalyzed ? (level.replace("_", " ") + ' (' + score + ' / 100)') : 'NOT ANALYZED (AI Unavailable)';
 
-        var breakdown = item.score_breakdown || {};
+        var breakdown = item.score_breakdown || null;
+        var techVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.technological_overlap + "%");
+        var ingVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.ingredient_overlap + "%");
+        var formVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.formulation_process_overlap + "%");
+        var claimVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.claim_concept_overlap + "%");
+
         var matchedComps = item.matched_components || [];
-        var matchedQueries = item.matched_queries || [];
         var openUrl = rec.open_patent_url || (pubNum ? ("https://patents.google.com/patent/" + pubNum.replace(/[^A-Za-z0-9]/g, "") + "/en") : (providerId ? ("https://europepmc.org/article/PAT/" + providerId) : ""));
         var openBtnLabel = openUrl.indexOf("patents.google.com") !== -1 ? "Open Google Patent ↗" : "Open Europe PMC Record ↗";
 
@@ -1783,10 +1814,10 @@
         }
 
         html += '<div class="patent-score-grid">'
-          + '<div class="patent-score-dim"><div class="patent-score-dim-label">TECH OVERLAP</div><div class="patent-score-dim-val">' + (breakdown.technological_overlap || 0) + '%</div></div>'
-          + '<div class="patent-score-dim"><div class="patent-score-dim-label">INGREDIENT OVERLAP</div><div class="patent-score-dim-val">' + (breakdown.ingredient_overlap || 0) + '%</div></div>'
-          + '<div class="patent-score-dim"><div class="patent-score-dim-label">FORMULATION & PROCESS</div><div class="patent-score-dim-val">' + (breakdown.formulation_process_overlap || 0) + '%</div></div>'
-          + '<div class="patent-score-dim"><div class="patent-score-dim-label">CLAIM CONCEPT</div><div class="patent-score-dim-val">' + (breakdown.claim_concept_overlap || 0) + '%</div></div>'
+          + '<div class="patent-score-dim"><div class="patent-score-dim-label">TECH OVERLAP</div><div class="patent-score-dim-val">' + techVal + '</div></div>'
+          + '<div class="patent-score-dim"><div class="patent-score-dim-label">INGREDIENT OVERLAP</div><div class="patent-score-dim-val">' + ingVal + '</div></div>'
+          + '<div class="patent-score-dim"><div class="patent-score-dim-label">FORMULATION & PROCESS</div><div class="patent-score-dim-val">' + formVal + '</div></div>'
+          + '<div class="patent-score-dim"><div class="patent-score-dim-label">CLAIM CONCEPT</div><div class="patent-score-dim-val">' + claimVal + '</div></div>'
           + '</div>';
 
         if (matchedComps.length > 0) {
@@ -1805,12 +1836,52 @@
           + '</div>';
 
         html += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);">'
+          + (isNotAnalyzed ? ('<button class="btn btn-secondary btn-sm" onclick="retryPatentAiAnalysis()">' + icon("auto_renew", 14) + ' Retry AI Analysis</button>') : '')
           + '<a href="' + escapeHtml(openUrl) + '" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display:inline-flex;align-items:center;gap:4px;">' + escapeHtml(openBtnLabel) + '</a>'
           + '<button class="btn btn-ghost btn-sm" onclick="savePatentToCase(\'' + escapeHtml(rec.id || "") + '\')">' + icon("bookmark", 14) + ' Save to Case</button>'
           + '</div>';
 
         html += '</div>';
       });
+
+      if (items.length > 5) {
+        html += '<div style="text-align:center;margin:16px 0 24px 0;">'
+          + '<button class="btn btn-secondary" onclick="toggleShowAllPatents()">'
+          + (window._showAllPatents ? 'Show Top 5 Candidate Patents Only' : ('View All ' + items.length + ' Candidate Patents →'))
+          + '</button>'
+          + '</div>';
+      }
+    }
+
+    // Collapsible Provider Query Plan
+    if (queryPlan.length > 0) {
+      html += '<details style="margin-bottom:24px;background:rgba(20,28,24,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px;">'
+        + '<summary style="font-size:14px;font-weight:700;color:#f8fafc;cursor:pointer;display:flex;align-items:center;gap:8px;">🎯 View Provider Query Plan (' + queryPlan.length + ' Categorized Search Concepts)</summary>'
+        + '<div style="padding-top:16px;">'
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:10px;">';
+
+      queryPlan.forEach(function(q) {
+        var cat = q.category || "SEARCH";
+        var catBg = "rgba(52,211,153,0.12)";
+        var catColor = "#34d399";
+        if (cat === "BOTANICAL") { catBg = "rgba(168,85,247,0.12)"; catColor = "#c084fc"; }
+        else if (cat === "COMMON_NAMES") { catBg = "rgba(236,72,153,0.12)"; catColor = "#f472b6"; }
+        else if (cat === "COMBINATION") { catBg = "rgba(59,130,246,0.12)"; catColor = "#60a5fa"; }
+        else if (cat === "STANDARDIZATION") { catBg = "rgba(16,185,129,0.12)"; catColor = "#34d399"; }
+        else if (cat === "FORMULATION") { catBg = "rgba(245,158,11,0.12)"; catColor = "#fbbf24"; }
+        else if (cat === "PROCESS") { catBg = "rgba(234,179,8,0.12)"; catColor = "#facc15"; }
+
+        html += '<div style="background:rgba(15,23,42,0.5);padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.05);">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+          + '<span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:' + catBg + ';color:' + catColor + ';">' + escapeHtml(cat) + '</span>'
+          + (q.signals ? ('<span style="font-size:10px;color:#94a3b8;">' + escapeHtml(q.signals) + '</span>') : '')
+          + '</div>'
+          + '<div style="font-family:monospace;font-size:12px;color:#f8fafc;font-weight:600;margin-bottom:4px;">Search: ' + escapeHtml(q.query) + '</div>'
+          + '<div style="font-size:11px;color:#94a3b8;">Purpose: ' + escapeHtml(q.rationale || "Screens literature for overlap.") + '</div>'
+          + '</div>';
+      });
+
+      html += '</div></div></details>';
     }
 
     // Manual Verification Callout & Correct IP India Link
