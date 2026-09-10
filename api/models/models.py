@@ -472,6 +472,7 @@ class PatentRecord(Base):
     source_url = Column(String(500), nullable=True)
 
     # Patent identifiers
+    provider_record_id = Column(String(100), nullable=True)
     publication_number = Column(String(100), nullable=True)
     application_number = Column(String(100), nullable=True)
     patent_type = Column(String(50), nullable=True)  # APPLICATION, PUBLICATION, GRANTED
@@ -489,6 +490,10 @@ class PatentRecord(Base):
 
     # Status
     status = Column(String(100), nullable=True)  # e.g. "Published", "Granted", "Pending"
+
+    # Family
+    family_id = Column(String(100), nullable=True)
+    family_members_json = Column(Text, nullable=True)  # JSON list of family publication numbers
 
     # Retrieval
     retrieved_at = Column(DateTime, nullable=False, default=_now_utc)
@@ -518,7 +523,7 @@ class PatentSearch(Base):
     product_case_id = Column(Integer, ForeignKey("product_cases.id"), nullable=False)
 
     # Search details
-    search_concepts = Column(Text, nullable=True, default="[]")  # JSON list of search queries
+    search_concepts = Column(Text, nullable=True, default="[]")  # JSON list of search query objects or strings
     jurisdictions_searched = Column(Text, nullable=True, default="[]")  # JSON list
     total_results = Column(Integer, nullable=False, default=0)
     sources_searched = Column(Integer, nullable=False, default=0)
@@ -556,13 +561,23 @@ class PatentRelevance(Base):
     search_id = Column(Integer, ForeignKey("patent_searches.id"), nullable=True)
     innovation_component_id = Column(Integer, ForeignKey("innovation_components.id"), nullable=True)
 
-    # Relevance
-    relevance_level = Column(String(20), nullable=False, default="LOW")  # HIGH, MEDIUM, LOW
+    # Relevance & Evidence Basis
+    relevance_level = Column(String(30), nullable=False, default="LOW")  # VERY_HIGH, HIGH, MODERATE, LOW, NOT_ANALYZED
     relevance_score = Column(Integer, nullable=True)  # 0-100
     explanation = Column(Text, nullable=True)
     evidence_reference = Column(Text, nullable=True)
     overlap_component = Column(String(100), nullable=True)  # which component overlaps
     overlap_description = Column(Text, nullable=True)
+
+    # Grounded evidence & score breakdown
+    evidence_basis = Column(String(50), nullable=True, default="TITLE_ABSTRACT")  # TITLE_ONLY, TITLE_ABSTRACT, CLAIM_TEXT
+    evidence_coverage = Column(String(50), nullable=True, default="STANDARD")  # LIMITED, STANDARD, ENHANCED
+    score_breakdown_json = Column(Text, nullable=True)  # JSON dict of dimension scores
+    matched_components_json = Column(Text, nullable=True)  # JSON list of matched terms
+    matched_queries_json = Column(Text, nullable=True)  # JSON list of queries that matched
+    why_relevant = Column(Text, nullable=True)
+    important_difference = Column(Text, nullable=True)
+    limitations = Column(Text, nullable=True)
 
     # User action
     saved_by_user = Column(Boolean, nullable=False, default=False)

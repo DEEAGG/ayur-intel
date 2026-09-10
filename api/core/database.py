@@ -84,14 +84,30 @@ def init_db() -> None:
     with engine.begin() as conn:
         is_sqlite = "sqlite" in str(engine.url)
         
-        # 1. Ensure is_demo column exists
-        try:
-            if is_sqlite:
-                conn.execute(text("ALTER TABLE product_cases ADD COLUMN is_demo BOOLEAN DEFAULT 0"))
-            else:
-                conn.execute(text("ALTER TABLE product_cases ADD COLUMN IF NOT EXISTS is_demo BOOLEAN DEFAULT FALSE"))
-        except Exception as e:
-            logger.debug("Column migration note (is_demo): %s", e)
+        # 1. Ensure columns exist for existing databases
+        new_cols = [
+            ("product_cases", "is_demo", "BOOLEAN DEFAULT 0" if is_sqlite else "BOOLEAN DEFAULT FALSE"),
+            ("patent_records", "provider_record_id", "VARCHAR(100)"),
+            ("patent_records", "family_id", "VARCHAR(100)"),
+            ("patent_records", "family_members_json", "TEXT"),
+            ("patent_relevances", "evidence_basis", "VARCHAR(50) DEFAULT 'TITLE_ABSTRACT'"),
+            ("patent_relevances", "evidence_coverage", "VARCHAR(50) DEFAULT 'STANDARD'"),
+            ("patent_relevances", "score_breakdown_json", "TEXT"),
+            ("patent_relevances", "matched_components_json", "TEXT"),
+            ("patent_relevances", "matched_queries_json", "TEXT"),
+            ("patent_relevances", "why_relevant", "TEXT"),
+            ("patent_relevances", "important_difference", "TEXT"),
+            ("patent_relevances", "limitations", "TEXT"),
+        ]
+
+        for table, col, col_type in new_cols:
+            try:
+                if is_sqlite:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                else:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}"))
+            except Exception as e:
+                logger.debug("Column migration note (%s.%s): %s", table, col, e)
 
         # 2. Performance indexes
         indexes = [
