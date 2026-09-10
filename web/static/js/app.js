@@ -3154,99 +3154,123 @@
   }
 
   // ----------------------------------------------------------------
-  // Knowledge Graph View (Phase 15)
+  // Knowledge Graph View (Phase B: Evidence Intelligence Graph)
   // ----------------------------------------------------------------
   function renderKnowledgeGraph() {
     var g = state.knowledgeGraphData;
-    if (!g) return '<div class="card"><div class="card-body"><p>No graph data available.</p></div></div>';
+    if (!g || !g.nodes || g.nodes.length === 0) {
+      return ''
+        + '<div class="view-header">'
+        + '<button class="btn btn-ghost btn-sm" id="back-from-knowledge-graph">' + icon('arrow_back', 15) + ' Back to Case</button>'
+        + '<div class="kg-header-badge"><span class="badge-dot"></span> Evidence Intelligence Graph</div>'
+        + '</div>'
+        + '<div class="card" style="margin-top:16px;"><div class="card-body" style="text-align:center;padding:48px 20px;">'
+        + '<div style="font-size:40px;color:#34d399;margin-bottom:12px;">' + icon('hub', 44) + '</div>'
+        + '<h3 style="font-size:18px;margin-bottom:8px;color:#f8fafc;">No Graph Entities Available</h3>'
+        + '<p style="color:#94a3b8;max-width:500px;margin:0 auto 20px;font-size:13px;line-height:1.5;">'
+        + 'Complete additional Case Intelligence modules (Botanical Discovery, Claims, Patent Screen, Regulatory Profile, Risk Assessment) to expand and explore this Evidence Intelligence Graph.'
+        + '</p>'
+        + '<button class="btn btn-primary btn-sm" id="back-from-knowledge-graph-empty">' + icon('arrow_back', 14) + ' Return to Case Overview</button>'
+        + '</div></div>';
+    }
 
-    var nodeTypes = g.summary ? g.summary.node_types : {};
-    var totalNodes = g.summary ? g.summary.total_nodes : 0;
-    var totalEdges = g.summary ? g.summary.total_edges : 0;
+    var nodeTypes = (g.summary && g.summary.node_types) ? g.summary.node_types : {};
+    var totalNodes = (g.summary && g.summary.total_nodes) ? g.summary.total_nodes : g.nodes.length;
+    var totalEdges = (g.summary && g.summary.total_edges) ? g.summary.total_edges : g.edges.length;
+
+    var evidenceCount = (nodeTypes.EVIDENCE || 0) + (nodeTypes.CASE_FINDING || 0) + (nodeTypes.TRADITIONAL_KNOWLEDGE || 0);
+    var risksCount = nodeTypes.RISK || 0;
+    var claimsCount = nodeTypes.CLAIM || 0;
+    var productName = g.product_name || (state.currentCase ? state.currentCase.name : 'Product Case');
 
     var html = ''
-      + '<div class="view-header"><button class="btn btn-ghost btn-sm" id="back-from-knowledge-graph">' + icon('arrow_back', 15) + ' Back to Case</button>'
-      + '<div style="display:flex;gap:8px;margin-left:auto;align-items:center">'
-      + '<input type="text" class="form-input" id="graph-search-input" placeholder="Search entities..." style="width:200px;padding:6px 10px;font-size:13px">'
-      + '<button class="btn btn-primary btn-sm" id="graph-search-btn">' + icon('search', 14) + '</button>'
-      + '<button class="btn btn-secondary btn-sm" id="graph-reset-btn">' + icon('restart_alt', 14) + ' Reset</button>'
-      + '</div></div>'
+      // Top Navigation bar
+      + '<div class="view-header">'
+      + '<button class="btn btn-ghost btn-sm" id="back-from-knowledge-graph">' + icon('arrow_back', 15) + ' Back to Case</button>'
+      + '<div class="kg-header-badge"><span class="badge-dot"></span> Evidence Intelligence Graph</div>'
+      + '</div>'
 
-      // Header
-      + '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon('account_tree', 20) + ' Knowledge Graph</h2>'
-      + '<p>Interactive visualization of ' + escapeHtml(g.product_name || '') + ' entity relationships</p></div><div class="card-body">'
+      // Page Header with Real Metrics Strip
+      + '<div class="kg-page-header">'
+      + '<div class="kg-title-row">'
+      + '<div class="kg-title-group">'
+      + '<h1 class="kg-page-title">' + icon('account_tree', 24) + ' Knowledge Graph</h1>'
+      + '<p class="kg-page-subtitle">Connected intelligence across evidence, IP, regulation and product decisions for <strong>' + escapeHtml(productName) + '</strong></p>'
+      + '</div>'
+      + '</div>'
+      + '<div class="kg-metrics-strip">'
+      + '<span class="kg-metric-item"><strong class="kg-metric-val">' + totalNodes + '</strong> Nodes</span>'
+      + '<span class="kg-metric-sep">·</span>'
+      + '<span class="kg-metric-item"><strong class="kg-metric-val">' + totalEdges + '</strong> Relationships</span>'
+      + '<span class="kg-metric-sep">·</span>'
+      + '<span class="kg-metric-item"><strong class="kg-metric-val">' + (nodeTypes.EVIDENCE || 0) + '</strong> Evidence</span>'
+      + '<span class="kg-metric-sep">·</span>'
+      + '<span class="kg-metric-item"><strong class="kg-metric-val">' + risksCount + '</strong> Risks</span>'
+      + '<span class="kg-metric-sep">·</span>'
+      + '<span class="kg-metric-item"><strong class="kg-metric-val">' + claimsCount + '</strong> Claims</span>'
+      + '</div>'
+      + '</div>'
 
-      // Stats
-      + '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">'
-      + '<div class="patent-stat-card"><div class="patent-stat-label">ENTITIES</div><div class="patent-stat-value">' + totalNodes + '</div></div>'
-      + '<div class="patent-stat-card"><div class="patent-stat-label">RELATIONSHIPS</div><div class="patent-stat-value">' + totalEdges + '</div></div>';
+      // Toolbar: 6 Intelligence Lenses + Controls
+      + '<div class="kg-toolbar">'
+      + '<div class="kg-lenses-group">'
+      + '<span class="kg-lenses-label">INTELLIGENCE LENS:</span>'
+      + '<button class="kg-lens-pill active" data-lens="OVERVIEW">' + icon('hub', 15) + ' Overview</button>'
+      + '<button class="kg-lens-pill" data-lens="EVIDENCE">' + icon('verified', 15) + ' Evidence</button>'
+      + '<button class="kg-lens-pill" data-lens="IP">' + icon('gavel', 15) + ' IP & Patents</button>'
+      + '<button class="kg-lens-pill" data-lens="REGULATORY">' + icon('policy', 15) + ' Regulatory</button>'
+      + '<button class="kg-lens-pill" data-lens="RISK">' + icon('warning', 15) + ' Risk</button>'
+      + '<button class="kg-lens-pill" data-lens="INNOVATION">' + icon('lightbulb', 15) + ' Innovation</button>'
+      + '</div>'
+      + '<div class="kg-controls-group">'
+      + '<div class="kg-search-wrap">'
+      + '<span class="material-symbols-outlined kg-search-icon">search</span>'
+      + '<input type="text" class="kg-search-input" id="kg-search-input" placeholder="Search graph nodes..." autocomplete="off">'
+      + '<button class="kg-search-clear" id="kg-search-clear" style="display:none;" title="Clear search">✕</button>'
+      + '</div>'
+      + '<div class="kg-btn-group">'
+      + '<button class="btn btn-secondary btn-sm kg-control-btn" id="kg-zoom-in" title="Zoom In">' + icon('zoom_in', 16) + '</button>'
+      + '<button class="btn btn-secondary btn-sm kg-control-btn" id="kg-zoom-out" title="Zoom Out">' + icon('zoom_out', 16) + '</button>'
+      + '<button class="btn btn-secondary btn-sm kg-control-btn" id="kg-fit-btn" title="Fit Graph">' + icon('center_focus_strong', 16) + '</button>'
+      + '<button class="btn btn-secondary btn-sm kg-control-btn" id="kg-reset-btn" title="Reset Selection">' + icon('restart_alt', 16) + ' Reset</button>'
+      + '</div>'
+      + '</div>'
+      + '</div>'
 
-    // Node type counts
-    var typeLabels = {
-      PRODUCT: 'Products', INGREDIENT: 'Ingredients', PLANT: 'Plants',
-      FORMULATION: 'Formulations', PROCESS: 'Processes',
-      TRADITIONAL_KNOWLEDGE: 'TK', PATENT: 'Patents',
-      INNOVATION_COMPONENT: 'Innovation', IP_STRATEGY: 'IP Strategy',
-      REGULATION: 'Regulations', JURISDICTION: 'Jurisdictions',
-      EVIDENCE: 'Evidence', SOURCE: 'Sources', RISK: 'Risks',
-      ALERT: 'Alerts', CASE_FINDING: 'Findings'
-    };
-    Object.keys(nodeTypes).forEach(function (t) {
-      if (nodeTypes[t] > 0) {
-        html += '<div class="patent-stat-card"><div class="patent-stat-label">' + (typeLabels[t] || t).toUpperCase() + '</div><div class="patent-stat-value">' + nodeTypes[t] + '</div></div>';
-      }
-    });
-    html += '</div>';
+      // Main Workspace: Graph Canvas + Drawer
+      + '<div class="kg-workspace">'
+      + '<div id="knowledge-graph-container" class="kg-canvas-container">'
+      + '<div class="kg-legend-overlay">'
+      + '<div class="kg-legend-items">'
+      + '<span class="kg-legend-item"><span class="kg-legend-dot" style="background:#2d4a3e;border-color:#34d399"></span> Product</span>'
+      + '<span class="kg-legend-item"><span class="kg-legend-dot" style="background:#4caf50"></span> Ingredient</span>'
+      + '<span class="kg-legend-item"><span class="kg-legend-dot" style="background:#00bcd4"></span> Claim</span>'
+      + '<span class="kg-legend-item"><span class="kg-legend-dot" style="background:#607d8b"></span> Evidence</span>'
+      + '<span class="kg-legend-item"><span class="kg-legend-dot" style="background:#f44336"></span> Patent</span>'
+      + '<span class="kg-legend-item"><span class="kg-legend-dot" style="background:#2196f3"></span> Regulation</span>'
+      + '<span class="kg-legend-item"><span class="kg-legend-dot" style="background:#ff5722"></span> Risk</span>'
+      + '<span class="kg-legend-item"><span class="kg-legend-dot" style="background:#9c27b0"></span> Innovation</span>'
+      + '</div>'
+      + '</div>'
+      + '<div id="kg-tooltip" class="kg-tooltip" style="display:none;"></div>'
+      + '</div>'
+      + '<div id="kg-drawer" class="kg-drawer" style="display:none;">'
+      + '<div class="kg-drawer-header">'
+      + '<div class="kg-drawer-title-wrap">'
+      + '<div class="kg-drawer-badges" id="kg-drawer-badges"></div>'
+      + '<h3 class="kg-drawer-title" id="kg-drawer-title">Node Details</h3>'
+      + '</div>'
+      + '<button class="kg-drawer-close" id="kg-drawer-close" title="Close Drawer">' + icon('close', 18) + '</button>'
+      + '</div>'
+      + '<div class="kg-drawer-body" id="kg-drawer-body"></div>'
+      + '</div>'
+      + '</div>'
 
-    // Filters
-    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">'
-      + '<button class="btn btn-ghost btn-xs graph-filter-btn active" data-filter="ALL">All</button>';
-    var filterTypes = ['PRODUCT', 'INGREDIENT', 'PLANT', 'PATENT', 'REGULATION', 'JURISDICTION', 'TRADITIONAL_KNOWLEDGE', 'INNOVATION_COMPONENT', 'IP_STRATEGY', 'EVIDENCE', 'RISK', 'ALERT', 'SOURCE', 'CASE_FINDING'];
-    filterTypes.forEach(function (t) {
-      if (nodeTypes[t] && nodeTypes[t] > 0) {
-        html += '<button class="btn btn-ghost btn-xs graph-filter-btn" data-filter="' + t + '">' + (typeLabels[t] || t) + '</button>';
-      }
-    });
-    html += '</div>';
-
-    // Graph container
-    html += '<div id="knowledge-graph-container" style="width:100%;height:500px;border:1px solid var(--color-outline-variant);border-radius:var(--radius-md);overflow:hidden;background:var(--color-surface-container-low);position:relative"></div>';
-
-    // Node detail panel
-    html += '<div id="graph-node-detail" style="display:none;margin-top:16px;padding:16px;border:1px solid var(--color-outline-variant);border-radius:var(--radius-md);background:var(--color-surface)"></div>';
-
-    html += '</div></div>';
-
-    // Legend
-    html += '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon('palette', 18) + ' Legend</h2></div><div class="card-body">'
-      + '<div style="display:flex;gap:12px;flex-wrap:wrap">';
-    var legendItems = [
-      { type: 'PRODUCT', color: '#2d4a3e', label: 'Product' },
-      { type: 'INGREDIENT', color: '#4caf50', label: 'Ingredient' },
-      { type: 'PLANT', color: '#66bb6a', label: 'Plant' },
-      { type: 'PATENT', color: '#f44336', label: 'Patent' },
-      { type: 'REGULATION', color: '#2196f3', label: 'Regulation' },
-      { type: 'JURISDICTION', color: '#1565c0', label: 'Jurisdiction' },
-      { type: 'TRADITIONAL_KNOWLEDGE', color: '#ff9800', label: 'Traditional Knowledge' },
-      { type: 'INNOVATION_COMPONENT', color: '#9c27b0', label: 'Innovation' },
-      { type: 'IP_STRATEGY', color: '#7b1fa2', label: 'IP Strategy' },
-      { type: 'EVIDENCE', color: '#607d8b', label: 'Evidence' },
-      { type: 'SOURCE', color: '#455a64', label: 'Source' },
-      { type: 'RISK', color: '#ff5722', label: 'Risk' },
-      { type: 'ALERT', color: '#ff9800', label: 'Alert' },
-      { type: 'CASE_FINDING', color: '#795548', label: 'Finding' },
-    ];
-    legendItems.forEach(function (item) {
-      if (nodeTypes[item.type] && nodeTypes[item.type] > 0) {
-        html += '<div style="display:flex;align-items:center;gap:6px;font-size:12px">'
-          + '<span style="width:12px;height:12px;border-radius:50%;background:' + item.color + '"></span>'
-          + '<span>' + item.label + ' (' + nodeTypes[item.type] + ')</span></div>';
-      }
-    });
-    html += '</div></div></div>';
-
-    // Disclaimer
-    html += '<div class="innovation-disclaimer">' + icon('warning', 18) + '<div><strong>Knowledge Graph.</strong> Relationships are derived from stored database records. No fabricated relationships are shown.</div></div>';
+      // Disclaimer
+      + '<div class="innovation-disclaimer" style="margin-top:16px;">'
+      + '<span class="material-symbols-outlined" style="color:#34d399;">verified_user</span>'
+      + '<div><strong>Evidence Intelligence Graph.</strong> All entities and relationships are dynamically synthesized from stored case records, regulatory profiles, patent searches, and canonical risk assessments. Zero speculative connections.</div>'
+      + '</div>';
 
     return html;
   }
@@ -3840,81 +3864,195 @@
 
 
   // ----------------------------------------------------------------
-  // Graph visualization helpers (called after render)
+  // Knowledge Graph (Phase B: Evidence Intelligence Graph Helpers)
   // ----------------------------------------------------------------
+  var GRAPH_LENSES = {
+    OVERVIEW: {
+      label: 'Overview',
+      primaryTypes: ['PRODUCT', 'INGREDIENT', 'CLAIM', 'EVIDENCE', 'PATENT', 'REGULATION', 'RISK', 'INNOVATION_COMPONENT'],
+      supportingTypes: ['PLANT', 'JURISDICTION', 'SOURCE', 'CASE_FINDING', 'IP_STRATEGY', 'ALERT', 'FORMULATION', 'PROCESS', 'TRADITIONAL_KNOWLEDGE']
+    },
+    EVIDENCE: {
+      label: 'Evidence',
+      primaryTypes: ['PRODUCT', 'CLAIM', 'EVIDENCE', 'SOURCE', 'CASE_FINDING', 'TRADITIONAL_KNOWLEDGE', 'INGREDIENT', 'PLANT'],
+      supportingTypes: []
+    },
+    IP: {
+      label: 'IP & Patents',
+      primaryTypes: ['PRODUCT', 'INGREDIENT', 'PATENT', 'IP_STRATEGY', 'INNOVATION_COMPONENT', 'JURISDICTION'],
+      supportingTypes: []
+    },
+    REGULATORY: {
+      label: 'Regulatory',
+      primaryTypes: ['PRODUCT', 'CLAIM', 'REGULATION', 'JURISDICTION', 'INGREDIENT'],
+      supportingTypes: []
+    },
+    RISK: {
+      label: 'Risk',
+      primaryTypes: ['PRODUCT', 'RISK', 'CLAIM', 'PATENT', 'REGULATION', 'EVIDENCE', 'ALERT'],
+      supportingTypes: []
+    },
+    INNOVATION: {
+      label: 'Innovation',
+      primaryTypes: ['PRODUCT', 'INGREDIENT', 'FORMULATION', 'PROCESS', 'INNOVATION_COMPONENT', 'IP_STRATEGY', 'PLANT'],
+      supportingTypes: []
+    }
+  };
+
   function initGraphVisualization() {
     var container = document.getElementById('knowledge-graph-container');
     if (!container || !state.knowledgeGraphData) return;
-    if (typeof d3 === 'undefined') { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--color-on-surface-variant)">D3.js not loaded</div>'; return; }
+    if (typeof d3 === 'undefined') {
+      container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--color-on-surface-variant)">D3.js visualization engine is loading...</div>';
+      return;
+    }
+
+    // Stop and cleanup any previous simulation
+    if (window._graphSimulation) {
+      window._graphSimulation.stop();
+      window._graphSimulation = null;
+    }
 
     var g = state.knowledgeGraphData;
-    var width = container.clientWidth;
-    var height = container.clientHeight;
+    var width = container.clientWidth || 800;
+    var height = container.clientHeight || 640;
 
-    var svg = d3.select(container).append('svg')
-      .attr('width', width).attr('height', height)
+    // Clear previous SVG inside container while preserving legend overlay and tooltip
+    var legendHtml = container.querySelector('.kg-legend-overlay');
+    var tooltipHtml = container.querySelector('.kg-tooltip');
+    container.innerHTML = '';
+    if (legendHtml) container.appendChild(legendHtml);
+    if (tooltipHtml) container.appendChild(tooltipHtml);
+
+    var svg = d3.select(container).insert('svg', ':first-child')
+      .attr('width', '100%')
+      .attr('height', '100%')
       .attr('viewBox', [0, 0, width, height]);
 
-    // Add zoom
+    // Graph Root Group with Zoom
     var g_group = svg.append('g');
     var zoom = d3.zoom()
-      .scaleExtent([0.2, 5])
-      .on('zoom', function (event) { g_group.attr('transform', event.transform); });
+      .scaleExtent([0.15, 4])
+      .on('zoom', function (event) {
+        g_group.attr('transform', event.transform);
+      });
     svg.call(zoom);
 
-    // Arrow markers
-    svg.append('defs').selectAll('marker')
-      .data(['arrow']).enter().append('marker')
-      .attr('id', 'arrow').attr('viewBox', '0 -5 10 10')
-      .attr('refX', 20).attr('refY', 0)
-      .attr('markerWidth', 6).attr('markerHeight', 6)
-      .attr('orient', 'auto')
-      .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', '#999');
+    // Store zoom on window for control buttons
+    window._graphZoom = zoom;
+    window._graphSvg = svg;
+    window._graphRootGroup = g_group;
+    window._graphWidth = width;
+    window._graphHeight = height;
 
-    // Prepare data
+    // Arrow markers
+    var defs = svg.append('defs');
+    defs.append('marker')
+      .attr('id', 'kg-arrow')
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 24)
+      .attr('refY', 0)
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-4L8,0L0,4')
+      .attr('fill', '#64748b');
+
+    defs.append('marker')
+      .attr('id', 'kg-arrow-highlight')
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 24)
+      .attr('refY', 0)
+      .attr('markerWidth', 7)
+      .attr('markerHeight', 7)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-4L8,0L0,4')
+      .attr('fill', '#34d399');
+
+    // Build entity lookup map
     var nodeMap = {};
     g.nodes.forEach(function (n) { nodeMap[n.id] = n; });
-    var links = g.edges.map(function (e) {
+
+    var links = (g.edges || []).map(function (e) {
       return {
         source: nodeMap[e.source] || e.source,
         target: nodeMap[e.target] || e.target,
         relationship: e.relationship,
-        metadata: e.metadata,
+        grounding: e.grounding || (e.metadata ? e.metadata.grounding : 'DIRECT'),
+        explanation: e.explanation || (e.metadata ? e.metadata.explanation : ''),
+        metadata: e.metadata || {}
       };
-    }).filter(function (l) { return l.source && l.target && typeof l.source === 'object' && typeof l.target === 'object'; });
+    }).filter(function (l) {
+      return l.source && l.target && typeof l.source === 'object' && typeof l.target === 'object';
+    });
 
-    // Force simulation
+    // Helper to identify primary hierarchy
+    function isPrimaryNodeType(t) {
+      return ['PRODUCT', 'INGREDIENT', 'CLAIM', 'EVIDENCE', 'PATENT', 'REGULATION', 'RISK', 'INNOVATION_COMPONENT'].indexOf(t) !== -1;
+    }
+
+    function getNodeRadius(d) {
+      if (d.type === 'PRODUCT') return 22;
+      if (isPrimaryNodeType(d.type)) return 14;
+      return 9;
+    }
+
+    // Force Simulation setup
     var simulation = d3.forceSimulation(g.nodes)
-      .force('link', d3.forceLink(links).id(function (d) { return d.id; }).distance(120))
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('link', d3.forceLink(links).id(function (d) { return d.id; }).distance(function (l) {
+        if (l.source.type === 'PRODUCT' || l.target.type === 'PRODUCT') return 140;
+        return 90;
+      }))
+      .force('charge', d3.forceManyBody().strength(function (d) {
+        if (d.type === 'PRODUCT') return -600;
+        if (isPrimaryNodeType(d.type)) return -250;
+        return -120;
+      }))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(30));
+      .force('collision', d3.forceCollide().radius(function (d) {
+        return getNodeRadius(d) + 16;
+      }));
 
     window._graphSimulation = simulation;
-    window._graphSvg = svg;
     window._graphNodes = g.nodes;
     window._graphLinks = links;
+    window._selectedNodeId = null;
+    window._activeLens = 'OVERVIEW';
 
-    // Links
-    var link = g_group.append('g').selectAll('line')
-      .data(links).enter().append('line')
-      .attr('stroke', '#999').attr('stroke-opacity', 0.4).attr('stroke-width', 1)
-      .attr('marker-end', 'url(#arrow)');
+    // Links Rendering
+    var linkGroup = g_group.append('g').attr('class', 'kg-links-layer');
+    var link = linkGroup.selectAll('line')
+      .data(links)
+      .enter().append('line')
+      .attr('class', 'graph-link')
+      .attr('stroke', '#475569')
+      .attr('stroke-opacity', 0.28)
+      .attr('stroke-width', 1.2)
+      .attr('marker-end', 'url(#kg-arrow)');
 
-    // Link labels
-    var linkLabel = g_group.append('g').selectAll('text')
-      .data(links).enter().append('text')
-      .attr('font-size', '8px').attr('fill', '#666').attr('text-anchor', 'middle')
+    // Link Labels (shown on hover/selection)
+    var linkLabelGroup = g_group.append('g').attr('class', 'kg-link-labels-layer');
+    var linkLabel = linkLabelGroup.selectAll('text')
+      .data(links)
+      .enter().append('text')
+      .attr('class', 'graph-link-label')
+      .attr('text-anchor', 'middle')
+      .attr('dy', -4)
       .text(function (d) { return d.relationship.replace(/_/g, ' '); });
 
-    // Nodes
-    var node = g_group.append('g').selectAll('g')
-      .data(g.nodes).enter().append('g')
-      .attr('class', 'graph-node')
-      .style('cursor', 'pointer')
+    // Nodes Rendering
+    var nodeGroup = g_group.append('g').attr('class', 'kg-nodes-layer');
+    var node = nodeGroup.selectAll('g')
+      .data(g.nodes)
+      .enter().append('g')
+      .attr('class', function (d) {
+        return 'graph-node' + (d.type === 'PRODUCT' ? ' active-product' : '');
+      })
       .call(d3.drag()
         .on('start', function (event, d) {
-          if (!event.active) simulation.alphaTarget(0.3).restart();
+          if (!event.active) simulation.alphaTarget(0.2).restart();
           d.fx = d.x; d.fy = d.y;
         })
         .on('drag', function (event, d) { d.fx = event.x; d.fy = event.y; })
@@ -3924,120 +4062,510 @@
         })
       );
 
-    // Node circles
+    // Outer Halo for Product
+    node.filter(function (d) { return d.type === 'PRODUCT'; })
+      .append('circle')
+      .attr('r', 28)
+      .attr('fill', 'none')
+      .attr('stroke', '#34d399')
+      .attr('stroke-width', 1.5)
+      .attr('stroke-dasharray', '4 3')
+      .attr('opacity', 0.85);
+
+    // Node Main Circle
     node.append('circle')
-      .attr('r', function (d) { return d.type === 'PRODUCT' ? 18 : 10; })
+      .attr('r', function (d) { return getNodeRadius(d); })
       .attr('fill', function (d) { return d.color || '#757575'; })
-      .attr('stroke', '#fff').attr('stroke-width', 2);
+      .attr('stroke', function (d) {
+        return d.type === 'PRODUCT' ? '#34d399' : (isPrimaryNodeType(d.type) ? '#ffffff' : 'rgba(255,255,255,0.7)');
+      })
+      .attr('stroke-width', function (d) {
+        return d.type === 'PRODUCT' ? 3 : 2;
+      });
 
-    // Node labels
+    // Node Labels
     node.append('text')
-      .attr('dy', function (d) { return d.type === 'PRODUCT' ? -24 : -16; })
+      .attr('dy', function (d) { return getNodeRadius(d) + 12; })
       .attr('text-anchor', 'middle')
-      .attr('font-size', function (d) { return d.type === 'PRODUCT' ? '11px' : '9px'; })
+      .attr('font-size', function (d) { return d.type === 'PRODUCT' ? '11px' : (isPrimaryNodeType(d.type) ? '9px' : '8px'); })
       .attr('font-weight', function (d) { return d.type === 'PRODUCT' ? '700' : '500'; })
-      .attr('fill', '#333')
-      .text(function (d) { var lbl = d.label || ''; return lbl.length > 25 ? lbl.substring(0, 22) + '...' : lbl; });
+      .text(function (d) {
+        var lbl = d.label || '';
+        var maxLen = d.type === 'PRODUCT' ? 26 : 18;
+        return lbl.length > maxLen ? lbl.substring(0, maxLen - 1) + '…' : lbl;
+      });
 
-    // Node click
-    node.on('click', function (event, d) {
-      event.stopPropagation();
-      showNodeDetail(d);
+    var tooltip = document.getElementById('kg-tooltip');
+
+    // Node Hover Interactions
+    node.on('mouseenter', function (event, d) {
+      if (window._selectedNodeId) return; // Keep locked selection
+
+      // Find 1-hop connected neighbors & links
+      var connectedNodeIds = {};
+      connectedNodeIds[d.id] = true;
+      var connectedLinks = {};
+
+      links.forEach(function (l) {
+        if (l.source.id === d.id) {
+          connectedNodeIds[l.target.id] = true;
+          connectedLinks[l.source.id + '->' + l.target.id] = true;
+        } else if (l.target.id === d.id) {
+          connectedNodeIds[l.source.id] = true;
+          connectedLinks[l.source.id + '->' + l.target.id] = true;
+        }
+      });
+
+      // Highlight active neighborhood
+      node.style('opacity', function (n) {
+        return connectedNodeIds[n.id] ? 1 : 0.15;
+      });
+
+      link
+        .attr('stroke-opacity', function (l) {
+          return connectedLinks[l.source.id + '->' + l.target.id] ? 0.9 : 0.05;
+        })
+        .attr('stroke-width', function (l) {
+          return connectedLinks[l.source.id + '->' + l.target.id] ? 2 : 1;
+        })
+        .attr('marker-end', function (l) {
+          return connectedLinks[l.source.id + '->' + l.target.id] ? 'url(#kg-arrow-highlight)' : 'url(#kg-arrow)';
+        });
+
+      linkLabel.classed('visible', function (l) {
+        return !!connectedLinks[l.source.id + '->' + l.target.id];
+      });
+
+      // Show rich tooltip
+      if (tooltip) {
+        var meta = d.metadata || {};
+        var tipHtml = '<div class="kg-tooltip-type">' + escapeHtml(d.type.replace(/_/g, ' ')) + '</div>'
+          + '<div class="kg-tooltip-title">' + escapeHtml(d.label) + '</div>';
+
+        var metaDetails = [];
+        if (meta.confidence !== undefined && meta.confidence !== null) {
+          var confVal = typeof meta.confidence === 'number' ? Math.round(meta.confidence * 100) + '%' : meta.confidence;
+          metaDetails.push('Confidence: <strong>' + escapeHtml(String(confVal)) + '</strong>');
+        }
+        if (meta.severity) {
+          metaDetails.push('Severity: <strong>' + escapeHtml(String(meta.severity)) + '</strong>');
+        }
+        if (meta.assessment_source) {
+          metaDetails.push('Source: <strong>' + (meta.assessment_source === 'GEMINI' ? 'AI-Assisted' : 'Rule Engine') + '</strong>');
+        }
+        if (meta.jurisdiction) {
+          metaDetails.push('Jurisdiction: <strong>' + escapeHtml(String(meta.jurisdiction)) + '</strong>');
+        }
+
+        if (metaDetails.length > 0) {
+          tipHtml += '<div class="kg-tooltip-meta">' + metaDetails.join(' · ') + '</div>';
+        }
+
+        tooltip.innerHTML = tipHtml;
+        tooltip.style.display = 'block';
+        var bounds = container.getBoundingClientRect();
+        tooltip.style.left = (event.clientX - bounds.left + 14) + 'px';
+        tooltip.style.top = (event.clientY - bounds.top + 14) + 'px';
+      }
     });
 
-    // Tick
+    node.on('mousemove', function (event) {
+      if (tooltip && tooltip.style.display !== 'none') {
+        var bounds = container.getBoundingClientRect();
+        tooltip.style.left = (event.clientX - bounds.left + 14) + 'px';
+        tooltip.style.top = (event.clientY - bounds.top + 14) + 'px';
+      }
+    });
+
+    node.on('mouseleave', function () {
+      if (tooltip) tooltip.style.display = 'none';
+      if (!window._selectedNodeId) {
+        applyGraphLens(window._activeLens || 'OVERVIEW');
+      }
+    });
+
+    // Node Click -> Lock Selection and Open Drawer
+    node.on('click', function (event, d) {
+      event.stopPropagation();
+      selectGraphNode(d);
+    });
+
+    // Background Click -> Deselect and Close Drawer
+    svg.on('click', function () {
+      deselectGraphNode();
+    });
+
+    // Simulation Tick
     simulation.on('tick', function () {
       link
         .attr('x1', function (d) { return d.source.x; })
         .attr('y1', function (d) { return d.source.y; })
         .attr('x2', function (d) { return d.target.x; })
         .attr('y2', function (d) { return d.target.y; });
+
       linkLabel
         .attr('x', function (d) { return (d.source.x + d.target.x) / 2; })
         .attr('y', function (d) { return (d.source.y + d.target.y) / 2; });
-      node.attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+
+      node.attr('transform', function (d) {
+        return 'translate(' + d.x + ',' + d.y + ')';
+      });
     });
 
-    // Click on background to deselect
-    svg.on('click', function () {
-      document.getElementById('graph-node-detail').style.display = 'none';
-    });
+    // Initial lens activation
+    applyGraphLens('OVERVIEW');
   }
 
-  function showNodeDetail(d) {
-    var panel = document.getElementById('graph-node-detail');
-    if (!panel) return;
+  // ----------------------------------------------------------------
+  // Graph Lens Application (Client-Side Filtering & Dimming)
+  // ----------------------------------------------------------------
+  function applyGraphLens(lensName) {
+    window._activeLens = lensName;
+    var lens = GRAPH_LENSES[lensName] || GRAPH_LENSES.OVERVIEW;
+    if (!window._graphSvg) return;
 
-    var meta = d.metadata || {};
-    var html = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">'
-      + '<span style="width:16px;height:16px;border-radius:50%;background:' + (d.color || '#757575') + '"></span>'
-      + '<div><div style="font-size:16px;font-weight:600">' + escapeHtml(d.label) + '</div>'
-      + '<div style="font-size:12px;color:var(--color-on-surface-variant)">' + escapeHtml(d.type) + '</div></div></div>';
+    var primarySet = {};
+    (lens.primaryTypes || []).forEach(function (t) { primarySet[t] = true; });
+    var supportingSet = {};
+    (lens.supportingTypes || []).forEach(function (t) { supportingSet[t] = true; });
 
-    // Metadata
-    var metaKeys = Object.keys(meta).filter(function (k) { return meta[k] !== null && meta[k] !== undefined && meta[k] !== ''; });
-    if (metaKeys.length > 0) {
-      html += '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:8px">';
-      metaKeys.forEach(function (k) {
-        var val = meta[k];
-        if (typeof val === 'object') val = JSON.stringify(val);
-        html += '<div><span class="label-caps" style="color:var(--color-on-surface-variant);font-size:10px">' + escapeHtml(k.replace(/_/g, ' ')) + '</span>'
-          + '<div style="font-size:13px;margin-top:2px">' + escapeHtml(String(val).substring(0, 100)) + '</div></div>';
+    // Update node emphasis
+    window._graphSvg.selectAll('.graph-node')
+      .style('opacity', function (d) {
+        if (window._selectedNodeId) {
+          return d.id === window._selectedNodeId ? 1 : 0.2;
+        }
+        if (primarySet[d.type]) return 1;
+        if (supportingSet[d.type]) return 0.45;
+        return 0.12;
       });
-      html += '</div>';
+
+    // Update edge emphasis
+    window._graphSvg.selectAll('.graph-link')
+      .attr('stroke-opacity', function (l) {
+        if (window._selectedNodeId) {
+          return (l.source.id === window._selectedNodeId || l.target.id === window._selectedNodeId) ? 0.9 : 0.05;
+        }
+        var srcEmphasized = primarySet[l.source.type];
+        var tgtEmphasized = primarySet[l.target.type];
+        if (srcEmphasized && tgtEmphasized) return 0.35;
+        if (srcEmphasized || tgtEmphasized) return 0.18;
+        return 0.06;
+      })
+      .attr('stroke-width', 1.2)
+      .attr('marker-end', 'url(#kg-arrow)');
+
+    window._graphSvg.selectAll('.graph-link-label').classed('visible', false);
+
+    // Gently reheat simulation
+    if (window._graphSimulation) {
+      window._graphSimulation.alpha(0.08).restart();
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // Node Selection & Intelligence Drawer
+  // ----------------------------------------------------------------
+  function selectGraphNode(d) {
+    window._selectedNodeId = d.id;
+    if (!window._graphSvg) return;
+
+    // Highlight selected node visually
+    window._graphSvg.selectAll('.graph-node')
+      .classed('active-selected', function (n) { return n.id === d.id; });
+
+    // Find connected links and nodes
+    var connectedNodeIds = {};
+    connectedNodeIds[d.id] = true;
+    var connectedLinks = {};
+
+    (window._graphLinks || []).forEach(function (l) {
+      if (l.source.id === d.id) {
+        connectedNodeIds[l.target.id] = true;
+        connectedLinks[l.source.id + '->' + l.target.id] = true;
+      } else if (l.target.id === d.id) {
+        connectedNodeIds[l.source.id] = true;
+        connectedLinks[l.source.id + '->' + l.target.id] = true;
+      }
+    });
+
+    window._graphSvg.selectAll('.graph-node')
+      .style('opacity', function (n) {
+        return connectedNodeIds[n.id] ? 1 : 0.15;
+      });
+
+    window._graphSvg.selectAll('.graph-link')
+      .attr('stroke-opacity', function (l) {
+        return connectedLinks[l.source.id + '->' + l.target.id] ? 0.9 : 0.05;
+      })
+      .attr('stroke-width', function (l) {
+        return connectedLinks[l.source.id + '->' + l.target.id] ? 2.2 : 1;
+      })
+      .attr('marker-end', function (l) {
+        return connectedLinks[l.source.id + '->' + l.target.id] ? 'url(#kg-arrow-highlight)' : 'url(#kg-arrow)';
+      });
+
+    window._graphSvg.selectAll('.graph-link-label')
+      .classed('visible', function (l) {
+        return !!connectedLinks[l.source.id + '->' + l.target.id];
+      });
+
+    showNodeDrawer(d);
+  }
+
+  function deselectGraphNode() {
+    window._selectedNodeId = null;
+    if (window._graphSvg) {
+      window._graphSvg.selectAll('.graph-node').classed('active-selected', false);
+    }
+    hideNodeDrawer();
+    applyGraphLens(window._activeLens || 'OVERVIEW');
+  }
+
+  function showNodeDrawer(d) {
+    var drawer = document.getElementById('kg-drawer');
+    var badgesEl = document.getElementById('kg-drawer-badges');
+    var titleEl = document.getElementById('kg-drawer-title');
+    var bodyEl = document.getElementById('kg-drawer-body');
+    if (!drawer || !badgesEl || !titleEl || !bodyEl) return;
+
+    titleEl.textContent = d.label || 'Entity Details';
+
+    // Header Badges
+    var meta = d.metadata || {};
+    var badgesHtml = '<span class="chip" style="background:' + (d.color || '#34d399') + '22;color:' + (d.color || '#34d399') + ';font-weight:700;font-size:11px;">'
+      + escapeHtml(d.type.replace(/_/g, ' ')) + '</span>';
+
+    if (meta.confidence !== undefined && meta.confidence !== null) {
+      var confNum = typeof meta.confidence === 'number' ? Math.round(meta.confidence * 100) : parseInt(meta.confidence, 10);
+      var confLabel = isNaN(confNum) ? meta.confidence : confNum + '% Confidence';
+      badgesHtml += '<span class="chip" style="background:rgba(52,211,153,0.12);color:#34d399;font-size:10px;">' + icon('verified', 12) + ' ' + escapeHtml(String(confLabel)) + '</span>';
     }
 
-    // Find connected edges
-    if (window._graphLinks) {
-      var connected = window._graphLinks.filter(function (l) {
-        return (l.source && l.source.id === d.id) || (l.target && l.target.id === d.id);
-      });
-      if (connected.length > 0) {
-        html += '<div style="margin-top:12px"><span class="label-caps" style="color:var(--color-on-surface-variant);font-size:10px">CONNECTIONS (' + connected.length + ')</span></div>';
-        connected.slice(0, 10).forEach(function (l) {
-          var other = (l.source.id === d.id) ? l.target : l.source;
-          var direction = (l.source.id === d.id) ? '->' : '<-';
-          html += '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--color-outline-variant)">'
-            + escapeHtml(l.relationship.replace(/_/g, ' ')) + ' ' + direction + ' '
-            + '<strong>' + escapeHtml(other.label || other.id) + '</strong>'
-            + ' <span style="color:var(--color-on-surface-variant)">(' + escapeHtml(other.type) + ')</span></div>';
+    if (meta.severity) {
+      var sevColor = meta.severity === 'HIGH' || meta.severity === 'CRITICAL' ? '#ef4444' : (meta.severity === 'MODERATE' ? '#f59e0b' : '#34d399');
+      badgesHtml += '<span class="chip" style="background:' + sevColor + '22;color:' + sevColor + ';font-weight:700;font-size:10px;">' + escapeHtml(String(meta.severity)) + ' Severity</span>';
+    }
+
+    if (meta.assessment_source) {
+      var srcLabel = meta.assessment_source === 'GEMINI' ? 'AI-Assisted (' + (meta.model_used || 'Gemini') + ')' : 'Deterministic Rule Engine';
+      badgesHtml += '<span class="chip" style="background:rgba(147,51,234,0.12);color:#c084fc;font-size:10px;">' + icon('psychology', 12) + ' ' + escapeHtml(srcLabel) + '</span>';
+    }
+
+    badgesEl.innerHTML = badgesHtml;
+
+    // Body Content
+    var bodyHtml = '';
+
+    // Section 1: Summary / Rationale / Full Claim
+    if (meta.full_text) {
+      bodyHtml += '<div class="kg-drawer-section">'
+        + '<div class="kg-drawer-section-title">' + icon('format_quote', 14) + ' Claim Assertion</div>'
+        + '<div class="kg-drawer-card" style="font-style:italic;border-left:3px solid #00bcd4;">"' + escapeHtml(meta.full_text) + '"</div>'
+        + '</div>';
+    } else if (meta.rationale || meta.why_it_matters || meta.summary || meta.description) {
+      var mainText = meta.rationale || meta.why_it_matters || meta.summary || meta.description;
+      bodyHtml += '<div class="kg-drawer-section">'
+        + '<div class="kg-drawer-section-title">' + icon('lightbulb', 14) + ' Intelligence Summary</div>'
+        + '<div class="kg-drawer-card">' + escapeHtml(String(mainText)) + '</div>'
+        + '</div>';
+    }
+
+    if (meta.recommended_action) {
+      bodyHtml += '<div class="kg-drawer-section">'
+        + '<div class="kg-drawer-section-title">' + icon('task_alt', 14) + ' Recommended Action</div>'
+        + '<div class="kg-drawer-card callout-action"><strong>Action:</strong> ' + escapeHtml(meta.recommended_action) + '</div>'
+        + '</div>';
+    }
+
+    // Section 2: Connected Graph Relationships
+    var connections = [];
+    (window._graphLinks || []).forEach(function (l) {
+      if (l.source.id === d.id) {
+        connections.push({
+          target: l.target,
+          relationship: l.relationship,
+          direction: 'out',
+          grounding: l.grounding || 'DIRECT',
+          explanation: l.explanation || ''
+        });
+      } else if (l.target.id === d.id) {
+        connections.push({
+          target: l.source,
+          relationship: l.relationship,
+          direction: 'in',
+          grounding: l.grounding || 'DIRECT',
+          explanation: l.explanation || ''
         });
       }
+    });
+
+    if (connections.length > 0) {
+      bodyHtml += '<div class="kg-drawer-section">'
+        + '<div class="kg-drawer-section-title">' + icon('hub', 14) + ' Connections (' + connections.length + ')</div>'
+        + '<div style="display:flex;flex-direction:column;gap:6px;">';
+
+      connections.forEach(function (c) {
+        var isDirect = (c.grounding || '').toUpperCase() === 'DIRECT';
+        var groundingClass = isDirect ? 'direct' : 'derived';
+        var arrowSym = c.direction === 'out' ? '→' : '←';
+
+        bodyHtml += '<div class="kg-conn-item">'
+          + '<div class="kg-conn-left">'
+          + '<span class="kg-conn-rel">' + arrowSym + ' ' + escapeHtml(c.relationship.replace(/_/g, ' ')) + '</span>'
+          + '<span class="kg-conn-name">' + escapeHtml(c.target.label || c.target.id) + '</span>'
+          + '</div>'
+          + '<span class="kg-conn-grounding ' + groundingClass + '" title="' + escapeHtml(c.explanation || '') + '">'
+          + escapeHtml(c.grounding || 'DIRECT') + '</span>'
+          + '</div>';
+      });
+
+      bodyHtml += '</div></div>';
     }
 
-    panel.innerHTML = html;
-    panel.style.display = 'block';
+    // Section 3: Key Structured Metadata
+    var skipKeys = {
+      full_text: true, rationale: true, why_it_matters: true, summary: true, description: true,
+      recommended_action: true, assessment_source: true, model_used: true
+    };
+    var dataRows = [];
+    Object.keys(meta).forEach(function (k) {
+      if (!skipKeys[k] && meta[k] !== null && meta[k] !== undefined && meta[k] !== '') {
+        var formattedVal = meta[k];
+        if (typeof formattedVal === 'object') {
+          try { formattedVal = JSON.stringify(formattedVal); } catch (e) { formattedVal = String(formattedVal); }
+        }
+        var formattedKey = k.replace(/_/g, ' ').replace(/\b\w/g, function (l) { return l.toUpperCase(); });
+        dataRows.push({ key: formattedKey, val: String(formattedVal) });
+      }
+    });
+
+    if (dataRows.length > 0) {
+      bodyHtml += '<div class="kg-drawer-section">'
+        + '<div class="kg-drawer-section-title">' + icon('table_chart', 14) + ' Entity Properties</div>'
+        + '<div class="kg-drawer-card"><div class="kg-data-table">';
+
+      dataRows.forEach(function (row) {
+        bodyHtml += '<div class="kg-data-row">'
+          + '<span class="kg-data-key">' + escapeHtml(row.key) + '</span>'
+          + '<span class="kg-data-val">' + escapeHtml(row.val) + '</span>'
+          + '</div>';
+      });
+
+      bodyHtml += '</div></div></div>';
+    }
+
+    // Section 4: Phase C Preview Placeholder (Explicitly non-interactive)
+    bodyHtml += '<div style="margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;gap:8px;">'
+      + '<button class="btn btn-secondary btn-xs" style="flex:1;opacity:0.5;cursor:not-allowed;pointer-events:none;font-size:11px;" disabled>' + icon('timeline', 13) + ' Trace Evidence <span style="font-size:9px;opacity:0.7;margin-left:2px;background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;">Phase C</span></button>'
+      + '<button class="btn btn-secondary btn-xs" style="flex:1;opacity:0.5;cursor:not-allowed;pointer-events:none;font-size:11px;" disabled>' + icon('insights', 13) + ' Impact Ripple <span style="font-size:9px;opacity:0.7;margin-left:2px;background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;">Phase C</span></button>'
+      + '</div>';
+
+    bodyEl.innerHTML = bodyHtml;
+    drawer.style.display = 'flex';
   }
 
-  // Graph filter
-  function filterGraphNodes(type) {
-    if (!window._graphSvg) return;
-    window._graphSvg.selectAll('.graph-node').style('opacity', function (d) {
-      if (type === 'ALL') return 1;
-      return d.type === type ? 1 : 0.15;
-    });
-    window._graphSvg.selectAll('line').style('opacity', function (d) {
-      if (type === 'ALL') return 0.4;
-      var srcType = d.source ? d.source.type : '';
-      var tgtType = d.target ? d.target.type : '';
-      return (srcType === type || tgtType === type) ? 0.6 : 0.05;
-    });
+  function hideNodeDrawer() {
+    var drawer = document.getElementById('kg-drawer');
+    if (drawer) drawer.style.display = 'none';
   }
 
-  // Graph highlight (for search)
-  function highlightGraphNodes(nodeIds) {
-    if (!window._graphSvg) return;
-    var idSet = {};
-    nodeIds.forEach(function (id) { idSet[id] = true; });
-    window._graphSvg.selectAll('.graph-node').style('opacity', function (d) {
-      return idSet[d.id] ? 1 : 0.15;
+  // ----------------------------------------------------------------
+  // Search & Navigation Helpers
+  // ----------------------------------------------------------------
+  function searchGraphLocally(query) {
+    if (!window._graphNodes || !window._graphSvg) return;
+    var q = (query || '').trim().toLowerCase();
+    if (!q) {
+      deselectGraphNode();
+      return;
+    }
+
+    var matchingNodes = (window._graphNodes || []).filter(function (n) {
+      var labelMatch = (n.label || '').toLowerCase().indexOf(q) !== -1;
+      var typeMatch = (n.type || '').toLowerCase().indexOf(q) !== -1;
+      var metaStr = JSON.stringify(n.metadata || {}).toLowerCase();
+      var metaMatch = metaStr.indexOf(q) !== -1;
+      return labelMatch || typeMatch || metaMatch;
     });
+
+    if (matchingNodes.length === 0) {
+      toast('No graph entities match "' + query + '"', 'info');
+      return;
+    }
+
+    toast('Found ' + matchingNodes.length + ' matching entity in graph', 'success');
+
+    var matchMap = {};
+    matchingNodes.forEach(function (n) { matchMap[n.id] = true; });
+
+    window._graphSvg.selectAll('.graph-node')
+      .style('opacity', function (d) { return matchMap[d.id] ? 1 : 0.12; });
+
+    window._graphSvg.selectAll('.graph-link')
+      .attr('stroke-opacity', 0.05);
+
+    // Zoom and center on the first match
+    var target = matchingNodes[0];
+    if (target && typeof target.x === 'number' && typeof target.y === 'number' && window._graphZoom) {
+      var width = window._graphWidth || 800;
+      var height = window._graphHeight || 640;
+      var scale = 1.4;
+      var transform = d3.zoomIdentity
+        .translate(width / 2 - target.x * scale, height / 2 - target.y * scale)
+        .scale(scale);
+
+      window._graphSvg.transition().duration(400).call(window._graphZoom.transform, transform);
+      selectGraphNode(target);
+    }
   }
 
-  function resetGraphHighlight() {
-    if (!window._graphSvg) return;
-    window._graphSvg.selectAll('.graph-node').style('opacity', 1);
-    window._graphSvg.selectAll('line').style('opacity', 0.4);
+  function zoomGraph(scaleFactor) {
+    if (window._graphSvg && window._graphZoom) {
+      window._graphSvg.transition().duration(250).call(window._graphZoom.scaleBy, scaleFactor);
+    }
+  }
+
+  function fitGraphToView() {
+    if (!window._graphSvg || !window._graphZoom || !window._graphNodes || window._graphNodes.length === 0) return;
+    var nodes = window._graphNodes;
+    var xs = nodes.map(function (n) { return n.x || 0; });
+    var ys = nodes.map(function (n) { return n.y || 0; });
+    var minX = Math.min.apply(null, xs);
+    var maxX = Math.max.apply(null, xs);
+    var minY = Math.min.apply(null, ys);
+    var maxY = Math.max.apply(null, ys);
+
+    var width = window._graphWidth || 800;
+    var height = window._graphHeight || 640;
+    var graphW = (maxX - minX) || 1;
+    var graphH = (maxY - minY) || 1;
+
+    var scale = Math.min(width / (graphW + 80), height / (graphH + 80), 1.6);
+    scale = Math.max(scale, 0.3);
+    var midX = (minX + maxX) / 2;
+    var midY = (minY + maxY) / 2;
+
+    var transform = d3.zoomIdentity
+      .translate(width / 2 - midX * scale, height / 2 - midY * scale)
+      .scale(scale);
+
+    window._graphSvg.transition().duration(400).call(window._graphZoom.transform, transform);
+  }
+
+  function resetGraphView() {
+    var searchInput = document.getElementById('kg-search-input');
+    var searchClear = document.getElementById('kg-search-clear');
+    if (searchInput) searchInput.value = '';
+    if (searchClear) searchClear.style.display = 'none';
+
+    // Set overview active
+    document.querySelectorAll('.kg-lens-pill').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-lens') === 'OVERVIEW');
+    });
+
+    deselectGraphNode();
+    fitGraphToView();
   }
 
 
@@ -5415,50 +5943,70 @@
       });
     }
 
-    // Graph search
-    var graphSearchBtn = document.getElementById("graph-search-btn");
-    if (graphSearchBtn) {
-      graphSearchBtn.addEventListener("click", async function () {
-        var q = document.getElementById("graph-search-input");
-        if (!q || !q.value.trim() || !state.currentCase) return;
-        state.loading = true; render({ scroll: "preserve" });
-        try {
-          var data = await api("/api/cases/" + state.currentCase.id + "/knowledge-graph/search?q=" + encodeURIComponent(q.value.trim()));
-          if (data.matching_nodes && data.matching_nodes.length > 0) {
-            toast('Found ' + data.total_matches + ' matching node(s)', 'success');
-            // Highlight matching nodes
-            highlightGraphNodes(data.matching_nodes.map(function(n) { return n.id; }));
-          } else {
-            toast('No matches found', 'info');
-          }
-        } catch (e) { state.error = "Search failed."; }
-        state.loading = false; render({ scroll: "preserve" });
+    var backFromKnowledgeGraphEmpty = document.getElementById("back-from-knowledge-graph-empty");
+    if (backFromKnowledgeGraphEmpty) {
+      backFromKnowledgeGraphEmpty.addEventListener("click", function () {
+        state.knowledgeGraphData = null;
+        navigateBackToCaseDetail();
       });
     }
 
-    // Graph filter buttons
-    document.querySelectorAll(".graph-filter-btn").forEach(function (btn) {
+    // Graph Intelligence Lens Pills
+    document.querySelectorAll(".kg-lens-pill").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        var filterType = btn.getAttribute("data-filter");
-        filterGraphNodes(filterType);
-        // Toggle active state
-        document.querySelectorAll(".graph-filter-btn").forEach(function(b) { b.classList.remove("active"); });
+        var lens = btn.getAttribute("data-lens");
+        document.querySelectorAll(".kg-lens-pill").forEach(function (b) { b.classList.remove("active"); });
         btn.classList.add("active");
+        applyGraphLens(lens);
       });
     });
 
-    // Graph reset
-    var graphResetBtn = document.getElementById("graph-reset-btn");
-    if (graphResetBtn) {
-      graphResetBtn.addEventListener("click", function () {
-        if (window._graphSimulation) {
-          window._graphSimulation.alpha(0.3).restart();
-        }
-        document.querySelectorAll(".graph-filter-btn").forEach(function(b) { b.classList.remove("active"); });
-        var allBtn = document.querySelector(".graph-filter-btn[data-filter='ALL']");
-        if (allBtn) allBtn.classList.add("active");
-        resetGraphHighlight();
+    // Graph Client-side Search & Clear
+    var kgSearchInput = document.getElementById("kg-search-input");
+    var kgSearchClear = document.getElementById("kg-search-clear");
+    if (kgSearchInput) {
+      kgSearchInput.addEventListener("input", function () {
+        var val = kgSearchInput.value;
+        if (kgSearchClear) kgSearchClear.style.display = val.trim() ? "block" : "none";
+        searchGraphLocally(val);
       });
+      kgSearchInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          searchGraphLocally(kgSearchInput.value);
+        }
+      });
+    }
+    if (kgSearchClear) {
+      kgSearchClear.addEventListener("click", function () {
+        if (kgSearchInput) kgSearchInput.value = "";
+        kgSearchClear.style.display = "none";
+        searchGraphLocally("");
+      });
+    }
+
+    // Graph View Controls (Zoom in/out, fit, reset)
+    var kgZoomIn = document.getElementById("kg-zoom-in");
+    if (kgZoomIn) {
+      kgZoomIn.addEventListener("click", function () { zoomGraph(1.25); });
+    }
+    var kgZoomOut = document.getElementById("kg-zoom-out");
+    if (kgZoomOut) {
+      kgZoomOut.addEventListener("click", function () { zoomGraph(0.8); });
+    }
+    var kgFitBtn = document.getElementById("kg-fit-btn");
+    if (kgFitBtn) {
+      kgFitBtn.addEventListener("click", function () { fitGraphToView(); });
+    }
+    var kgResetBtn = document.getElementById("kg-reset-btn");
+    if (kgResetBtn) {
+      kgResetBtn.addEventListener("click", function () { resetGraphView(); });
+    }
+
+    // Drawer Close
+    var kgDrawerClose = document.getElementById("kg-drawer-close");
+    if (kgDrawerClose) {
+      kgDrawerClose.addEventListener("click", function () { deselectGraphNode(); });
     }
 
     // --- Source Router (Phase 16) ---
