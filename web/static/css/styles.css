@@ -2791,6 +2791,160 @@ a:hover { text-decoration: underline; }
   }
 }
 
+/* Phase C: Trace Evidence & Connection Intelligence Styles */
+.kg-evidence-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+.kg-evidence-status-badge.traceable {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+.kg-evidence-status-badge.no-path {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.kg-trace-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.kg-trace-tab {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.kg-trace-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+}
+.kg-trace-tab.active {
+  background: rgba(52, 211, 153, 0.15);
+  border-color: #34d399;
+  color: #34d399;
+  font-weight: 700;
+}
+
+.kg-trace-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+.kg-trace-step {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.kg-trace-node-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+.kg-trace-node-card.origin-target {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.05);
+}
+.kg-trace-node-card.start-node {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.05);
+}
+.kg-trace-step-conn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0;
+  position: relative;
+}
+.kg-trace-step-line {
+  width: 2px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.15);
+}
+.kg-trace-conn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin: 2px 0;
+}
+
+.kg-conn-expl-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+.kg-conn-expl-card .kg-grounding-help {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.graph-link.active-selected {
+  stroke: #fbbf24 !important;
+  stroke-width: 3.2px !important;
+  stroke-opacity: 1 !important;
+}
+.graph-link.active-trace-link {
+  stroke: #34d399 !important;
+  stroke-width: 3px !important;
+  stroke-opacity: 1 !important;
+}
+.graph-link.active-trace-link.derived {
+  stroke: #c084fc !important;
+}
+.graph-node.active-trace-node circle {
+  stroke: #34d399 !important;
+  stroke-width: 3.5px !important;
+  filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.7));
+}
+.graph-node.active-trace-start circle {
+  stroke: #fbbf24 !important;
+  stroke-width: 4px !important;
+  filter: drop-shadow(0 0 10px rgba(251, 191, 36, 0.8));
+}
+
+.kg-link-hit-area {
+  cursor: pointer;
+  stroke: transparent;
+  stroke-width: 14px;
+}
+
 /* ------------------------------------------------------------------
    Eligibility Check Popup & Button (India AYUSH / FSSAI Compliance)
    ------------------------------------------------------------------ */

@@ -3198,6 +3198,15 @@
     var claimsCount = nodeTypes.CLAIM || 0;
     var productName = g.product_name || (state.currentCase ? state.currentCase.name : 'Product Case');
 
+    var directCount = (g.edges || []).filter(function (e) {
+      var gnd = (e.grounding || (e.metadata && e.metadata.grounding) || "DIRECT").toUpperCase();
+      return gnd === "DIRECT";
+    }).length;
+    var derivedCount = (g.edges || []).filter(function (e) {
+      var gnd = (e.grounding || (e.metadata && e.metadata.grounding) || "").toUpperCase();
+      return gnd === "DERIVED";
+    }).length;
+
     var html = ''
       // Top Navigation bar
       + '<div class="view-header">'
@@ -3216,7 +3225,7 @@
       + '<div class="kg-metrics-strip">'
       + '<span class="kg-metric-item"><strong class="kg-metric-val">' + totalNodes + '</strong> Nodes</span>'
       + '<span class="kg-metric-sep">·</span>'
-      + '<span class="kg-metric-item"><strong class="kg-metric-val">' + totalEdges + '</strong> Relationships</span>'
+      + '<span class="kg-metric-item"><strong class="kg-metric-val">' + totalEdges + '</strong> Relationships <span style="font-size:11px;opacity:0.85;">(' + directCount + ' Direct · ' + derivedCount + ' Derived)</span></span>'
       + '<span class="kg-metric-sep">·</span>'
       + '<span class="kg-metric-item"><strong class="kg-metric-val">' + (nodeTypes.EVIDENCE || 0) + '</strong> Evidence</span>'
       + '<span class="kg-metric-sep">·</span>'
@@ -4034,6 +4043,8 @@
     window._graphNodes = g.nodes;
     window._graphLinks = links;
     window._selectedNodeId = null;
+    window._selectedEdge = null;
+    window._traceMode = false;
     window._activeLens = 'OVERVIEW';
 
     // Links Rendering
@@ -4047,7 +4058,17 @@
       .attr('stroke-width', 1.2)
       .attr('marker-end', 'url(#kg-arrow)');
 
-    // Link Labels (shown on hover/selection)
+    // Hit Areas for Link Interaction (Transparent thick overlay)
+    var hitLinkGroup = g_group.append('g').attr('class', 'kg-link-hit-layer');
+    var hitLink = hitLinkGroup.selectAll('line')
+      .data(links)
+      .enter().append('line')
+      .attr('class', 'kg-link-hit-area')
+      .attr('stroke', 'transparent')
+      .attr('stroke-width', 14)
+      .style('cursor', 'pointer');
+
+    // Link Labels (shown on hover/selection/trace)
     var linkLabelGroup = g_group.append('g').attr('class', 'kg-link-labels-layer');
     var linkLabel = linkLabelGroup.selectAll('text')
       .data(links)
@@ -4114,7 +4135,7 @@
 
     // Node Hover Interactions
     node.on('mouseenter', function (event, d) {
-      if (window._selectedNodeId) return; // Keep locked selection
+      if (window._selectedNodeId || window._selectedEdge || window._traceMode) return; // Keep locked state
 
       // Find 1-hop connected neighbors & links
       var connectedNodeIds = {};
@@ -4194,7 +4215,7 @@
 
     node.on('mouseleave', function () {
       if (tooltip) tooltip.style.display = 'none';
-      if (!window._selectedNodeId) {
+      if (!window._selectedNodeId && !window._selectedEdge && !window._traceMode) {
         applyGraphLens(window._activeLens || 'OVERVIEW');
       }
     });
@@ -4205,6 +4226,43 @@
       selectGraphNode(d);
     });
 
+    // Edge Hover & Click (via transparent hit-areas)
+    hitLink.on('mouseenter', function (event, l) {
+      if (window._selectedNodeId || window._selectedEdge || window._traceMode) return;
+      if (tooltip) {
+        var isDirect = (l.grounding || '').toUpperCase() === 'DIRECT';
+        var gBadge = '<span class="kg-conn-grounding ' + (isDirect ? 'direct' : 'derived') + '">' + escapeHtml(l.grounding || 'DIRECT') + '</span>';
+        var tipHtml = '<div class="kg-tooltip-type">Relationship · ' + gBadge + '</div>'
+          + '<div class="kg-tooltip-title">' + escapeHtml(l.source.label || l.source.id) + ' → ' + escapeHtml(l.target.label || l.target.id) + '</div>'
+          + '<div class="kg-tooltip-meta"><strong>' + escapeHtml(l.relationship.replace(/_/g, ' ')) + '</strong>'
+          + (l.explanation ? '<div style="margin-top:4px;font-size:11px;color:#cbd5e1;">' + escapeHtml(l.explanation) + '</div>' : '')
+          + '</div>';
+
+        tooltip.innerHTML = tipHtml;
+        tooltip.style.display = 'block';
+        var bounds = container.getBoundingClientRect();
+        tooltip.style.left = (event.clientX - bounds.left + 14) + 'px';
+        tooltip.style.top = (event.clientY - bounds.top + 14) + 'px';
+      }
+    });
+
+    hitLink.on('mousemove', function (event) {
+      if (tooltip && tooltip.style.display !== 'none') {
+        var bounds = container.getBoundingClientRect();
+        tooltip.style.left = (event.clientX - bounds.left + 14) + 'px';
+        tooltip.style.top = (event.clientY - bounds.top + 14) + 'px';
+      }
+    });
+
+    hitLink.on('mouseleave', function () {
+      if (tooltip) tooltip.style.display = 'none';
+    });
+
+    hitLink.on('click', function (event, l) {
+      event.stopPropagation();
+      selectGraphEdge(l);
+    });
+
     // Background Click -> Deselect and Close Drawer
     svg.on('click', function () {
       deselectGraphNode();
@@ -4213,6 +4271,12 @@
     // Simulation Tick
     simulation.on('tick', function () {
       link
+        .attr('x1', function (d) { return d.source.x; })
+        .attr('y1', function (d) { return d.source.y; })
+        .attr('x2', function (d) { return d.target.x; })
+        .attr('y2', function (d) { return d.target.y; });
+
+      hitLink
         .attr('x1', function (d) { return d.source.x; })
         .attr('y1', function (d) { return d.source.y; })
         .attr('x2', function (d) { return d.target.x; })
@@ -4232,10 +4296,165 @@
   }
 
   // ----------------------------------------------------------------
+  // Evidence Traversal & Grounding Helpers (Deterministic Graph BFS)
+  // ----------------------------------------------------------------
+  function findEvidenceTraces(startNode, maxDepth, maxTraces) {
+    if (!startNode || !window._graphLinks || !window._graphNodes) return [];
+    maxDepth = maxDepth || 4;
+    maxTraces = maxTraces || 3;
+
+    var evidenceTypes = ['EVIDENCE', 'CASE_FINDING', 'TRADITIONAL_KNOWLEDGE', 'SOURCE', 'BOTANICAL_SOURCE'];
+    var anchorTypes = ['PATENT', 'REGULATION', 'PRODUCT', 'INGREDIENT', 'CLAIM', 'RISK'];
+
+    // If starting node is already Evidence, we trace outwards to Claim, Ingredient, Product
+    var isStartingEvidence = evidenceTypes.indexOf(startNode.type) !== -1;
+    var targetTypes = isStartingEvidence ? anchorTypes : evidenceTypes.concat(anchorTypes);
+
+    // Build adjacency list for fast BFS
+    var adj = {};
+    (window._graphNodes || []).forEach(function (n) { adj[n.id] = []; });
+    (window._graphLinks || []).forEach(function (l) {
+      if (adj[l.source.id]) adj[l.source.id].push({ neighbor: l.target, link: l, dir: 'out' });
+      if (adj[l.target.id]) adj[l.target.id].push({ neighbor: l.source, link: l, dir: 'in' });
+    });
+
+    var queue = [{
+      curr: startNode,
+      pathNodes: [startNode],
+      pathLinks: [],
+      visited: {}
+    }];
+    queue[0].visited[startNode.id] = true;
+
+    var candidatePaths = [];
+
+    while (queue.length > 0) {
+      var item = queue.shift();
+      if (item.pathLinks.length >= maxDepth) continue;
+
+      var edges = adj[item.curr.id] || [];
+      for (var i = 0; i < edges.length; i++) {
+        var edge = edges[i];
+        var nbr = edge.neighbor;
+        if (item.visited[nbr.id]) continue;
+
+        var nextVisited = {};
+        Object.keys(item.visited).forEach(function (k) { nextVisited[k] = true; });
+        nextVisited[nbr.id] = true;
+
+        var nextPathNodes = item.pathNodes.concat([nbr]);
+        var nextPathLinks = item.pathLinks.concat([edge.link]);
+
+        var isTargetMatch = targetTypes.indexOf(nbr.type) !== -1 && nbr.id !== startNode.id;
+        var isEvidenceEnd = evidenceTypes.indexOf(nbr.type) !== -1;
+
+        if (isTargetMatch) {
+          var directCount = nextPathLinks.filter(function (l) {
+            return (l.grounding || '').toUpperCase() === 'DIRECT';
+          }).length;
+          var derivedCount = nextPathLinks.length - directCount;
+
+          candidatePaths.push({
+            nodes: nextPathNodes,
+            links: nextPathLinks,
+            directCount: directCount,
+            derivedCount: derivedCount,
+            targetType: nbr.type,
+            targetLabel: nbr.label || nbr.id,
+            hops: nextPathLinks.length,
+            isEvidence: isEvidenceEnd
+          });
+        }
+
+        if (nextPathLinks.length < maxDepth) {
+          queue.push({
+            curr: nbr,
+            pathNodes: nextPathNodes,
+            pathLinks: nextPathLinks,
+            visited: nextVisited
+          });
+        }
+      }
+    }
+
+    // Rank candidate traces:
+    // 1. Evidence-bearing targets first (if startNode is not Evidence)
+    // 2. Shorter hop distance
+    // 3. Higher direct grounding count
+    candidatePaths.sort(function (a, b) {
+      if (a.isEvidence !== b.isEvidence) return a.isEvidence ? -1 : 1;
+      if (a.hops !== b.hops) return a.hops - b.hops;
+      return b.directCount - a.directCount;
+    });
+
+    // Deduplicate by target ID
+    var seenTargets = {};
+    var uniquePaths = [];
+    for (var p = 0; p < candidatePaths.length; p++) {
+      var path = candidatePaths[p];
+      var targetId = path.nodes[path.nodes.length - 1].id;
+      if (!seenTargets[targetId]) {
+        seenTargets[targetId] = true;
+        uniquePaths.push(path);
+        if (uniquePaths.length >= maxTraces) break;
+      }
+    }
+
+    return uniquePaths;
+  }
+
+  function getNodeEvidenceStatus(d, traces) {
+    var evidenceTypes = ['EVIDENCE', 'CASE_FINDING', 'TRADITIONAL_KNOWLEDGE', 'SOURCE', 'BOTANICAL_SOURCE'];
+    if (evidenceTypes.indexOf(d.type) !== -1) {
+      return {
+        status: 'PRIMARY_SOURCE',
+        badgeClass: 'traceable',
+        label: 'PRIMARY EVIDENCE',
+        description: 'This entity is an empirical evidence source, classical literature record, or verified case finding.'
+      };
+    }
+
+    var hasEvidenceTrace = (traces || []).some(function (t) {
+      return t.isEvidence;
+    });
+
+    if (d.type === 'CLAIM' || d.type === 'RISK') {
+      if (hasEvidenceTrace) {
+        return {
+          status: 'TRACEABLE',
+          badgeClass: 'traceable',
+          label: 'TRACEABLE EVIDENCE',
+          description: 'Verified grounded trail connects this ' + d.type.toLowerCase() + ' to empirical scientific/classical evidence.'
+        };
+      } else {
+        return {
+          status: 'NO_GROUNDED_PATH',
+          badgeClass: 'no-path',
+          label: 'NO GROUNDED PATH',
+          description: 'No scientific or classical literature evidence node is currently linked to this ' + d.type.toLowerCase() + ' in the graph.'
+        };
+      }
+    }
+
+    if (traces && traces.length > 0) {
+      return {
+        status: 'CONNECTED',
+        badgeClass: 'traceable',
+        label: 'GRAPH CONNECTED',
+        description: 'Grounded relationships connect this node across ' + traces.length + ' multi-hop pathway' + (traces.length === 1 ? '' : 's') + '.'
+      };
+    }
+
+    return null;
+  }
+
+  // ----------------------------------------------------------------
   // Graph Lens Application (Client-Side Filtering & Dimming)
   // ----------------------------------------------------------------
   function applyGraphLens(lensName) {
     window._activeLens = lensName;
+    window._selectedEdge = null;
+    window._traceMode = false;
     var lens = GRAPH_LENSES[lensName] || GRAPH_LENSES.OVERVIEW;
     if (!window._graphSvg) return;
 
@@ -4244,8 +4463,10 @@
     var supportingSet = {};
     (lens.supportingTypes || []).forEach(function (t) { supportingSet[t] = true; });
 
-    // Update node emphasis
+    // Clean active trace classes
     window._graphSvg.selectAll('.graph-node')
+      .classed('active-trace-node', false)
+      .classed('active-trace-start', false)
       .style('opacity', function (d) {
         if (window._selectedNodeId) {
           return d.id === window._selectedNodeId ? 1 : 0.2;
@@ -4257,6 +4478,9 @@
 
     // Update edge emphasis
     window._graphSvg.selectAll('.graph-link')
+      .classed('active-selected', false)
+      .classed('active-trace-link', false)
+      .classed('derived', false)
       .attr('stroke-opacity', function (l) {
         if (window._selectedNodeId) {
           return (l.source.id === window._selectedNodeId || l.target.id === window._selectedNodeId) ? 0.9 : 0.05;
@@ -4283,10 +4507,14 @@
   // ----------------------------------------------------------------
   function selectGraphNode(d) {
     window._selectedNodeId = d.id;
+    window._selectedEdge = null;
+    window._traceMode = false;
     if (!window._graphSvg) return;
 
     // Highlight selected node visually
     window._graphSvg.selectAll('.graph-node')
+      .classed('active-trace-node', false)
+      .classed('active-trace-start', false)
       .classed('active-selected', function (n) { return n.id === d.id; });
 
     // Find connected links and nodes
@@ -4310,6 +4538,9 @@
       });
 
     window._graphSvg.selectAll('.graph-link')
+      .classed('active-selected', false)
+      .classed('active-trace-link', false)
+      .classed('derived', false)
       .attr('stroke-opacity', function (l) {
         return connectedLinks[l.source.id + '->' + l.target.id] ? 0.9 : 0.05;
       })
@@ -4330,8 +4561,17 @@
 
   function deselectGraphNode() {
     window._selectedNodeId = null;
+    window._selectedEdge = null;
+    window._traceMode = false;
     if (window._graphSvg) {
-      window._graphSvg.selectAll('.graph-node').classed('active-selected', false);
+      window._graphSvg.selectAll('.graph-node')
+        .classed('active-selected', false)
+        .classed('active-trace-node', false)
+        .classed('active-trace-start', false);
+      window._graphSvg.selectAll('.graph-link')
+        .classed('active-selected', false)
+        .classed('active-trace-link', false)
+        .classed('derived', false);
     }
     hideNodeDrawer();
     applyGraphLens(window._activeLens || 'OVERVIEW');
@@ -4372,6 +4612,21 @@
     // Body Content
     var bodyHtml = '';
 
+    // Evidence Grounding Status Block
+    var traces = findEvidenceTraces(d, 4, 3);
+    var evidenceStatus = getNodeEvidenceStatus(d, traces);
+    if (evidenceStatus) {
+      bodyHtml += '<div class="kg-drawer-section">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+        + '<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#94a3b8;">Evidence Grounding Status</span>'
+        + '<span class="kg-evidence-status-badge ' + evidenceStatus.badgeClass + '">' + escapeHtml(evidenceStatus.label) + '</span>'
+        + '</div>'
+        + '<div class="kg-drawer-card" style="font-size:11px;line-height:1.45;color:#cbd5e1;">'
+        + escapeHtml(evidenceStatus.description)
+        + '</div>'
+        + '</div>';
+    }
+
     // Section 1: Summary / Rationale / Full Claim
     if (meta.full_text) {
       bodyHtml += '<div class="kg-drawer-section">'
@@ -4393,11 +4648,12 @@
         + '</div>';
     }
 
-    // Section 2: Connected Graph Relationships
+    // Section 2: Connected Graph Relationships (Interactive rows)
     var connections = [];
     (window._graphLinks || []).forEach(function (l) {
       if (l.source.id === d.id) {
         connections.push({
+          linkRef: l,
           target: l.target,
           relationship: l.relationship,
           direction: 'out',
@@ -4406,6 +4662,7 @@
         });
       } else if (l.target.id === d.id) {
         connections.push({
+          linkRef: l,
           target: l.source,
           relationship: l.relationship,
           direction: 'in',
@@ -4417,15 +4674,15 @@
 
     if (connections.length > 0) {
       bodyHtml += '<div class="kg-drawer-section">'
-        + '<div class="kg-drawer-section-title">' + icon('hub', 14) + ' Connections (' + connections.length + ')</div>'
+        + '<div class="kg-drawer-section-title">' + icon('hub', 14) + ' Connected Relationships (' + connections.length + ')</div>'
         + '<div style="display:flex;flex-direction:column;gap:6px;">';
 
-      connections.forEach(function (c) {
+      connections.forEach(function (c, cIdx) {
         var isDirect = (c.grounding || '').toUpperCase() === 'DIRECT';
         var groundingClass = isDirect ? 'direct' : 'derived';
         var arrowSym = c.direction === 'out' ? '→' : '←';
 
-        bodyHtml += '<div class="kg-conn-item">'
+        bodyHtml += '<div class="kg-conn-item" style="cursor:pointer;" data-conn-idx="' + cIdx + '" title="Click to inspect relationship details">'
           + '<div class="kg-conn-left">'
           + '<span class="kg-conn-rel">' + arrowSym + ' ' + escapeHtml(c.relationship.replace(/_/g, ' ')) + '</span>'
           + '<span class="kg-conn-name">' + escapeHtml(c.target.label || c.target.id) + '</span>'
@@ -4470,14 +4727,38 @@
       bodyHtml += '</div></div></div>';
     }
 
-    // Section 4: Phase C Preview Placeholder (Explicitly non-interactive)
+    // Section 4: Phase C Trace Evidence Action
+    var traceCount = traces.length;
+    var traceBtnLabel = traceCount > 0
+      ? (icon('timeline', 13) + ' Trace Evidence (' + traceCount + ' Path' + (traceCount === 1 ? '' : 's') + ')')
+      : (icon('timeline', 13) + ' Trace Evidence (0 Paths)');
+
     bodyHtml += '<div style="margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;gap:8px;">'
-      + '<button class="btn btn-secondary btn-xs" style="flex:1;opacity:0.5;cursor:not-allowed;pointer-events:none;font-size:11px;" disabled>' + icon('timeline', 13) + ' Trace Evidence <span style="font-size:9px;opacity:0.7;margin-left:2px;background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;">Phase C</span></button>'
-      + '<button class="btn btn-secondary btn-xs" style="flex:1;opacity:0.5;cursor:not-allowed;pointer-events:none;font-size:11px;" disabled>' + icon('insights', 13) + ' Impact Ripple <span style="font-size:9px;opacity:0.7;margin-left:2px;background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px;">Phase C</span></button>'
+      + '<button class="btn btn-primary btn-xs" style="flex:1;" id="kg-btn-trace-evidence"' + (traceCount === 0 ? ' disabled style="opacity:0.55;cursor:not-allowed;"' : '') + '>'
+      + traceBtnLabel + '</button>'
       + '</div>';
 
     bodyEl.innerHTML = bodyHtml;
     drawer.style.display = 'flex';
+
+    // Wire connection row clicks
+    drawer.querySelectorAll('.kg-conn-item').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var idx = parseInt(el.getAttribute('data-conn-idx'), 10);
+        if (connections[idx] && connections[idx].linkRef) {
+          selectGraphEdge(connections[idx].linkRef);
+        }
+      });
+    });
+
+    // Wire Trace Evidence click
+    var traceBtn = document.getElementById('kg-btn-trace-evidence');
+    if (traceBtn && traceCount > 0) {
+      traceBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        activateTraceMode(d, traces, 0);
+      });
+    }
   }
 
   function hideNodeDrawer() {
@@ -4486,10 +4767,381 @@
   }
 
   // ----------------------------------------------------------------
+  // Trace Evidence Mode & Multi-Hop Pathway Drawer
+  // ----------------------------------------------------------------
+  function activateTraceMode(startNode, traces, activeIdx) {
+    if (!traces || traces.length === 0) {
+      toast('No evidence trace pathways found for this entity', 'info');
+      return;
+    }
+    window._traceMode = true;
+    window._activeTraces = traces;
+    window._activeTraceIndex = activeIdx || 0;
+    window._traceStartNode = startNode;
+    window._selectedEdge = null;
+    window._selectedNodeId = null;
+
+    var activeTrace = traces[window._activeTraceIndex] || traces[0];
+    var nodeInPathMap = {};
+    var linkInPathMap = {};
+
+    activeTrace.nodes.forEach(function (n) { nodeInPathMap[n.id] = true; });
+    activeTrace.links.forEach(function (l) {
+      linkInPathMap[l.source.id + '->' + l.target.id] = l;
+      linkInPathMap[l.target.id + '->' + l.source.id] = l;
+    });
+
+    if (window._graphSvg) {
+      // Highlight nodes in trace
+      window._graphSvg.selectAll('.graph-node')
+        .style('opacity', function (d) {
+          return nodeInPathMap[d.id] ? 1 : 0.08;
+        })
+        .classed('active-selected', false)
+        .classed('active-trace-node', function (d) {
+          return !!nodeInPathMap[d.id];
+        })
+        .classed('active-trace-start', function (d) {
+          return d.id === startNode.id;
+        });
+
+      // Highlight links in trace
+      window._graphSvg.selectAll('.graph-link')
+        .classed('active-selected', false)
+        .attr('stroke-opacity', function (l) {
+          var key1 = l.source.id + '->' + l.target.id;
+          var key2 = l.target.id + '->' + l.source.id;
+          return (linkInPathMap[key1] || linkInPathMap[key2]) ? 1 : 0.04;
+        })
+        .attr('stroke-width', function (l) {
+          var key1 = l.source.id + '->' + l.target.id;
+          var key2 = l.target.id + '->' + l.source.id;
+          return (linkInPathMap[key1] || linkInPathMap[key2]) ? 3 : 1;
+        })
+        .classed('active-trace-link', function (l) {
+          var key1 = l.source.id + '->' + l.target.id;
+          var key2 = l.target.id + '->' + l.source.id;
+          return !!(linkInPathMap[key1] || linkInPathMap[key2]);
+        })
+        .classed('derived', function (l) {
+          var key1 = l.source.id + '->' + l.target.id;
+          var key2 = l.target.id + '->' + l.source.id;
+          var match = linkInPathMap[key1] || linkInPathMap[key2];
+          return match && (match.grounding || '').toUpperCase() !== 'DIRECT';
+        });
+
+      // Show labels for links in trace
+      window._graphSvg.selectAll('.graph-link-label')
+        .classed('visible', function (l) {
+          var key1 = l.source.id + '->' + l.target.id;
+          var key2 = l.target.id + '->' + l.source.id;
+          return !!(linkInPathMap[key1] || linkInPathMap[key2]);
+        });
+    }
+
+    showTraceDrawer(startNode, traces, window._activeTraceIndex);
+  }
+
+  function showTraceDrawer(startNode, traces, activeIdx) {
+    var drawer = document.getElementById('kg-drawer');
+    var badgesEl = document.getElementById('kg-drawer-badges');
+    var titleEl = document.getElementById('kg-drawer-title');
+    var bodyEl = document.getElementById('kg-drawer-body');
+    if (!drawer || !badgesEl || !titleEl || !bodyEl) return;
+
+    var trace = traces[activeIdx] || traces[0];
+    titleEl.textContent = 'Evidence Trace Pathway';
+
+    // Badges
+    badgesEl.innerHTML = '<span class="chip" style="background:rgba(52,211,153,0.15);color:#34d399;font-weight:700;font-size:11px;">'
+      + icon('timeline', 12) + ' ' + trace.hops + ' Hop' + (trace.hops === 1 ? '' : 's') + '</span>'
+      + '<span class="chip" style="background:rgba(255,255,255,0.06);color:#e2e8f0;font-size:10px;">'
+      + trace.directCount + ' Direct · ' + trace.derivedCount + ' Derived</span>';
+
+    var bodyHtml = '';
+
+    // Tab navigation if multiple traces
+    if (traces.length > 1) {
+      bodyHtml += '<div class="kg-trace-nav">';
+      traces.forEach(function (t, idx) {
+        var isTabActive = idx === activeIdx;
+        var targetName = t.nodes[t.nodes.length - 1].label || t.nodes[t.nodes.length - 1].id;
+        var shortTarget = targetName.length > 16 ? targetName.substring(0, 15) + '…' : targetName;
+        bodyHtml += '<button class="kg-trace-tab ' + (isTabActive ? 'active' : '') + '" data-trace-idx="' + idx + '">'
+          + 'Path ' + (idx + 1) + ' (' + escapeHtml(shortTarget) + ')' + '</button>';
+      });
+      bodyHtml += '</div>';
+    }
+
+    // Trace Timeline
+    bodyHtml += '<div class="kg-drawer-section">'
+      + '<div class="kg-drawer-section-title">' + icon('route', 14) + ' Grounded Path Traversal</div>'
+      + '<div class="kg-trace-timeline">';
+
+    trace.nodes.forEach(function (currNode, idx) {
+      var isStart = idx === 0;
+      var isEnd = idx === trace.nodes.length - 1;
+      var cardClass = isStart ? 'start-node' : (isEnd ? 'origin-target' : '');
+
+      bodyHtml += '<div class="kg-trace-step">'
+        + '<div class="kg-trace-node-card ' + cardClass + '" style="cursor:pointer;" data-node-id="' + escapeHtml(currNode.id) + '">'
+        + '<span class="chip" style="background:' + (currNode.color || '#34d399') + '22;color:' + (currNode.color || '#34d399') + ';font-size:10px;font-weight:700;">'
+        + escapeHtml(currNode.type.replace(/_/g, ' ')) + '</span>'
+        + '<div style="display:flex;flex-direction:column;flex:1;min-width:0;">'
+        + '<span style="font-size:12px;font-weight:600;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(currNode.label || currNode.id) + '</span>'
+        + (isStart ? '<span style="font-size:10px;color:#fbbf24;font-weight:600;">Trace Origin Entity</span>' : (isEnd ? '<span style="font-size:10px;color:#34d399;font-weight:600;">Evidence Destination</span>' : ''))
+        + '</div>'
+        + '</div>';
+
+      if (idx < trace.links.length) {
+        var l = trace.links[idx];
+        var isDirect = (l.grounding || '').toUpperCase() === 'DIRECT';
+        bodyHtml += '<div class="kg-trace-step-conn">'
+          + '<div class="kg-trace-step-line"></div>'
+          + '<span class="kg-trace-conn-badge">'
+          + escapeHtml(l.relationship.replace(/_/g, ' '))
+          + '<span class="kg-conn-grounding ' + (isDirect ? 'direct' : 'derived') + '" style="font-size:9px;padding:1px 5px;">' + escapeHtml(l.grounding || 'DIRECT') + '</span>'
+          + '</span>'
+          + '<div class="kg-trace-step-line"></div>'
+          + '</div>';
+      }
+
+      bodyHtml += '</div>';
+    });
+
+    bodyHtml += '</div></div>';
+
+    // Target Entity Details
+    var targetNode = trace.nodes[trace.nodes.length - 1];
+    var tMeta = targetNode.metadata || {};
+    if (tMeta.rationale || tMeta.summary || tMeta.full_text || tMeta.description || tMeta.source_title) {
+      var descText = tMeta.rationale || tMeta.summary || tMeta.full_text || tMeta.description || tMeta.source_title;
+      bodyHtml += '<div class="kg-drawer-section">'
+        + '<div class="kg-drawer-section-title">' + icon('verified', 14) + ' Evidence Finding Summary</div>'
+        + '<div class="kg-drawer-card" style="font-size:12px;color:#e2e8f0;border-left:3px solid #34d399;">'
+        + escapeHtml(String(descText))
+        + '</div>'
+        + '</div>';
+    }
+
+    // Footer
+    bodyHtml += '<div style="margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;gap:8px;">'
+      + '<button class="btn btn-secondary btn-xs" style="flex:1;" id="kg-btn-exit-trace">' + icon('arrow_back', 12) + ' Exit Trace View</button>'
+      + '</div>';
+
+    bodyEl.innerHTML = bodyHtml;
+    drawer.style.display = 'flex';
+
+    // Wire Tab Clicks
+    drawer.querySelectorAll('.kg-trace-tab').forEach(function (tab) {
+      tab.addEventListener('click', function (e) {
+        e.preventDefault();
+        var idx = parseInt(tab.getAttribute('data-trace-idx'), 10);
+        activateTraceMode(startNode, traces, idx);
+      });
+    });
+
+    // Wire Node Clicks in timeline
+    drawer.querySelectorAll('.kg-trace-node-card').forEach(function (card) {
+      card.addEventListener('click', function () {
+        var nid = card.getAttribute('data-node-id');
+        var nodeObj = (window._graphNodes || []).find(function (n) { return n.id === nid; });
+        if (nodeObj) {
+          selectGraphNode(nodeObj);
+        }
+      });
+    });
+
+    // Wire Exit Button
+    var exitBtn = document.getElementById('kg-btn-exit-trace');
+    if (exitBtn) {
+      exitBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        exitTraceMode();
+      });
+    }
+  }
+
+  function exitTraceMode() {
+    window._traceMode = false;
+    window._activeTraces = null;
+    window._activeTraceIndex = 0;
+
+    if (window._graphSvg) {
+      window._graphSvg.selectAll('.graph-node')
+        .classed('active-trace-node', false)
+        .classed('active-trace-start', false);
+
+      window._graphSvg.selectAll('.graph-link')
+        .classed('active-trace-link', false)
+        .classed('derived', false);
+
+      window._graphSvg.selectAll('.graph-link-label').classed('visible', false);
+    }
+
+    if (window._traceStartNode) {
+      var prevStart = window._traceStartNode;
+      window._traceStartNode = null;
+      selectGraphNode(prevStart);
+    } else {
+      deselectGraphNode();
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // Connection Selection & Connection Intelligence Drawer
+  // ----------------------------------------------------------------
+  function selectGraphEdge(l) {
+    window._selectedEdge = l;
+    window._selectedNodeId = null;
+    window._traceMode = false;
+
+    if (window._graphSvg) {
+      window._graphSvg.selectAll('.graph-node')
+        .classed('active-selected', false)
+        .classed('active-trace-node', false)
+        .classed('active-trace-start', false)
+        .style('opacity', function (d) {
+          return (d.id === l.source.id || d.id === l.target.id) ? 1 : 0.12;
+        });
+
+      window._graphSvg.selectAll('.graph-link')
+        .classed('active-trace-link', false)
+        .classed('derived', false)
+        .classed('active-selected', function (edge) {
+          return (edge.source.id === l.source.id && edge.target.id === l.target.id) ||
+                 (edge.source.id === l.target.id && edge.target.id === l.source.id);
+        })
+        .attr('stroke-opacity', function (edge) {
+          var isSelected = (edge.source.id === l.source.id && edge.target.id === l.target.id) ||
+                           (edge.source.id === l.target.id && edge.target.id === l.source.id);
+          return isSelected ? 1 : 0.05;
+        })
+        .attr('stroke-width', function (edge) {
+          var isSelected = (edge.source.id === l.source.id && edge.target.id === l.target.id) ||
+                           (edge.source.id === l.target.id && edge.target.id === l.source.id);
+          return isSelected ? 3.2 : 1;
+        });
+
+      window._graphSvg.selectAll('.graph-link-label')
+        .classed('visible', function (edge) {
+          return (edge.source.id === l.source.id && edge.target.id === l.target.id) ||
+                 (edge.source.id === l.target.id && edge.target.id === l.source.id);
+        });
+    }
+
+    showConnectionDrawer(l);
+  }
+
+  function showConnectionDrawer(l) {
+    var drawer = document.getElementById('kg-drawer');
+    var badgesEl = document.getElementById('kg-drawer-badges');
+    var titleEl = document.getElementById('kg-drawer-title');
+    var bodyEl = document.getElementById('kg-drawer-body');
+    if (!drawer || !badgesEl || !titleEl || !bodyEl) return;
+
+    var isDirect = (l.grounding || '').toUpperCase() === 'DIRECT';
+    titleEl.textContent = 'Connection Intelligence';
+
+    // Badges
+    badgesEl.innerHTML = '<span class="chip" style="background:rgba(52,211,153,0.12);color:#34d399;font-weight:700;font-size:11px;">'
+      + escapeHtml(l.relationship.replace(/_/g, ' ')) + '</span>'
+      + '<span class="kg-conn-grounding ' + (isDirect ? 'direct' : 'derived') + '" style="font-size:11px;padding:3px 8px;">'
+      + escapeHtml(l.grounding || 'DIRECT') + '</span>';
+
+    var bodyHtml = '';
+
+    // Relationship Explanation Card
+    bodyHtml += '<div class="kg-drawer-section">'
+      + '<div class="kg-drawer-section-title">' + icon('help_outline', 14) + ' Relationship Explanation</div>'
+      + '<div class="kg-conn-expl-card">'
+      + '<div>' + escapeHtml(l.explanation || ('Connects ' + (l.source.label || l.source.id) + ' to ' + (l.target.label || l.target.id) + ' via ' + l.relationship.replace(/_/g, ' ') + '.')) + '</div>'
+      + '<div class="kg-grounding-help">'
+      + (isDirect
+          ? '<strong>DIRECT Grounding:</strong> Verified deterministic reference from source record without heuristic jump.'
+          : '<strong>DERIVED Grounding:</strong> Inferred via rule-based canonical mapping or multi-hop relationship resolution.')
+      + '</div>'
+      + '</div></div>';
+
+    // Endpoints section
+    bodyHtml += '<div class="kg-drawer-section">'
+      + '<div class="kg-drawer-section-title">' + icon('route', 14) + ' Connected Entities</div>'
+      + '<div style="display:flex;flex-direction:column;gap:8px;">'
+      + '<div class="kg-trace-node-card" style="cursor:pointer;" id="kg-conn-source-card">'
+      + '<span class="chip" style="background:' + (l.source.color || '#34d399') + '22;color:' + (l.source.color || '#34d399') + ';font-size:10px;font-weight:700;">' + escapeHtml(l.source.type.replace(/_/g, ' ')) + '</span>'
+      + '<span style="font-size:12px;font-weight:600;color:#f1f5f9;flex:1;">' + escapeHtml(l.source.label || l.source.id) + '</span>'
+      + '<span style="font-size:10px;color:#94a3b8;">Source ' + icon('arrow_forward', 11) + '</span>'
+      + '</div>'
+      + '<div class="kg-trace-node-card" style="cursor:pointer;" id="kg-conn-target-card">'
+      + '<span class="chip" style="background:' + (l.target.color || '#34d399') + '22;color:' + (l.target.color || '#34d399') + ';font-size:10px;font-weight:700;">' + escapeHtml(l.target.type.replace(/_/g, ' ')) + '</span>'
+      + '<span style="font-size:12px;font-weight:600;color:#f1f5f9;flex:1;">' + escapeHtml(l.target.label || l.target.id) + '</span>'
+      + '<span style="font-size:10px;color:#94a3b8;">Target ' + icon('arrow_forward', 11) + '</span>'
+      + '</div>'
+      + '</div></div>';
+
+    // Edge Metadata Properties if any
+    var meta = l.metadata || {};
+    var skipMeta = { grounding: true, explanation: true };
+    var metaRows = [];
+    Object.keys(meta).forEach(function (k) {
+      if (!skipMeta[k] && meta[k] !== null && meta[k] !== undefined && meta[k] !== '') {
+        var val = meta[k];
+        if (typeof val === 'object') {
+          try { val = JSON.stringify(val); } catch (e) { val = String(val); }
+        }
+        var fKey = k.replace(/_/g, ' ').replace(/\b\w/g, function (char) { return char.toUpperCase(); });
+        metaRows.push({ key: fKey, val: String(val) });
+      }
+    });
+
+    if (metaRows.length > 0) {
+      bodyHtml += '<div class="kg-drawer-section">'
+        + '<div class="kg-drawer-section-title">' + icon('table_chart', 14) + ' Relationship Properties</div>'
+        + '<div class="kg-drawer-card"><div class="kg-data-table">';
+      metaRows.forEach(function (row) {
+        bodyHtml += '<div class="kg-data-row"><span class="kg-data-key">' + escapeHtml(row.key) + '</span><span class="kg-data-val">' + escapeHtml(row.val) + '</span></div>';
+      });
+      bodyHtml += '</div></div></div>';
+    }
+
+    // Footer Actions
+    bodyHtml += '<div style="margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;gap:8px;">'
+      + '<button class="btn btn-secondary btn-xs" style="flex:1;" id="kg-btn-close-conn">' + icon('close', 12) + ' Close Connection View</button>'
+      + '</div>';
+
+    bodyEl.innerHTML = bodyHtml;
+    drawer.style.display = 'flex';
+
+    var srcCard = document.getElementById('kg-conn-source-card');
+    if (srcCard) {
+      srcCard.addEventListener('click', function () {
+        selectGraphNode(l.source);
+      });
+    }
+
+    var tgtCard = document.getElementById('kg-conn-target-card');
+    if (tgtCard) {
+      tgtCard.addEventListener('click', function () {
+        selectGraphNode(l.target);
+      });
+    }
+
+    var closeBtn = document.getElementById('kg-btn-close-conn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function () {
+        deselectGraphNode();
+      });
+    }
+  }
+
+  // ----------------------------------------------------------------
   // Search & Navigation Helpers
   // ----------------------------------------------------------------
   function searchGraphLocally(query) {
     if (!window._graphNodes || !window._graphSvg) return;
+    window._selectedEdge = null;
+    window._traceMode = false;
+
     var q = (query || '').trim().toLowerCase();
     if (!q) {
       deselectGraphNode();
@@ -4515,9 +5167,14 @@
     matchingNodes.forEach(function (n) { matchMap[n.id] = true; });
 
     window._graphSvg.selectAll('.graph-node')
+      .classed('active-trace-node', false)
+      .classed('active-trace-start', false)
       .style('opacity', function (d) { return matchMap[d.id] ? 1 : 0.12; });
 
     window._graphSvg.selectAll('.graph-link')
+      .classed('active-selected', false)
+      .classed('active-trace-link', false)
+      .classed('derived', false)
       .attr('stroke-opacity', 0.05);
 
     // Zoom and center on the first match
