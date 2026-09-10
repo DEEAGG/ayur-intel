@@ -526,6 +526,8 @@ class PatentSearch(Base):
     search_concepts = Column(Text, nullable=True, default="[]")  # JSON list of search query objects or strings
     jurisdictions_searched = Column(Text, nullable=True, default="[]")  # JSON list
     total_results = Column(Integer, nullable=False, default=0)
+    raw_discovered_count = Column(Integer, nullable=True, default=0)
+    unique_screened_count = Column(Integer, nullable=True, default=0)
     sources_searched = Column(Integer, nullable=False, default=0)
     sources_succeeded = Column(Integer, nullable=False, default=0)
 

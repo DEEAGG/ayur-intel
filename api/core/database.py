@@ -98,6 +98,8 @@ def init_db() -> None:
             ("patent_relevances", "why_relevant", "TEXT"),
             ("patent_relevances", "important_difference", "TEXT"),
             ("patent_relevances", "limitations", "TEXT"),
+            ("patent_searches", "raw_discovered_count", "INTEGER DEFAULT 0"),
+            ("patent_searches", "unique_screened_count", "INTEGER DEFAULT 0"),
         ]
 
         for table, col, col_type in new_cols:

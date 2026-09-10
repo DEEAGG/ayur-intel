@@ -61,6 +61,56 @@ def _deserialize_dict(value: Optional[str]) -> dict:
         return {}
 
 
+def get_patent_jurisdiction(record: dict | PatentRecord | PatentResult | None) -> str:
+    """Extract authoritative 2-letter jurisdiction code from official patent metadata.
+
+    Returns 2-letter code (e.g. 'IN', 'US', 'WO', 'EP', 'GB', 'DE', etc.) or 'UNKNOWN'.
+    NEVER infers India ('IN') from botanical terms, applicant names, or abstract text.
+    """
+    if not record:
+        return "UNKNOWN"
+
+    jurisdiction = None
+    pub_num = ""
+    provider_id = ""
+    authority = ""
+
+    if isinstance(record, dict):
+        jurisdiction = record.get("jurisdiction")
+        pub_num = record.get("publication_number") or ""
+        provider_id = record.get("provider_record_id") or record.get("id") or ""
+        authority = record.get("authority") or ""
+    else:
+        jurisdiction = getattr(record, "jurisdiction", None)
+        pub_num = getattr(record, "publication_number", None) or ""
+        provider_id = getattr(record, "provider_record_id", None) or getattr(record, "public_id", None) or ""
+        authority = getattr(record, "authority", None) or ""
+
+    if jurisdiction and isinstance(jurisdiction, str):
+        j_upper = jurisdiction.strip().upper()
+        if len(j_upper) == 2 and j_upper.isalpha() and j_upper not in ("GL", "UN"):
+            return j_upper
+
+    if pub_num and isinstance(pub_num, str):
+        pub_upper = pub_num.strip().upper()
+        m = re.match(r'^([A-Z]{2})\d', pub_upper)
+        if m:
+            return m.group(1)
+
+    if provider_id and isinstance(provider_id, str):
+        pid_upper = provider_id.strip().upper()
+        m = re.match(r'^([A-Z]{2})\d', pid_upper)
+        if m:
+            return m.group(1)
+
+    if authority and isinstance(authority, str):
+        auth_upper = authority.strip().upper()
+        if len(auth_upper) == 2 and auth_upper.isalpha():
+            return auth_upper
+
+    return "UNKNOWN"
+
+
 def _record_to_dict(rec: PatentRecord) -> dict:
     inventors = None
     if rec.inventors:
@@ -85,12 +135,15 @@ def _record_to_dict(rec: PatentRecord) -> dict:
     else:
         open_patent_url = rec.source_url or (f"https://europepmc.org/article/PAT/{provider_id}" if provider_id else "")
 
+    j_code = get_patent_jurisdiction(rec)
+
     return {
         "id": rec.public_id,
         "provider_record_id": provider_id,
         "source_name": rec.source_name,
         "authority": rec.authority,
-        "jurisdiction": rec.jurisdiction,
+        "jurisdiction": j_code,
+        "jurisdiction_code": j_code,
         "publication_number": rec.publication_number,
         "application_number": rec.application_number,
         "patent_type": rec.patent_type,
@@ -720,6 +773,11 @@ def run_patent_intelligence(
 
     analyzed_candidates = _analyze_patents_with_gemini(pre_ranked[:20], case)
 
+    raw_discovered = sum(getattr(resp, "raw_discovered_count", len(resp.results)) for resp in responses)
+    if raw_discovered < len(deduped_results):
+        raw_discovered = len(deduped_results)
+    unique_screened = len(deduped_results)
+
     now = datetime.now(timezone.utc)
 
     search = PatentSearch(
@@ -728,6 +786,8 @@ def run_patent_intelligence(
         search_concepts=json.dumps(query_plan),
         jurisdictions_searched=json.dumps(search_jurisdictions),
         total_results=len(analyzed_candidates),
+        raw_discovered_count=raw_discovered,
+        unique_screened_count=unique_screened,
         sources_searched=len(responses),
         sources_succeeded=sum(1 for r in responses if r.is_configured),
         status="COMPLETED",
@@ -836,7 +896,14 @@ def run_patent_intelligence(
         discovery_coverage = "ZERO"
 
     metrics = {
+        "raw_discovered_count": raw_discovered,
+        "unique_screened_count": unique_screened,
+        "shortlisted_count": len(pre_ranked[:20]),
+        "analyzed_count": len(persisted_relevances),
         "total_retrieved": len(persisted_relevances),
+        "ai_attempted_count": len(persisted_relevances),
+        "ai_successful_count": sum(1 for i in persisted_relevances if i.get("relevance_level") in ("LOW", "MODERATE", "HIGH", "VERY_HIGH")),
+        "not_shortlisted_count": max(0, unique_screened - len(pre_ranked[:20])),
         "very_high_count": vh_cnt,
         "high_count": h_cnt,
         "moderate_count": sum(1 for i in persisted_relevances if i.get("relevance_level") == "MODERATE"),
@@ -917,8 +984,18 @@ def get_or_run_patent_intelligence(
 
             query_plan = _deserialize_list(existing_search.search_concepts)
 
+            raw_disc = getattr(existing_search, "raw_discovered_count", None) or len(items)
+            uniq_scr = getattr(existing_search, "unique_screened_count", None) or len(items)
+
             metrics = {
+                "raw_discovered_count": raw_disc,
+                "unique_screened_count": uniq_scr,
+                "shortlisted_count": min(20, len(items)),
+                "analyzed_count": len(items),
                 "total_retrieved": len(items),
+                "ai_attempted_count": min(20, len(items)),
+                "ai_successful_count": sum(1 for i in items if i.get("relevance_level") in ("LOW", "MODERATE", "HIGH", "VERY_HIGH")),
+                "not_shortlisted_count": max(0, uniq_scr - min(20, len(items))),
                 "very_high_count": sum(1 for i in items if i.get("relevance_level") == "VERY_HIGH"),
                 "high_count": sum(1 for i in items if i.get("relevance_level") == "HIGH"),
                 "moderate_count": sum(1 for i in items if i.get("relevance_level") == "MODERATE"),
@@ -944,6 +1021,10 @@ def get_or_run_patent_intelligence(
                 "product_case_id": case.public_id,
                 "query_plan": [],
                 "summary_metrics": {
+                    "raw_discovered_count": 0,
+                    "unique_screened_count": 0,
+                    "shortlisted_count": 0,
+                    "analyzed_count": 0,
                     "total_retrieved": 0,
                     "very_high_count": 0,
                     "high_count": 0,

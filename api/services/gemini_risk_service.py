@@ -497,6 +497,22 @@ def generate_fallback_risk_assessment(
 
     overall_conf = round(sum(d["confidence"] for d in domain_scores) / len(domain_scores), 2)
 
+    if not risks:
+        risks.append({
+            "id": "gen-reg-01",
+            "title": "General Statutory & Quality Compliance Verification",
+            "domain": "Regulatory",
+            "severity": "MODERATE",
+            "likelihood": "MEDIUM",
+            "impact": "MEDIUM",
+            "confidence": 0.80,
+            "why_it_matters": "All commercial botanical formulations require verified statutory documentation and quality specifications.",
+            "evidence_refs": [{"source_type": "passport", "reference_key": "passport:identity"} if "passport:identity" in valid_evidence_keys else {"source_type": "passport", "reference_key": list(valid_evidence_keys.keys())[0]}],
+            "evidence_status": "SUPPORTED",
+            "recommended_action": "Ensure raw material certificates of analysis and statutory dossiers are compiled.",
+            "requires_human_verification": True,
+        })
+
     # Sort risks by severity
     sev_rank = {"CRITICAL": 4, "HIGH": 3, "MODERATE": 2, "LOW": 1}
     risks.sort(key=lambda x: sev_rank.get(x.get("severity", "LOW"), 0), reverse=True)

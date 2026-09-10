@@ -19,6 +19,7 @@ from api.services.patent_service import (
     generate_query_plan,
     get_category_from_score,
     get_or_run_patent_intelligence,
+    get_patent_jurisdiction,
 )
 
 
@@ -87,7 +88,15 @@ def run_tests():
             assert "patents.google.com" not in sample_res.source_url, "FAIL: Must not build unverified Google Patents URL!"
             print("    Identifier Separation & Safe Verification URL Verified!")
 
-    # 3. Test Gemini Failure Semantics (No Heuristic Score Fallback)
+    # Test Jurisdiction Extraction & India Lens Identification
+    print("    Testing Jurisdiction Extraction & IN Identification...")
+    assert get_patent_jurisdiction({"publication_number": "IN202011045678A"}) == "IN", "FAIL: IN pub num must return IN"
+    assert get_patent_jurisdiction({"provider_record_id": "IN987654"}) == "IN", "FAIL: IN provider id must return IN"
+    assert get_patent_jurisdiction({"jurisdiction": "IN"}) == "IN", "FAIL: IN jurisdiction code must return IN"
+    assert get_patent_jurisdiction({"publication_number": "US10123456B2", "title": "Ayurvedic India formulation"}) == "US", "FAIL: Text containing India must NOT override official US code"
+    assert get_patent_jurisdiction({"publication_number": None, "provider_record_id": None}) == "UNKNOWN", "FAIL: Missing metadata must return UNKNOWN"
+    assert get_patent_jurisdiction(None) == "UNKNOWN", "FAIL: None record must return UNKNOWN"
+    print("    Jurisdiction Extraction & Verification Passed!")
     print("[3] Testing Gemini Failure Semantics...")
     dummy_item = {
         "result": primary_adapter.search(query="Withania somnifera").results[0] if len(primary_adapter.search(query="Withania somnifera").results) > 0 else None,
@@ -167,7 +176,19 @@ def run_tests():
             assert "patents.google.com" in first_patent["open_patent_url"], "FAIL: Canonical pub num must build Google Patents URL!"
             print("    Google Patents URL verified for canonical publication number!")
 
-    # Test GET Reopen -> 0 new search rows created
+    # Test 4-Stage Funnel Metrics
+    print("    Testing 4-Stage Funnel Metrics...")
+    metrics1 = res1["summary_metrics"]
+    assert "raw_discovered_count" in metrics1, "FAIL: raw_discovered_count missing from summary_metrics"
+    assert "unique_screened_count" in metrics1, "FAIL: unique_screened_count missing from summary_metrics"
+    assert "shortlisted_count" in metrics1, "FAIL: shortlisted_count missing from summary_metrics"
+    assert "analyzed_count" in metrics1, "FAIL: analyzed_count missing from summary_metrics"
+    print(f"    Funnel Stage Metrics: DISCOVERED={metrics1['raw_discovered_count']}, SCREENED={metrics1['unique_screened_count']}, SHORTLISTED={metrics1['shortlisted_count']}, ANALYZED={metrics1['analyzed_count']}")
+    assert metrics1["raw_discovered_count"] >= metrics1["unique_screened_count"], "FAIL: raw_discovered_count must be >= unique_screened_count"
+    assert metrics1["unique_screened_count"] >= metrics1["shortlisted_count"], "FAIL: unique_screened_count must be >= shortlisted_count"
+    assert metrics1["ai_successful_count"] + metrics1["not_analyzed_count"] == metrics1["shortlisted_count"], "FAIL: AI successful + NOT_ANALYZED must equal shortlisted candidates count"
+    assert metrics1["unique_screened_count"] - metrics1["shortlisted_count"] == metrics1["not_shortlisted_count"], "FAIL: screened - shortlisted must equal not_shortlisted_count"
+    print("    4-Stage Funnel Metrics & Count Semantics Verified!")
     print("    Testing Reopen Module GET (0 new search rows)...")
     res2 = get_or_run_patent_intelligence(db=db, owner=user, case_public_id=case.public_id, force_rerun=False)
     assert res2["search_id"] == first_search_id, "FAIL: GET-First should return existing search!"

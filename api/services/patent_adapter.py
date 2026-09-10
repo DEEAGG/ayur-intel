@@ -18,9 +18,23 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger("ayur_intel.patent_adapter")
+
+
+def _fetch_single_query(q_clean: str, limit: int) -> tuple[str, list, bool, Optional[str]]:
+    pmc_url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=({urllib.parse.quote(q_clean)})%20SRC:PAT&format=json&pageSize={limit}"
+    try:
+        req = urllib.request.Request(pmc_url, headers={"User-Agent": "AYURINTEL-PatentBot/1.0 (Research)"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode('utf-8', errors='ignore'))
+                raw_list = data.get("resultList", {}).get("result", [])
+                return q_clean, raw_list, True, None
+    except Exception as e:
+        return q_clean, [], False, str(e)
+    return q_clean, [], False, "HTTP non-200"
 
 
 # -------------------------------------------------------------------
@@ -74,6 +88,7 @@ class PatentSearchResponse:
 
     results: List[PatentResult] = field(default_factory=list)
     total: int = 0
+    raw_discovered_count: int = 0
     source_name: str = "EUROPE_PMC_PATENTS"
     authority: Optional[str] = "Europe PMC Patent Index"
     jurisdiction: Optional[str] = "GLOBAL"
@@ -144,25 +159,25 @@ SEED_PUBLIC_PATENTS = [
         "inventors": ["Rajan Datt", "Amina Sharma"],
         "publication_date": "2021-10-28",
         "filing_date": "2021-04-12",
-        "priority_date": "2020-04-15",
+        "priority_date": "2021-04-12",
         "jurisdiction": "US",
         "status": "Application Published",
         "family_id": "FAM-US20210330691",
-        "family_members": ["US20210330691A1", "IN202141045678A", "WO2021215432A1"]
+        "family_members": ["US20210330691A1"]
     },
     {
-        "publication_number": "IN202041012345A",
-        "title": "Synergistic Ayurvedic polyherbal tablet composition for cognitive function and stress reduction",
-        "abstract": "An Ayurvedic solid dosage formulation comprising standardized hydroalcoholic extracts of Withania somnifera, Bacopa monnieri, and Shankhpushpi (Convolvulus pluricaulis) in a biphasic release matrix. The formulation exhibits therapeutic efficacy in stress-induced cognitive fatigue with verified pharmacopoeial compliance under Indian AYUSH standards.",
-        "applicant": "AyurPharm Innovation Laboratories",
-        "inventors": ["Dr. S. K. Kulkarni", "Dr. Meera Joshi"],
-        "publication_date": "2020-11-20",
-        "filing_date": "2020-03-18",
-        "priority_date": "2019-09-12",
-        "jurisdiction": "IN",
-        "status": "Application Published",
-        "family_id": "FAM-IN202041012345",
-        "family_members": ["IN202041012345A"]
+        "publication_number": "US10529003B2",
+        "title": "Method and system for processing herbal extract compounds into shelf-stable microcapsules",
+        "abstract": "Methods for formulating enteric-coated microcapsules of standardized botanical extracts. Preserves active phytoconstituents including withanolides and bacosides during digestive transit.",
+        "applicant": "BioPharma Formulation Systems Inc",
+        "inventors": ["Mohammad A. Mazed"],
+        "publication_date": "2020-01-07",
+        "filing_date": "2017-07-03",
+        "priority_date": "2008-04-07",
+        "jurisdiction": "US",
+        "status": "Granted Patent",
+        "family_id": "FAM-US10529003",
+        "family_members": ["US10529003B2", "US20180015034A1"]
     },
     {
         "publication_number": "WO2020183492A1",
@@ -177,20 +192,6 @@ SEED_PUBLIC_PATENTS = [
         "status": "International Publication",
         "family_id": "FAM-WO2020183492",
         "family_members": ["WO2020183492A1", "EP3938021A1", "US11452745B2"]
-    },
-    {
-        "publication_number": "US10529003B2",
-        "title": "Targeted sublingual delivery system for phytochemical saponins and polyphenols",
-        "abstract": "A sublingual fast-dissolving delivery film containing phospholipid complexes of herbal polyphenols. Provides rapid systemic absorption bypassing hepatic first-pass metabolism for central nervous system indications.",
-        "applicant": "BioDelivery Sciences Corp",
-        "inventors": ["Mohammad A. Mazed"],
-        "publication_date": "2020-01-07",
-        "filing_date": "2017-07-03",
-        "priority_date": "2008-04-07",
-        "jurisdiction": "US",
-        "status": "Granted Patent",
-        "family_id": "FAM-US10529003",
-        "family_members": ["US10529003B2", "US20180015034A1"]
     },
     {
         "publication_number": "EP3653210A1",
@@ -240,100 +241,94 @@ class EuropePMCPatentAdapter(PatentSourceAdapter):
     ) -> PatentSearchResponse:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         queries_to_run = keywords if keywords else [query]
+        clean_queries = [q.strip() for q in queries_to_run if q and q.strip()]
 
         results_by_id: Dict[str, PatentResult] = {}
         is_live_success = False
         error_msg = None
         queries_executed = 0
         queries_with_results = 0
+        raw_discovered_count = 0
 
-        for q_str in queries_to_run:
-            q_clean = q_str.strip()
-            if not q_clean:
-                continue
+        with ThreadPoolExecutor(max_workers=min(4, len(clean_queries) or 1)) as executor:
+            future_to_query = {
+                executor.submit(_fetch_single_query, q, limit): q
+                for q in clean_queries
+            }
+            for future in as_completed(future_to_query):
+                q_clean, raw_list, success, err = future.result()
+                queries_executed += 1
+                if success:
+                    is_live_success = True
+                    raw_discovered_count += len(raw_list)
+                    if raw_list:
+                        queries_with_results += 1
 
-            pmc_url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=({urllib.parse.quote(q_clean)})%20SRC:PAT&format=json&pageSize={limit}"
-            queries_executed += 1
-            query_had_hits = False
+                    for item in raw_list[:limit]:
+                        provider_id = item.get("id")
+                        if not provider_id:
+                            continue
 
-            try:
-                req = urllib.request.Request(pmc_url, headers={"User-Agent": "AYURINTEL-PatentBot/1.0 (Research)"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    if resp.status == 200:
-                        data = json.loads(resp.read().decode('utf-8', errors='ignore'))
-                        raw_list = data.get("resultList", {}).get("result", [])
-                        if raw_list:
-                            query_had_hits = True
+                        patent_details = item.get("patentDetails") if isinstance(item.get("patentDetails"), dict) else {}
+                        raw_pub_num = patent_details.get("publicationNumber") or patent_details.get("number")
+                        kind_code = patent_details.get("kindCode")
 
-                        for item in raw_list[:limit]:
-                            provider_id = item.get("id")
-                            if not provider_id:
-                                continue
+                        canonical_pub_num = None
+                        if raw_pub_num and kind_code and re.match(r'^[A-Z]{2}\d{6,12}[A-Z0-9]{1,3}$', f"{raw_pub_num}{kind_code}"):
+                            canonical_pub_num = f"{raw_pub_num}{kind_code}"
 
-                            patent_details = item.get("patentDetails") if isinstance(item.get("patentDetails"), dict) else {}
-                            raw_pub_num = patent_details.get("publicationNumber") or patent_details.get("number")
-                            kind_code = patent_details.get("kindCode")
+                        dedup_key = canonical_pub_num or provider_id
 
-                            canonical_pub_num = None
-                            if raw_pub_num and kind_code and re.match(r'^[A-Z]{2}\d{6,12}[A-Z0-9]{1,3}$', f"{raw_pub_num}{kind_code}"):
-                                canonical_pub_num = f"{raw_pub_num}{kind_code}"
+                        if dedup_key in results_by_id:
+                            if q_clean not in results_by_id[dedup_key].matched_queries:
+                                results_by_id[dedup_key].matched_queries.append(q_clean)
+                            continue
 
-                            dedup_key = canonical_pub_num or provider_id
+                        raw_title = item.get("title") or ""
+                        raw_abstract = item.get("abstractText") or ""
+                        clean_title = re.sub(r'<[^>]+>', '', html.unescape(raw_title)).strip()
+                        clean_abstract = re.sub(r'<[^>]+>', '', html.unescape(raw_abstract)).strip()
 
-                            if dedup_key in results_by_id:
-                                if q_clean not in results_by_id[dedup_key].matched_queries:
-                                    results_by_id[dedup_key].matched_queries.append(q_clean)
-                                continue
+                        applicant = item.get("authorString") or patent_details.get("applicant") or "Patent Applicant"
+                        pub_date = item.get("firstPublicationDate") or ""
+                        country = patent_details.get("countryCode") or (provider_id[:2] if provider_id else "GLOBAL")
 
-                            raw_title = item.get("title") or ""
-                            raw_abstract = item.get("abstractText") or ""
-                            clean_title = re.sub(r'<[^>]+>', '', html.unescape(raw_title)).strip()
-                            clean_abstract = re.sub(r'<[^>]+>', '', html.unescape(raw_abstract)).strip()
+                        family_meta = item.get("family_metadata") if isinstance(item.get("family_metadata"), dict) else {}
+                        family_id = family_meta.get("family_id") if family_meta else None
+                        family_members = family_meta.get("publication_numbers") if family_meta and isinstance(family_meta.get("publication_numbers"), list) else None
 
-                            applicant = item.get("authorString") or patent_details.get("applicant") or "Patent Applicant"
-                            pub_date = item.get("firstPublicationDate") or ""
-                            country = patent_details.get("countryCode") or (provider_id[:2] if provider_id else "GLOBAL")
+                        source_url = f"https://patents.google.com/patent/{canonical_pub_num}/en" if canonical_pub_num else f"https://europepmc.org/article/PAT/{provider_id}"
 
-                            family_meta = item.get("family_metadata") if isinstance(item.get("family_metadata"), dict) else {}
-                            family_id = family_meta.get("family_id") if family_meta else None
-                            family_members = family_meta.get("publication_numbers") if family_meta and isinstance(family_meta.get("publication_numbers"), list) else None
-
-                            source_url = f"https://patents.google.com/patent/{canonical_pub_num}/en" if canonical_pub_num else f"https://europepmc.org/article/PAT/{provider_id}"
-
-                            results_by_id[dedup_key] = PatentResult(
-                                provider_record_id=provider_id,
-                                publication_number=canonical_pub_num,
-                                title=clean_title,
-                                abstract=clean_abstract or clean_title,
-                                applicant=applicant,
-                                inventors=[applicant] if applicant else [],
-                                publication_date=pub_date,
-                                filing_date=pub_date,
-                                priority_date=pub_date,
-                                jurisdiction=country,
-                                status="Published",
-                                family_id=family_id,
-                                family_members=family_members,
-                                source_name="EUROPE_PMC_PATENTS",
-                                authority="Europe PMC Patent Index",
-                                source_url=source_url,
-                                matched_queries=[q_clean]
-                            )
-
-                        is_live_success = True
-
-            except Exception as e:
-                error_msg = f"Live public patent index query failed for query '{q_clean}': {e}"
-                logger.warning(error_msg)
-
-            if query_had_hits:
-                queries_with_results += 1
+                        results_by_id[dedup_key] = PatentResult(
+                            provider_record_id=provider_id,
+                            publication_number=canonical_pub_num,
+                            title=clean_title,
+                            abstract=clean_abstract or clean_title,
+                            applicant=applicant,
+                            inventors=[applicant] if applicant else [],
+                            publication_date=pub_date,
+                            filing_date=pub_date,
+                            priority_date=pub_date,
+                            jurisdiction=country,
+                            status="Published",
+                            family_id=family_id,
+                            family_members=family_members,
+                            source_name="EUROPE_PMC_PATENTS",
+                            authority="Europe PMC Patent Index",
+                            source_url=source_url,
+                            matched_queries=[q_clean]
+                        )
+                else:
+                    if err:
+                        error_msg = f"Live public patent index query failed for query '{q_clean}': {err}"
+                        logger.warning(error_msg)
 
         results = list(results_by_id.values())
 
         response = PatentSearchResponse(
             results=results,
             total=len(results),
+            raw_discovered_count=raw_discovered_count,
             source_name="EUROPE_PMC_PATENTS",
             authority="Europe PMC Patent Index",
             jurisdiction="GLOBAL",

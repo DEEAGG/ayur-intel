@@ -1573,6 +1573,28 @@
   }
   window.toggleShowAllPatents = toggleShowAllPatents;
 
+  function setPatentTab(tab) {
+    window._patentActiveTab = tab;
+    render({ scroll: "preserve" });
+  }
+  window.setPatentTab = setPatentTab;
+
+  function getPatentJurisdictionCode(rec) {
+    if (!rec) return "UNKNOWN";
+    var j = rec.jurisdiction_code || rec.jurisdiction;
+    if (j && typeof j === 'string') {
+      var jUp = j.trim().upperCase ? j.trim().toUpperCase() : j.trim();
+      if (jUp.length === 2 && jUp !== "GL" && jUp !== "UN") return jUp;
+    }
+    var pub = (rec.publication_number || "").toUpperCase();
+    var m = pub.match(/^([A-Z]{2})\d/);
+    if (m) return m[1];
+    var pid = (rec.provider_record_id || "").toUpperCase();
+    var m2 = pid.match(/^([A-Z]{2})\d/);
+    if (m2) return m2[1];
+    return "UNKNOWN";
+  }
+
   function renderPatentIntelligence() {
     var data = state.patentSearchResults;
     var caseName = state.currentCase ? state.currentCase.name : "Product Case";
@@ -1597,6 +1619,10 @@
 
     var items = data.patents || data.results || [];
     var metrics = data.summary_metrics || {
+      raw_discovered_count: items.length,
+      unique_screened_count: items.length,
+      shortlisted_count: Math.min(20, items.length),
+      analyzed_count: items.length,
       total_retrieved: items.length,
       very_high_count: items.filter(function(i){ return i.relevance_level === "VERY_HIGH"; }).length,
       high_count: items.filter(function(i){ return i.relevance_level === "HIGH"; }).length,
@@ -1654,7 +1680,7 @@
       + '<span style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;background:rgba(255,255,255,0.05);color:' + covColor + ';border:1px solid ' + covColor + '40;">COVERAGE: ' + covBadge + '</span>'
       + '</div></div>'
       + '<p style="font-size:13px;color:#e2e8f0;line-height:1.6;margin-bottom:14px;">'
-      + 'AYUR-INTEL screened <strong>' + metrics.total_retrieved + ' candidate patents</strong> from public literature. '
+      + 'AYUR-INTEL screened <strong>' + (metrics.unique_screened_count || metrics.total_retrieved) + ' unique candidate patents</strong> from <strong>' + (metrics.raw_discovered_count || metrics.total_retrieved) + ' raw hits</strong> across query plan concepts. '
       + 'Found <strong>' + (metrics.very_high_count + metrics.high_count + metrics.moderate_count) + ' technically overlapping patents</strong> (' + (metrics.very_high_count + metrics.high_count) + ' High/Very High overlap). '
       + 'Prior-art density indicates <strong>' + signalLabel + '</strong> for this formulation concept.'
       + '</p>'
@@ -1667,23 +1693,78 @@
       + '<div style="font-size:11px;color:#94a3b8;font-style:italic;">* Screened based on public title and abstract text. Does not constitute a formal freedom-to-operate (FTO) or legal patentability opinion.</div>'
       + '</div>';
 
-    // Screened -> Shortlisted -> AI Analyzed Visual Funnel Pipeline
-    var analyzedCount = items.length - unanalyzedCount;
-    html += '<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:12px;margin-bottom:20px;text-align:center;">'
+    // True 4-Stage Visual Funnel Pipeline (Discovered -> Screened -> Shortlisted -> AI Analyzed)
+    var rawDiscovered = metrics.raw_discovered_count || metrics.total_retrieved || items.length;
+    var uniqueScreened = metrics.unique_screened_count || metrics.total_retrieved || items.length;
+    var shortlisted = metrics.shortlisted_count || Math.min(20, items.length);
+    var analyzedCount = metrics.analyzed_count || (items.length - unanalyzedCount);
+
+    html += '<div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;margin-bottom:16px;text-align:center;">'
       + '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);padding:14px;border-radius:8px;">'
-      + '<div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:0.05em;">1. SCREENED</div>'
-      + '<div style="font-size:22px;font-weight:700;color:#f8fafc;margin-top:2px;">' + metrics.total_retrieved + '</div>'
-      + '<div style="font-size:10px;color:#64748b;">Public Literature Records</div>'
+      + '<div style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:0.05em;">1. DISCOVERED</div>'
+      + '<div style="font-size:22px;font-weight:700;color:#f8fafc;margin-top:2px;">' + rawDiscovered + '</div>'
+      + '<div style="font-size:10px;color:#64748b;">Raw Hits Across Queries</div>'
       + '</div>'
-      + '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(52,211,153,0.2);padding:14px;border-radius:8px;">'
-      + '<div style="font-size:11px;font-weight:700;color:#34d399;letter-spacing:0.05em;">2. SHORTLISTED</div>'
-      + '<div style="font-size:22px;font-weight:700;color:#34d399;margin-top:2px;">' + items.length + '</div>'
-      + '<div style="font-size:10px;color:#64748b;">Top Pre-Ranked Prior Art</div>'
+      + '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(52,211,153,0.15);padding:14px;border-radius:8px;">'
+      + '<div style="font-size:11px;font-weight:700;color:#34d399;letter-spacing:0.05em;">2. SCREENED</div>'
+      + '<div style="font-size:22px;font-weight:700;color:#34d399;margin-top:2px;">' + uniqueScreened + '</div>'
+      + '<div style="font-size:10px;color:#64748b;">Unique Deduplicated Records</div>'
+      + '</div>'
+      + '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(251,191,36,0.2);padding:14px;border-radius:8px;">'
+      + '<div style="font-size:11px;font-weight:700;color:#fbbf24;letter-spacing:0.05em;">3. SHORTLISTED</div>'
+      + '<div style="font-size:22px;font-weight:700;color:#fbbf24;margin-top:2px;">' + shortlisted + '</div>'
+      + '<div style="font-size:10px;color:#64748b;">Top Pre-Ranked Candidates</div>'
       + '</div>'
       + '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(96,165,250,0.2);padding:14px;border-radius:8px;">'
-      + '<div style="font-size:11px;font-weight:700;color:#60a5fa;letter-spacing:0.05em;">3. AI ANALYZED</div>'
+      + '<div style="font-size:11px;font-weight:700;color:#60a5fa;letter-spacing:0.05em;">4. AI ANALYZED</div>'
       + '<div style="font-size:22px;font-weight:700;color:#60a5fa;margin-top:2px;">' + analyzedCount + '</div>'
       + '<div style="font-size:10px;color:#64748b;">' + (unanalyzedCount > 0 ? (unanalyzedCount + ' Pending AI Retry') : 'Semantic Overlap Verified') + '</div>'
+      + '</div>'
+      + '</div>';
+
+    // Expandable "How AYUR-INTEL analyzed this" Accordion
+    html += '<details style="margin-bottom:20px;background:rgba(15,23,42,0.75);border:1px solid rgba(52,211,153,0.3);border-radius:8px;padding:12px 16px;">'
+      + '<summary style="font-size:13px;font-weight:700;color:#34d399;cursor:pointer;display:flex;align-items:center;gap:8px;">'
+      + icon("info", 16) + ' How AYUR-INTEL analyzed this (3-Stage Screening Methodology)'
+      + '</summary>'
+      + '<div style="padding-top:14px;font-size:13px;color:#cbd5e1;line-height:1.6;">'
+      + '<div style="margin-bottom:10px;">'
+      + '<strong style="color:#f8fafc;">Stage 1 — Patent Discovery:</strong> Queries public patent indices (Europe PMC Patent Index) deterministically across 5–10 structured query plan concepts (botanical names, active phytoconstituents, formulation matrix, and process terms).'
+      + '</div>'
+      + '<div style="margin-bottom:10px;">'
+      + '<strong style="color:#f8fafc;">Stage 2 — Candidate Ranking:</strong> Deterministic pre-ranking ranks deduplicated public prior-art records based on active ingredient matches, formulation matrix, and query plan term overlap.'
+      + '</div>'
+      + '<div style="margin-bottom:10px;">'
+      + '<strong style="color:#f8fafc;">Stage 3 — AI Deep Comparison:</strong> Gemini AI semantically evaluates ONLY the actual retrieved patent title/abstract text against product case details across 4 scoring dimensions (technology, ingredient, formulation/process, claim concept).'
+      + '</div>'
+      + '<div style="padding:10px 12px;background:rgba(52,211,153,0.1);border-left:3px solid #34d399;border-radius:4px;font-size:12px;color:#34d399;margin-top:12px;">'
+      + '🔒 <strong>Non-Negotiable Rule:</strong> Gemini does NOT invent or discover patent records. All candidate literature originates from verified public patent index queries.'
+      + '</div>'
+      + '</div>'
+      + '</details>';
+
+    // Jurisdiction Breakdown & Coverage Summary Box
+    var jurCounts = { IN: 0, US: 0, WO: 0, EP: 0, OTHER: 0, UNKNOWN: 0 };
+    items.forEach(function(item) {
+      var rec = item.patent || {};
+      var code = getPatentJurisdictionCode(rec);
+      if (code === "IN") jurCounts.IN++;
+      else if (code === "US") jurCounts.US++;
+      else if (code === "WO") jurCounts.WO++;
+      else if (code === "EP") jurCounts.EP++;
+      else if (code === "UNKNOWN") jurCounts.UNKNOWN++;
+      else jurCounts.OTHER++;
+    });
+
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);padding:12px 16px;border-radius:8px;margin-bottom:20px;font-size:12px;">'
+      + '<div style="font-weight:700;color:#94a3b8;letter-spacing:0.05em;text-transform:uppercase;">Jurisdiction Coverage:</div>'
+      + '<div style="display:flex;gap:14px;flex-wrap:wrap;color:#f8fafc;font-weight:600;">'
+      + '<span>🇮🇳 IN: <strong>' + jurCounts.IN + '</strong></span>'
+      + '<span>🇺🇸 US: <strong>' + jurCounts.US + '</strong></span>'
+      + '<span>🌐 WO: <strong>' + jurCounts.WO + '</strong></span>'
+      + '<span>🇪🇺 EP: <strong>' + jurCounts.EP + '</strong></span>'
+      + '<span>Other: <strong>' + jurCounts.OTHER + '</strong></span>'
+      + '<span>Unknown: <strong>' + jurCounts.UNKNOWN + '</strong></span>'
       + '</div>'
       + '</div>';
 
@@ -1735,121 +1816,148 @@
         + '<div style="font-size:11px;color:#64748b;margin-top:10px;">* Zero search matches indicates no records were returned for these specific query terms in public index literature. It does NOT imply that no patents exist worldwide.</div>'
         + '</div></div></div>';
     } else {
-      var displayItems = window._showAllPatents ? items : items.slice(0, 5);
-
-      html += '<div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
-        + '<h3 style="font-size:15px;font-weight:700;color:#f8fafc;">📑 Candidate Prior-Art Evidence (' + (window._showAllPatents ? ('Showing all ' + items.length) : ('Top 5 of ' + items.length + ' candidates')) + ')</h3>'
-        + (items.length > 5 ? ('<button class="btn btn-ghost btn-sm" onclick="toggleShowAllPatents()">' + (window._showAllPatents ? 'Show Top 5 Only' : ('View All ' + items.length + ' Candidate Patents →')) + '</button>') : '')
-        + '</div>';
-
-      displayItems.forEach(function(item) {
-        var rec = item.patent || {};
-        var providerId = rec.provider_record_id || "";
-        var pubNum = rec.publication_number || null;
-        var title = rec.title || "Untitled Patent Document";
-        var applicant = rec.applicant || "Not Listed";
-        var pubDate = rec.publication_date || rec.filing_date || "N/A";
-        var jurisdiction = rec.jurisdiction || rec.authority || "GLOBAL";
-
-        var flag = "🌍";
-        if (jurisdiction.indexOf("IN") !== -1) flag = "🇮🇳";
-        else if (jurisdiction.indexOf("US") !== -1) flag = "🇺🇸";
-        else if (jurisdiction.indexOf("EP") !== -1 || jurisdiction.indexOf("EU") !== -1) flag = "🇪🇺";
-        else if (jurisdiction.indexOf("WO") !== -1) flag = "🌐";
-
-        var idBadgeText = pubNum ? (flag + " " + pubNum) : (providerId ? (flag + " Source ID: " + providerId) : (flag + " ID Not Available"));
-        var pubNumDisplay = pubNum ? escapeHtml(pubNum) : "Not available";
-        var sourceIdDisplay = providerId ? (' &nbsp;|&nbsp; <strong>Source Record ID:</strong> ' + escapeHtml(providerId)) : '';
-
-        var level = item.relevance_level || "LOW";
-        var score = item.relevance_score;
-        var isNotAnalyzed = level === "NOT_ANALYZED" || score === null || score === undefined;
-
-        var badgeCls = "badge-low";
-        if (level === "VERY_HIGH") badgeCls = "badge-very-high";
-        else if (level === "HIGH") badgeCls = "badge-high";
-        else if (level === "MODERATE") badgeCls = "badge-moderate";
-        else if (isNotAnalyzed) badgeCls = "badge-not-analyzed";
-
-        var scoreLabel = !isNotAnalyzed ? (level.replace("_", " ") + ' (' + score + ' / 100)') : 'NOT ANALYZED (AI Unavailable)';
-
-        var breakdown = item.score_breakdown || null;
-        var techVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.technological_overlap + "%");
-        var ingVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.ingredient_overlap + "%");
-        var formVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.formulation_process_overlap + "%");
-        var claimVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.claim_concept_overlap + "%");
-
-        var matchedComps = item.matched_components || [];
-        var openUrl = rec.open_patent_url || (pubNum ? ("https://patents.google.com/patent/" + pubNum.replace(/[^A-Za-z0-9]/g, "") + "/en") : (providerId ? ("https://europepmc.org/article/PAT/" + providerId) : ""));
-        var openBtnLabel = openUrl.indexOf("patents.google.com") !== -1 ? "Open Google Patent ↗" : "Open Europe PMC Record ↗";
-
-        var evBasis = item.evidence_basis || "TITLE_ABSTRACT";
-        var evBadgeLabel = "ABSTRACT-LEVEL SCREENING";
-        if (evBasis === "TITLE_ONLY") evBadgeLabel = "TITLE-LEVEL SCREENING";
-        else if (evBasis === "TITLE_ABSTRACT_CLAIMS" || evBasis === "CLAIM_TEXT") evBadgeLabel = "CLAIM-LEVEL SCREENING";
-
-        var familyHtml = "";
-        if (rec.family_id && rec.family_members && rec.family_members.length > 1) {
-          familyHtml = '<span class="patent-pub-badge" style="background:rgba(168,85,247,0.12);color:#c084fc;border-color:rgba(168,85,247,0.3);">Family: ' + escapeHtml(rec.family_id) + ' (' + rec.family_members.length + ')</span>';
-        }
-
-        html += '<div class="patent-card">'
-          + '<div class="patent-card-header">'
-          + '<div>'
-          + '<div class="patent-card-title-row">'
-          + '<span class="patent-pub-badge">' + escapeHtml(idBadgeText) + '</span>'
-          + familyHtml
-          + '<span class="patent-evidence-basis-badge">' + escapeHtml(evBadgeLabel) + '</span>'
-          + '<span class="patent-relevance-badge ' + badgeCls + '">' + escapeHtml(scoreLabel) + '</span>'
-          + '</div>'
-          + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;line-height:1.4;margin-bottom:6px;">' + escapeHtml(title) + '</h3>'
-          + '<div style="font-size:12px;color:#94a3b8;"><strong>Applicant / Assignee:</strong> ' + escapeHtml(applicant) + ' &nbsp;|&nbsp; <strong>Publication #:</strong> ' + pubNumDisplay + sourceIdDisplay + ' &nbsp;|&nbsp; <strong>Date:</strong> ' + escapeHtml(pubDate) + ' &nbsp;|&nbsp; <strong>Authority:</strong> ' + escapeHtml(rec.authority || jurisdiction) + '</div>'
-          + '</div>'
-          + '</div>';
-
-        if (rec.abstract) {
-          html += '<div style="font-size:13px;color:#cbd5e1;line-height:1.5;margin:10px 0;padding:10px 12px;background:rgba(15,23,42,0.4);border-radius:6px;border-left:3px solid #34d399;">'
-            + escapeHtml(rec.abstract.length > 320 ? rec.abstract.substring(0, 320) + '...' : rec.abstract)
-            + '</div>';
-        }
-
-        html += '<div class="patent-score-grid">'
-          + '<div class="patent-score-dim"><div class="patent-score-dim-label">TECH OVERLAP</div><div class="patent-score-dim-val">' + techVal + '</div></div>'
-          + '<div class="patent-score-dim"><div class="patent-score-dim-label">INGREDIENT OVERLAP</div><div class="patent-score-dim-val">' + ingVal + '</div></div>'
-          + '<div class="patent-score-dim"><div class="patent-score-dim-label">FORMULATION & PROCESS</div><div class="patent-score-dim-val">' + formVal + '</div></div>'
-          + '<div class="patent-score-dim"><div class="patent-score-dim-label">CLAIM CONCEPT</div><div class="patent-score-dim-val">' + claimVal + '</div></div>'
-          + '</div>';
-
-        if (matchedComps.length > 0) {
-          html += '<div style="margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
-            + '<span style="font-size:11px;color:#94a3b8;font-weight:600;">MATCHED WITH YOUR PRODUCT:</span>';
-          matchedComps.forEach(function(mc) {
-            html += '<span style="font-size:11px;padding:2px 8px;border-radius:12px;background:rgba(52,211,153,0.12);color:#34d399;border:1px solid rgba(52,211,153,0.25);">' + escapeHtml(mc) + '</span>';
-          });
-          html += '</div>';
-        }
-
-        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:10px;margin-top:12px;">'
-          + '<div class="patent-section-box"><div class="patent-section-title">WHY RELEVANT</div><div style="color:#f8fafc;">' + escapeHtml(item.why_relevant || "Overlap detected in abstract screening.") + '</div></div>'
-          + '<div class="patent-section-box"><div class="patent-section-title">IMPORTANT DIFFERENCE</div><div style="color:#f8fafc;">' + escapeHtml(item.important_difference || "Product case specifies standardized extract ratios.") + '</div></div>'
-          + '<div class="patent-section-box"><div class="patent-section-title">SCREENING LIMITATION</div><div style="color:#f8fafc;">' + escapeHtml(item.limitations || "Based on title/abstract text screening.") + '</div></div>'
-          + '</div>';
-
-        html += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);">'
-          + (isNotAnalyzed ? ('<button class="btn btn-secondary btn-sm" onclick="retryPatentAiAnalysis()">' + icon("auto_renew", 14) + ' Retry AI Analysis</button>') : '')
-          + '<a href="' + escapeHtml(openUrl) + '" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display:inline-flex;align-items:center;gap:4px;">' + escapeHtml(openBtnLabel) + '</a>'
-          + '<button class="btn btn-ghost btn-sm" onclick="savePatentToCase(\'' + escapeHtml(rec.id || "") + '\')">' + icon("bookmark", 14) + ' Save to Case</button>'
-          + '</div>';
-
-        html += '</div>';
+      // Tab Navigation (TOP MATCHES, INDIAN MATCHES, ALL SHORTLISTED)
+      var activeTab = window._patentActiveTab || "top";
+      var indianItems = items.filter(function(item) {
+        return getPatentJurisdictionCode(item.patent) === "IN";
       });
 
-      if (items.length > 5) {
-        html += '<div style="text-align:center;margin:16px 0 24px 0;">'
-          + '<button class="btn btn-secondary" onclick="toggleShowAllPatents()">'
-          + (window._showAllPatents ? 'Show Top 5 Candidate Patents Only' : ('View All ' + items.length + ' Candidate Patents →'))
-          + '</button>'
+      html += '<div style="display:flex;gap:8px;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:16px;padding-bottom:8px;">'
+        + '<button class="btn btn-sm ' + (activeTab === "top" ? "btn-primary" : "btn-ghost") + '" onclick="setPatentTab(\'top\')">⭐ Top Matches (' + Math.min(5, items.length) + ')</button>'
+        + '<button class="btn btn-sm ' + (activeTab === "india" ? "btn-primary" : "btn-ghost") + '" onclick="setPatentTab(\'india\')">🇮🇳 Indian Matches (' + indianItems.length + ')</button>'
+        + '<button class="btn btn-sm ' + (activeTab === "all" ? "btn-primary" : "btn-ghost") + '" onclick="setPatentTab(\'all\')">📋 All Shortlisted (' + items.length + ')</button>'
+        + '</div>';
+
+      var displayItems = items;
+      if (activeTab === "top") {
+        displayItems = items.slice(0, 5);
+      } else if (activeTab === "india") {
+        displayItems = indianItems;
+      }
+
+      if (activeTab === "india" && indianItems.length === 0) {
+        html += '<div class="card" style="padding:28px;background:rgba(15,23,42,0.8);border:1px solid rgba(245,158,11,0.3);margin-bottom:24px;text-align:center;">'
+          + '<div style="font-size:36px;margin-bottom:8px;">🇮🇳</div>'
+          + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;margin-bottom:6px;">No India-Identified Patent Records in Current Public Screening</h3>'
+          + '<p style="font-size:13px;color:#cbd5e1;max-width:640px;margin:0 auto 16px auto;line-height:1.6;">'
+          + 'No patent records with explicit Indian jurisdiction metadata (IN) were returned during this public literature screening for <strong>' + escapeHtml(caseName) + '</strong>.<br>'
+          + 'Public literature indices cover a subset of published Indian patents. For a complete Indian patent search, verify directly on official government search portals.'
+          + '</p>'
+          + '<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'
+          + '<a href="https://ipindia.gov.in/patents-before-you-apply-public-search" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">🇮🇳 Open IP India / InPASS Public Search ↗</a>'
+          + '<a href="https://patentscope.wipo.int/search/en/search.jsf" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">🌐 Open WIPO PATENTSCOPE (India Coverage) ↗</a>'
+          + '</div>'
+          + '<div style="font-size:11px;color:#64748b;">'
+          + '* Note: TKDL (Traditional Knowledge Digital Library) is a non-patent manual research resource accessible via official Indian patent examiners.'
+          + '</div>'
           + '</div>';
+      } else {
+        html += '<div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
+          + '<h3 style="font-size:15px;font-weight:700;color:#f8fafc;">📑 ' + (activeTab === "top" ? 'Top Matches' : (activeTab === "india" ? 'Indian Matches' : 'All Shortlisted Patents')) + ' (' + displayItems.length + ')</h3>'
+          + '</div>';
+
+        displayItems.forEach(function(item) {
+          var rec = item.patent || {};
+          var providerId = rec.provider_record_id || "";
+          var pubNum = rec.publication_number || null;
+          var title = rec.title || "Untitled Patent Document";
+          var applicant = rec.applicant || "Not Listed";
+          var pubDate = rec.publication_date || rec.filing_date || "N/A";
+          var jCode = getPatentJurisdictionCode(rec);
+          var jurisdiction = jCode !== "UNKNOWN" ? jCode : (rec.authority || "GLOBAL");
+
+          var flag = "🌍";
+          if (jurisdiction.indexOf("IN") !== -1) flag = "🇮🇳";
+          else if (jurisdiction.indexOf("US") !== -1) flag = "🇺🇸";
+          else if (jurisdiction.indexOf("EP") !== -1 || jurisdiction.indexOf("EU") !== -1) flag = "🇪🇺";
+          else if (jurisdiction.indexOf("WO") !== -1) flag = "🌐";
+
+          var idBadgeText = pubNum ? (flag + " " + pubNum) : (providerId ? (flag + " Source ID: " + providerId) : (flag + " ID Not Available"));
+          var pubNumDisplay = pubNum ? escapeHtml(pubNum) : "Not available";
+          var sourceIdDisplay = providerId ? (' &nbsp;|&nbsp; <strong>Source Record ID:</strong> ' + escapeHtml(providerId)) : '';
+
+          var level = item.relevance_level || "LOW";
+          var score = item.relevance_score;
+          var isNotAnalyzed = level === "NOT_ANALYZED" || score === null || score === undefined;
+
+          var badgeCls = "badge-low";
+          if (level === "VERY_HIGH") badgeCls = "badge-very-high";
+          else if (level === "HIGH") badgeCls = "badge-high";
+          else if (level === "MODERATE") badgeCls = "badge-moderate";
+          else if (isNotAnalyzed) badgeCls = "badge-not-analyzed";
+
+          var scoreLabel = !isNotAnalyzed ? (level.replace("_", " ") + ' (' + score + ' / 100)') : 'NOT ANALYZED (AI Unavailable)';
+
+          var breakdown = item.score_breakdown || null;
+          var techVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.technological_overlap + "%");
+          var ingVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.ingredient_overlap + "%");
+          var formVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.formulation_process_overlap + "%");
+          var claimVal = isNotAnalyzed || !breakdown ? "—" : (breakdown.claim_concept_overlap + "%");
+
+          var matchedComps = item.matched_components || [];
+          var openUrl = rec.open_patent_url || (pubNum ? ("https://patents.google.com/patent/" + pubNum.replace(/[^A-Za-z0-9]/g, "") + "/en") : (providerId ? ("https://europepmc.org/article/PAT/" + providerId) : ""));
+          var openBtnLabel = openUrl.indexOf("patents.google.com") !== -1 ? "Open Google Patent ↗" : "Open Europe PMC Record ↗";
+
+          var evBasis = item.evidence_basis || "TITLE_ABSTRACT";
+          var evBadgeLabel = "ABSTRACT-LEVEL SCREENING";
+          if (evBasis === "TITLE_ONLY") evBadgeLabel = "TITLE-LEVEL SCREENING";
+          else if (evBasis === "TITLE_ABSTRACT_CLAIMS" || evBasis === "CLAIM_TEXT") evBadgeLabel = "CLAIM-LEVEL SCREENING";
+
+          var familyHtml = "";
+          if (rec.family_id && rec.family_members && rec.family_members.length > 1) {
+            familyHtml = '<span class="patent-pub-badge" style="background:rgba(168,85,247,0.12);color:#c084fc;border-color:rgba(168,85,247,0.3);">Family: ' + escapeHtml(rec.family_id) + ' (' + rec.family_members.length + ')</span>';
+          }
+
+          html += '<div class="patent-card">'
+            + '<div class="patent-card-header">'
+            + '<div>'
+            + '<div class="patent-card-title-row">'
+            + '<span class="patent-pub-badge">' + escapeHtml(idBadgeText) + '</span>'
+            + familyHtml
+            + '<span class="patent-evidence-basis-badge">' + escapeHtml(evBadgeLabel) + '</span>'
+            + '<span class="patent-relevance-badge ' + badgeCls + '">' + escapeHtml(scoreLabel) + '</span>'
+            + '</div>'
+            + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;line-height:1.4;margin-bottom:6px;">' + escapeHtml(title) + '</h3>'
+            + '<div style="font-size:12px;color:#94a3b8;"><strong>Applicant / Assignee:</strong> ' + escapeHtml(applicant) + ' &nbsp;|&nbsp; <strong>Publication #:</strong> ' + pubNumDisplay + sourceIdDisplay + ' &nbsp;|&nbsp; <strong>Date:</strong> ' + escapeHtml(pubDate) + ' &nbsp;|&nbsp; <strong>Authority:</strong> ' + escapeHtml(rec.authority || jurisdiction) + '</div>'
+            + '</div>'
+            + '</div>';
+
+          if (rec.abstract) {
+            html += '<div style="font-size:13px;color:#cbd5e1;line-height:1.5;margin:10px 0;padding:10px 12px;background:rgba(15,23,42,0.4);border-radius:6px;border-left:3px solid #34d399;">'
+              + escapeHtml(rec.abstract.length > 320 ? rec.abstract.substring(0, 320) + '...' : rec.abstract)
+              + '</div>';
+          }
+
+          html += '<div class="patent-score-grid">'
+            + '<div class="patent-score-dim"><div class="patent-score-dim-label">TECH OVERLAP</div><div class="patent-score-dim-val">' + techVal + '</div></div>'
+            + '<div class="patent-score-dim"><div class="patent-score-dim-label">INGREDIENT OVERLAP</div><div class="patent-score-dim-val">' + ingVal + '</div></div>'
+            + '<div class="patent-score-dim"><div class="patent-score-dim-label">FORMULATION & PROCESS</div><div class="patent-score-dim-val">' + formVal + '</div></div>'
+            + '<div class="patent-score-dim"><div class="patent-score-dim-label">CLAIM CONCEPT</div><div class="patent-score-dim-val">' + claimVal + '</div></div>'
+            + '</div>';
+
+          if (matchedComps.length > 0) {
+            html += '<div style="margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+              + '<span style="font-size:11px;color:#94a3b8;font-weight:600;">MATCHED WITH YOUR PRODUCT:</span>';
+            matchedComps.forEach(function(mc) {
+              html += '<span style="font-size:11px;padding:2px 8px;border-radius:12px;background:rgba(52,211,153,0.12);color:#34d399;border:1px solid rgba(52,211,153,0.25);">' + escapeHtml(mc) + '</span>';
+            });
+            html += '</div>';
+          }
+
+          html += '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:10px;margin-top:12px;">'
+            + '<div class="patent-section-box"><div class="patent-section-title">WHY RELEVANT</div><div style="color:#f8fafc;">' + escapeHtml(item.why_relevant || "Overlap detected in abstract screening.") + '</div></div>'
+            + '<div class="patent-section-box"><div class="patent-section-title">IMPORTANT DIFFERENCE</div><div style="color:#f8fafc;">' + escapeHtml(item.important_difference || "Product case specifies standardized extract ratios.") + '</div></div>'
+            + '<div class="patent-section-box"><div class="patent-section-title">SCREENING LIMITATION</div><div style="color:#f8fafc;">' + escapeHtml(item.limitations || "Based on title/abstract text screening.") + '</div></div>'
+            + '</div>';
+
+          html += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06);">'
+            + (isNotAnalyzed ? ('<button class="btn btn-secondary btn-sm" onclick="retryPatentAiAnalysis()">' + icon("auto_renew", 14) + ' Retry AI Analysis</button>') : '')
+            + '<a href="' + escapeHtml(openUrl) + '" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display:inline-flex;align-items:center;gap:4px;">' + escapeHtml(openBtnLabel) + '</a>'
+            + '<button class="btn btn-ghost btn-sm" onclick="savePatentToCase(\'' + escapeHtml(rec.id || "") + '\')">' + icon("bookmark", 14) + ' Save to Case</button>'
+            + '</div>';
+
+          html += '</div>';
+        });
       }
     }
 
