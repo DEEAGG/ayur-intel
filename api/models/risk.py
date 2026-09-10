@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean, Float
 from sqlalchemy.orm import relationship
 
 from api.models.models import Base, _uuid, _now_utc
@@ -152,5 +152,46 @@ class SelfExtensionRequest(Base):
     created_at = Column(DateTime, nullable=False, default=_now_utc)
     updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)
 
+    owner = relationship("User", lazy="selectin")
+    product_case = relationship("ProductCase", lazy="selectin")
+
+
+class RiskAssessment(Base):
+    """Complete, canonical AI / Rule-based Risk Assessment for a Product Case."""
+
+    __tablename__ = "risk_assessments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    public_id = Column(String(32), unique=True, nullable=False, default=_uuid)
+
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    product_case_id = Column(Integer, ForeignKey("product_cases.id"), nullable=False, index=True)
+
+    # Assessment provenance
+    assessment_source = Column(String(30), nullable=False, default="GEMINI")  # GEMINI | RULE_ENGINE
+    model_used = Column(String(50), nullable=True)  # e.g. gemini-2.5-flash or None
+    schema_version = Column(Integer, nullable=False, default=1)
+
+    # Core scores & summary
+    overall_score = Column(Integer, nullable=False, default=0)  # 0-100
+    overall_level = Column(String(20), nullable=False, default="MODERATE")  # LOW, MODERATE, HIGH, CRITICAL
+    overall_confidence = Column(Float, nullable=False, default=0.80)  # 0.0 - 1.0
+    overall_summary = Column(Text, nullable=True)
+
+    # Structured JSON payloads
+    domain_scores_json = Column(Text, nullable=False, default="[]")
+    top_risks_json = Column(Text, nullable=False, default="[]")
+    mitigation_plan_json = Column(Text, nullable=False, default="{}")
+    evidence_gaps_json = Column(Text, nullable=False, default="[]")
+    evidence_coverage_json = Column(Text, nullable=False, default="{}")
+    raw_response_json = Column(Text, nullable=False, default="{}")
+
+    # Transparency disclaimer
+    disclaimer = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=_now_utc)
+    updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)
+
+    # Relationships
     owner = relationship("User", lazy="selectin")
     product_case = relationship("ProductCase", lazy="selectin")

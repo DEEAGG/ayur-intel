@@ -14,7 +14,7 @@ from api.models.evidence import (
     UnifiedEvidence, CaseFinding, CaseFindingEvidence,
 )
 from api.models.risk import (
-    Risk, RiskEvidence, RiskResolution, SelfExtensionRequest,
+    Risk, RiskEvidence, RiskResolution, SelfExtensionRequest, RiskAssessment,
 )
 from api.models.decision import DecisionDashboardSnapshot
 from api.models.monitoring import (
@@ -33,7 +33,7 @@ __all__ = [
     "RegulatoryProfile", "RegulatoryRequirement",
     "JurisdictionComparison", "ComparisonJurisdiction", "ComparisonItem", "ComparisonValue",
     "UnifiedEvidence", "CaseFinding", "CaseFindingEvidence",
-    "Risk", "RiskEvidence", "RiskResolution", "SelfExtensionRequest",
+    "Risk", "RiskEvidence", "RiskResolution", "SelfExtensionRequest", "RiskAssessment",
     "DecisionDashboardSnapshot",
     "MonitoringConfig", "MonitoringSource", "MonitoringRun", "ChangeRecord", "Alert",
     "AuditLog",

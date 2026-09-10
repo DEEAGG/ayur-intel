@@ -690,11 +690,11 @@
         + '<p>Navigate AYUSH, FSSAI, and Indian regulatory requirements.</p>'
         + '<button class="ws-btn" onclick="event.stopPropagation(); generateRegulatoryAnalysis()">Check →</button>'
         + '</div>'
-        + '<div class="workspace-card">'
+        + '<div class="workspace-card" id="card-intel-risk">'
         + '<span class="ws-icon">⚠️</span>'
         + '<h4>Risk Assessment</h4>'
         + '<p>Identify IP, regulatory, and market risks.</p>'
-        + '<button class="ws-btn" onclick="showToast(\'⚠️ Risk Assessment coming soon!\', \'info\')">Assess →</button>'
+        + '<button class="ws-btn" onclick="event.stopPropagation(); generateRiskAssessment()">Assess →</button>'
         + '</div>'
         + '<div class="workspace-card">'
         + '<span class="ws-icon">🕸️</span>'
@@ -2298,142 +2298,504 @@
   }
 
   // ----------------------------------------------------------------
-  // Risk + Self-Extension View (Phase 12)
+  // AI-Powered Risk Intelligence Module (Phase 12)
   // ----------------------------------------------------------------
 
-  function renderRiskView() {
-    var rd = state.riskData;
-    if (!rd) return '<div class="card"><div class="card-body"><p>No risk data available.</p></div></div>';
+  var _isRiskAssessmentGenerating = false;
 
-    var levelColors = { HIGH: 'var(--color-error)', MEDIUM: '#d97706', LOW: 'var(--color-secondary)', UNKNOWN: 'var(--color-outline)' };
-    var levelLabels = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low', UNKNOWN: 'Unknown' };
-    var categoryLabels = {
-      PATENT_IP: 'Patent / IP', REGULATORY: 'Regulatory',
-      INGREDIENT_PRODUCT_INFO: 'Product Information', CLAIMS: 'Claims',
-      TK_PRIOR_ART: 'TK / Prior Art', DATA_EVIDENCE_GAP: 'Evidence Gap',
-      JURISDICTION_UNCERTAINTY: 'Jurisdiction Uncertainty'
-    };
-    var categoryIcons = {
-      PATENT_IP: 'gavel', REGULATORY: 'policy', INGREDIENT_PRODUCT_INFO: 'eco',
-      CLAIMS: 'verified', TK_PRIOR_ART: 'menu_book', DATA_EVIDENCE_GAP: 'warning',
-      JURISDICTION_UNCERTAINTY: 'language'
-    };
-    var healthColors = { GOOD: 'var(--color-secondary)', PARTIAL: '#d97706', LIMITED: 'var(--color-error)' };
-    var phaseLabels = {
-      PHASE_5_INNOVATION: 'Innovation Map', PHASE_6_PATENT: 'Patent Intelligence',
-      PHASE_7_PATENT_DEEP: 'Patent Deep Analysis', PHASE_8_IP_STRATEGY: 'IP Strategy',
-      PHASE_9_REGULATORY: 'Regulatory Intel', PHASE_10_JURISDICTION: 'Jurisdiction Compare',
-      USER_INPUT: 'User Input'
-    };
-
-    var html = ''
-      + '<div class="view-header"><button class="btn btn-ghost btn-sm" id="back-from-risk">' + icon('arrow_back', 15) + ' Back to Case</button></div>'
-
-      // Header card
-      + '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>Risk &amp; Analysis Health</h2>'
-      + '<p>Potential issues and missing information for ' + escapeHtml(rd.product_name || '') + '</p></div><div class="card-body">'
-
-      // Risk summary stats
-      + '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px">'
-      + '<div class="patent-stat-card"><div class="patent-stat-label">TOTAL RISKS</div><div class="patent-stat-value">' + rd.total_risks + '</div></div>'
-      + '<div class="patent-stat-card" style="border-left:4px solid ' + levelColors.HIGH + '"><div class="patent-stat-label">HIGH</div><div class="patent-stat-value">' + rd.high_count + '</div></div>'
-      + '<div class="patent-stat-card" style="border-left:4px solid ' + levelColors.MEDIUM + '"><div class="patent-stat-label">MEDIUM</div><div class="patent-stat-value">' + rd.medium_count + '</div></div>'
-      + '<div class="patent-stat-card" style="border-left:4px solid ' + levelColors.LOW + '"><div class="patent-stat-label">LOW</div><div class="patent-stat-value">' + rd.low_count + '</div></div>'
-      + '</div>';
-
-    // Analysis Health
-    var h = rd.analysis_health || {};
-    html += '<div style="margin-bottom:16px"><span class="label-caps" style="color:var(--color-on-surface-variant)">ANALYSIS HEALTH</span></div>'
-      + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">';
-    var healthItems = [
-      { label: 'Product Completeness', value: h.product_completeness || 'LIMITED' },
-      { label: 'Evidence Coverage', value: (h.evidence_coverage || 0) + '%' },
-      { label: 'Patent Analysis', value: h.patent_analysis || 'LIMITED' },
-      { label: 'Regulatory', value: h.regulatory_coverage || 'LIMITED' },
-      { label: 'Jurisdictions', value: h.jurisdiction_coverage || 'LIMITED' }
-    ];
-    healthItems.forEach(function (item) {
-      var color = healthColors[item.value] || 'var(--color-outline)';
-      html += '<div style="padding:8px 14px;border:1px solid var(--color-outline-variant);border-radius:var(--radius-md);display:flex;align-items:center;gap:8px">'
-        + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + '"></span>'
-        + '<span style="font-size:13px;color:var(--color-on-surface-variant)">' + item.label + '</span>'
-        + '<span style="font-size:13px;font-weight:600;color:var(--color-on-surface)">' + item.value + '</span>'
-        + '</div>';
-    });
-    html += '</div></div></div>';
-
-    // Risk cards grouped by category
-    if (rd.risks && rd.risks.length > 0) {
-      var grouped = {};
-      rd.risks.forEach(function (r) {
-        if (!grouped[r.category]) grouped[r.category] = [];
-        grouped[r.category].push(r);
-      });
-
-      Object.keys(grouped).forEach(function (cat) {
-        var risks = grouped[cat];
-        html += '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon(categoryIcons[cat] || 'warning', 18) + ' ' + (categoryLabels[cat] || cat) + '</h2>'
-          + '<p>' + risks.length + ' risk' + (risks.length > 1 ? 's' : '') + '</p></div><div class="card-body">';
-
-        risks.forEach(function (r) {
-          var color = levelColors[r.level] || 'var(--color-outline)';
-          html += '<div class="innovation-component-card" style="margin-bottom:12px;border-left:4px solid ' + color + '">'
-            + '<div class="innovation-component-header"><div>'
-            + '<div style="font-size:15px;font-weight:600;color:var(--color-on-surface)">' + escapeHtml(r.title) + '</div>'
-            + '</div>'
-            + '<span class="innovation-classification-badge" style="background:' + color + '15;color:' + color + '">' + (levelLabels[r.level] || r.level) + '</span>'
-            + '</div>';
-          if (r.description) html += '<div style="font-size:13px;color:var(--color-on-surface-variant);line-height:1.6;margin-bottom:8px">' + escapeHtml(r.description) + '</div>';
-          if (r.affected_component_label) html += '<div style="margin-bottom:8px"><span class="label-caps" style="color:var(--color-on-surface-variant)">AFFECTED</span> ' + escapeHtml(r.affected_component_label) + '</div>';
-          if (r.missing_information) html += '<div style="margin-bottom:8px;padding:8px 12px;background:var(--color-surface-container);border-radius:var(--radius-md);font-size:12px"><span class="label-caps" style="color:var(--color-on-surface-variant)">MISSING</span> ' + escapeHtml(r.missing_information) + '</div>';
-          if (r.next_action) html += '<div style="margin-bottom:8px"><span class="label-caps" style="color:var(--color-on-surface-variant)">NEXT ACTION</span> ' + escapeHtml(r.next_action) + '</div>';
-          if (r.source_phase) html += '<div style="font-size:12px;color:var(--color-on-surface-variant)">Source: ' + (phaseLabels[r.source_phase] || r.source_phase) + '</div>';
-
-          // Evidence
-          if (r.evidence && r.evidence.length > 0) {
-            html += '<div style="margin-top:8px">';
-            r.evidence.forEach(function (e, ci) {
-              html += '<div class="knowledge-finding-evidence" style="cursor:pointer" onclick="window.AYUR.openEvidenceDrawer(\'' + (e.evidence_id || 'N/A') + '\')">'
-                + '<div style="font-weight:600;color:var(--color-on-surface)"[' + (ci + 1) + '] ' + escapeHtml(e.evidence_source_name || e.evidence_authority || 'Source') + '</div>';
-              if (e.evidence_jurisdiction) html += '<div style="font-size:12px;color:var(--color-on-surface-variant)">Jurisdiction: ' + escapeHtml(e.evidence_jurisdiction) + '</div>';
-              if (e.evidence_reference) html += '<div style="font-size:12px;color:var(--color-on-surface-variant);font-family:JetBrains Mono,monospace">Ref: ' + escapeHtml(e.evidence_reference) + '</div>';
-              html += '</div>';
-            });
-            html += '</div>';
-          }
-
-          html += '</div>';
-        });
-        html += '</div></div>';
-      });
+  async function generateRiskAssessment(caseId, forceReassess) {
+    var c = state.currentCase || (state.cases && state.cases.find(function(item) { return item.id === caseId; }));
+    if (!c && state.cases && state.cases.length > 0) {
+      c = state.cases[0];
+      state.currentCase = c;
+    }
+    if (!c) {
+      showToast('⚠️ No active product case found', 'error');
+      return;
     }
 
-    // Self-Extension panel
-    if (rd.self_extensions && rd.self_extensions.length > 0) {
-      html += '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon('extension', 18) + ' Self-Extension: Missing Information</h2>'
-        + '<p>' + rd.self_extensions.length + ' item' + (rd.self_extensions.length > 1 ? 's' : '') + ' need attention</p></div><div class="card-body">';
+    if (_isRiskAssessmentGenerating) {
+      showToast('⏳ Risk assessment generation is already in progress...', 'info');
+      return;
+    }
 
-      rd.self_extensions.forEach(function (ext) {
-        var priColor = ext.priority === 'HIGH' ? 'var(--color-error)' : ext.priority === 'MEDIUM' ? '#d97706' : 'var(--color-secondary)';
-        html += '<div class="innovation-component-card" style="margin-bottom:12px;border-left:4px solid ' + priColor + '>'
-          + '<div class="innovation-component-header"><div>'
-          + '<div style="font-size:14px;font-weight:600;color:var(--color-on-surface)">' + icon('warning', 16) + ' ' + escapeHtml(ext.title) + '</div>'
+    var cacheKey = "riskAssessment";
+    if (!forceReassess) {
+      var cached = getCachedModule(c.id, cacheKey) || getCachedModule(c.id, "riskData");
+      if (cached) {
+        state.riskData = cached;
+        state.view = "risk";
+        saveStateToLocalStorage();
+        render();
+        scrollToTop();
+        return;
+      }
+    }
+
+    _isRiskAssessmentGenerating = true;
+    state.riskLoading = true;
+    state.riskLoadingStep = 1;
+    state.view = "risk";
+    render();
+    scrollToTop();
+
+    // Visual step sequence
+    var stepTimer1 = setTimeout(function() {
+      if (state.riskLoading) { state.riskLoadingStep = 2; render(); }
+    }, 450);
+    var stepTimer2 = setTimeout(function() {
+      if (state.riskLoading) { state.riskLoadingStep = 3; render(); }
+    }, 900);
+    var stepTimer3 = setTimeout(function() {
+      if (state.riskLoading) { state.riskLoadingStep = 4; render(); }
+    }, 1400);
+
+    try {
+      var data = null;
+      if (forceReassess) {
+        data = await api("/api/cases/" + c.id + "/risk-assessment/reassess", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        });
+      } else {
+        try {
+          data = await api("/api/cases/" + c.id + "/risk-assessment");
+        } catch (getErr) {
+          data = await api("/api/cases/" + c.id + "/risk-assessment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+      }
+
+      if (data) {
+        setCachedModule(c.id, cacheKey, data);
+        setCachedModule(c.id, "riskData", data);
+        state.riskData = data;
+        state.riskLoading = false;
+        saveStateToLocalStorage();
+      }
+    } catch (e) {
+      console.error("Risk assessment generation failed:", e);
+      state.riskLoading = false;
+      showToast("⚠️ Could not generate AI Risk Assessment right now.", "error");
+    } finally {
+      clearTimeout(stepTimer1);
+      clearTimeout(stepTimer2);
+      clearTimeout(stepTimer3);
+      _isRiskAssessmentGenerating = false;
+      state.riskLoading = false;
+      render();
+      scrollToTop();
+    }
+  }
+  window.generateRiskAssessment = generateRiskAssessment;
+
+  function renderRiskLoadingShell(step) {
+    var s = step || 1;
+    var html = ''
+      + '<div class="view-header">'
+      + '<button class="btn btn-ghost btn-sm" onclick="if(window.AYUR){window.AYUR.state.view=\'case-detail\';window.AYUR.render();window.AYUR.scrollToTop();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
+      + '</div>'
+      + '<div class="risk-loading-shell">'
+      + '<div style="font-size:36px;margin-bottom:12px">⚠️</div>'
+      + '<h2 style="font-size:22px;font-weight:700;color:#ffffff;margin-bottom:6px">Synthesizing Product Risk Profile</h2>'
+      + '<p style="color:#7a9c8f;font-size:14px;margin-bottom:24px">Evaluating IP, regulatory, claims, and formulation safety parameters</p>'
+      + '<div class="risk-loading-steps">'
+
+      + '<div class="risk-loading-step-item ' + (s >= 1 ? 'active' : '') + '">'
+      + (s > 1 ? '<span class="material-symbols-outlined risk-step-icon-done" style="font-size:20px">check_circle</span>' : '<span class="material-symbols-outlined risk-step-icon-pulse" style="font-size:20px">pending</span>')
+      + '<span>Product identity, ingredients &amp; claims loaded</span>'
+      + '</div>'
+
+      + '<div class="risk-loading-step-item ' + (s >= 2 ? 'active' : '') + '">'
+      + (s > 2 ? '<span class="material-symbols-outlined risk-step-icon-done" style="font-size:20px">check_circle</span>' : (s === 2 ? '<span class="material-symbols-outlined risk-step-icon-pulse" style="font-size:20px">pending</span>' : '<span class="material-symbols-outlined" style="font-size:20px;color:#4a6358">radio_button_unchecked</span>'))
+      + '<span>Regulatory framework &amp; classification reviewed</span>'
+      + '</div>'
+
+      + '<div class="risk-loading-step-item ' + (s >= 3 ? 'active' : '') + '">'
+      + (s > 3 ? '<span class="material-symbols-outlined risk-step-icon-done" style="font-size:20px">check_circle</span>' : (s === 3 ? '<span class="material-symbols-outlined risk-step-icon-pulse" style="font-size:20px">pending</span>' : '<span class="material-symbols-outlined" style="font-size:20px;color:#4a6358">radio_button_unchecked</span>'))
+      + '<span>Patent landscape &amp; prior art signals reviewed</span>'
+      + '</div>'
+
+      + '<div class="risk-loading-step-item ' + (s >= 4 ? 'active' : '') + '">'
+      + (s >= 4 ? '<span class="material-symbols-outlined risk-step-icon-pulse" style="font-size:20px">sync</span>' : '<span class="material-symbols-outlined" style="font-size:20px;color:#4a6358">radio_button_unchecked</span>')
+      + '<span>Synthesizing structured risk intelligence...</span>'
+      + '</div>'
+
+      + '</div>'
+      + '<div class="skeleton skeleton-text" style="width:80%;margin:0 auto"></div>'
+      + '</div>';
+    return html;
+  }
+
+  function renderRiskView() {
+    if (state.riskLoading) {
+      return renderRiskLoadingShell(state.riskLoadingStep || 1);
+    }
+
+    var rd = state.riskData;
+    if (!rd) {
+      return ''
+        + '<div class="view-header">'
+        + '<button class="btn btn-ghost btn-sm" onclick="if(window.AYUR){window.AYUR.state.view=\'case-detail\';window.AYUR.render();window.AYUR.scrollToTop();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
+        + '</div>'
+        + '<div class="card"><div class="card-body" style="text-align:center;padding:40px">'
+        + '<p style="color:#b0c8c0;font-size:16px;margin-bottom:16px">No Risk Assessment has been generated yet for this product case.</p>'
+        + '<button class="btn btn-primary" onclick="generateRiskAssessment()">Run AI Risk Assessment →</button>'
+        + '</div></div>';
+    }
+
+    var ov = rd.overall_risk || {};
+    var score = typeof ov.score === 'number' ? ov.score : 50;
+    var level = (ov.level || 'MODERATE').toUpperCase();
+    var conf = Math.round((typeof ov.confidence === 'number' ? ov.confidence : 0.8) * 100);
+    var source = rd.assessment_source || 'GEMINI';
+    var isAI = source === 'GEMINI';
+    var modelUsed = rd.model_used;
+    var cov = rd.evidence_coverage || {};
+    var topRisks = rd.top_risks || [];
+    var domainScores = rd.domain_scores || [];
+    var mitigation = rd.mitigation_plan || {};
+    var gaps = rd.evidence_gaps || [];
+    var disclaimer = rd.disclaimer || 'Decision support only.';
+
+    var levelColorMap = {
+      LOW: '#2ecc71',
+      MODERATE: '#f39c12',
+      HIGH: '#e74c3c',
+      CRITICAL: '#ff6b6b'
+    };
+    var scoreColor = levelColorMap[level] || '#f39c12';
+
+    var tagClass = 'risk-tag-' + level.toLowerCase();
+
+    var html = ''
+      + '<div class="view-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">'
+      + '<button class="btn btn-ghost btn-sm" id="back-from-risk" onclick="if(window.AYUR){window.AYUR.state.view=\'case-detail\';window.AYUR.render();window.AYUR.scrollToTop();}">' + icon('arrow_back', 16) + ' Back to Case Intelligence</button>'
+      + '<button class="btn btn-outline btn-sm" id="refresh-risk-btn" onclick="generateRiskAssessment(null, true)" title="Run a fresh AI assessment with latest case evidence">' + icon('refresh', 16) + ' Refresh AI Assessment</button>'
+      + '</div>';
+
+    // Fallback Alert Banner
+    if (!isAI) {
+      html += '<div style="margin-bottom:16px;background:rgba(243,156,18,0.1);border:1px solid rgba(243,156,18,0.3);border-radius:10px;padding:12px 16px;color:#f39c12;font-size:13px;display:flex;align-items:center;gap:10px">'
+        + '<span class="material-symbols-outlined" style="font-size:20px">info</span>'
+        + '<div><strong>Rule-Based Assessment:</strong> AI analysis is temporarily unavailable. This assessment was generated using AYUR-INTEL\'s deterministic risk rules.</div>'
+        + '</div>';
+    }
+
+    // 1. Overall Risk Hero Card
+    html += '<div class="risk-hero-card">'
+      + '<div class="risk-hero-header">'
+      + '<div>'
+      + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">'
+      + '<span style="font-size:28px">⚠️</span>'
+      + '<h2 style="font-size:24px;font-weight:700;color:#ffffff;margin:0">Risk Intelligence Assessment</h2>'
+      + (isAI
+          ? '<span class="chip" style="background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3);font-weight:600">✨ AI-Assisted • Powered by Gemini' + (modelUsed ? ' (' + escapeHtml(modelUsed) + ')' : '') + '</span>'
+          : '<span class="chip" style="background:rgba(243,156,18,0.15);color:#f39c12;border:1px solid rgba(243,156,18,0.3);font-weight:600">⚙️ Rule-Based Assessment</span>')
+      + '</div>'
+      + '<p style="color:#b0c8c0;margin:0;font-size:14px">Decision-support risk profile for <strong style="color:#e0eee8">' + escapeHtml(rd.product_name || (state.currentCase ? state.currentCase.name : 'Product')) + '</strong></p>'
+      + '</div>'
+
+      // Score Display
+      + '<div class="risk-score-badge">'
+      + '<div>'
+      + '<div style="font-size:11px;color:#7a9c8f;text-transform:uppercase;font-weight:700;margin-bottom:2px">Risk Score</div>'
+      + '<span class="risk-score-num" style="color:' + scoreColor + '">' + score + '</span>'
+      + '<span class="risk-score-max"> / 100</span>'
+      + '</div>'
+      + '<span class="risk-level-tag ' + tagClass + '">' + level + ' RISK</span>'
+      + '</div>'
+      + '</div>'
+
+      // Executive Summary & Confidence
+      + '<div style="background:rgba(10,18,14,0.6);border-radius:10px;padding:14px 18px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.05)">'
+      + '<div style="font-size:14px;color:#ffffff;line-height:1.6;margin-bottom:8px">' + escapeHtml(ov.summary || 'Risk profile synthesized across available case intelligence dimensions.') + '</div>'
+      + '<div style="display:flex;align-items:center;gap:12px;font-size:12px;color:#7a9c8f">'
+      + '<span>Assessment Confidence: <strong style="color:#e0eee8">' + conf + '%</strong></span>'
+      + '<span>•</span>'
+      + '<span>Last Assessed: <strong style="color:#b0c8c0">' + (rd.updated_at ? new Date(rd.updated_at).toLocaleDateString() : 'Just now') + '</strong></span>'
+      + '</div>'
+      + '</div>'
+
+      // Evidence Coverage Strip
+      + '<div class="risk-coverage-strip">'
+      + '<span style="font-size:11px;font-weight:700;color:#7a9c8f;text-transform:uppercase;margin-right:4px">Evidence Coverage:</span>'
+      + '<span class="risk-coverage-chip ' + (cov.product_passport === 'Complete' ? 'available' : 'not-run') + '">Passport: ' + escapeHtml(cov.product_passport || 'Complete') + '</span>'
+      + '<span class="risk-coverage-chip ' + (cov.patent_intelligence === 'Available' ? 'available' : 'not-run') + '">Patents: ' + escapeHtml(cov.patent_intelligence || 'Not Run') + '</span>'
+      + '<span class="risk-coverage-chip ' + (cov.regulatory_pathways === 'Available' ? 'available' : 'not-run') + '">Regulatory: ' + escapeHtml(cov.regulatory_pathways || 'Not Run') + '</span>'
+      + '<span class="risk-coverage-chip ' + (cov.knowledge_evidence === 'Available' ? 'available' : 'not-run') + '">Knowledge: ' + escapeHtml(cov.knowledge_evidence || 'Not Run') + '</span>'
+      + '<span class="risk-coverage-chip ' + (cov.innovation_analysis === 'Available' ? 'available' : 'not-run') + '">Innovation: ' + escapeHtml(cov.innovation_analysis || 'Not Run') + '</span>'
+      + '</div>'
+      + '</div>';
+
+    // 2. Top Priority Risks Section
+    if (topRisks.length > 0) {
+      html += '<div style="margin-bottom:28px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+        + '<h3 style="font-size:18px;font-weight:700;color:#ffffff;margin:0;display:flex;align-items:center;gap:8px"><span style="color:#e74c3c">●</span> Top Priority Risks</h3>'
+        + '<span style="font-size:12px;color:#7a9c8f">' + topRisks.length + ' key risk items</span>'
+        + '</div>'
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));gap:16px">';
+
+      topRisks.forEach(function(r, idx) {
+        var rSev = (r.severity || 'MODERATE').toUpperCase();
+        var sClass = rSev === 'HIGH' || rSev === 'CRITICAL' ? 'sev-high' : 'sev-mod';
+        var tColor = levelColorMap[rSev] || '#f39c12';
+        var rTag = 'risk-tag-' + rSev.toLowerCase();
+
+        html += '<div class="risk-interactive-card ' + sClass + '" id="top-risk-card-' + idx + '">'
+          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'
+          + '<span class="risk-level-tag ' + rTag + '" style="font-size:11px">' + rSev + '</span>'
+          + '<span style="font-size:12px;color:#7a9c8f;font-weight:600">' + escapeHtml(r.domain || 'General') + '</span>'
           + '</div>'
-          + '<span class="innovation-classification-badge" style="background:' + priColor + '15;color:' + priColor + '">' + escapeHtml(ext.priority) + '</span>'
+          + '<h4 style="font-size:15px;font-weight:700;color:#ffffff;margin:0 0 8px 0;line-height:1.4">' + escapeHtml(r.title) + '</h4>'
+          + '<p style="font-size:13px;color:#b0c8c0;line-height:1.5;margin:0 0 12px 0">' + escapeHtml(r.why_it_matters || '') + '</p>'
+          + '<div style="display:flex;gap:12px;font-size:11px;color:#7a9c8f;margin-bottom:12px;flex-wrap:wrap">'
+          + '<span>Likelihood: <strong style="color:#e0eee8">' + escapeHtml(r.likelihood || 'Medium') + '</strong></span>'
+          + '<span>Impact: <strong style="color:#e0eee8">' + escapeHtml(r.impact || 'Medium') + '</strong></span>'
+          + '</div>'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,0.06);padding-top:10px">'
+          + '<span style="font-size:11px;color:#7a9c8f">' + (r.evidence_refs && r.evidence_refs.length > 0 ? escapeHtml(r.evidence_refs[0].label || 'Evidence Linked') : 'Verified') + '</span>'
+          + '<button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:12px;color:#2ecc71" onclick="window.AYUR.focusRiskInRegister(\'' + escapeHtml(r.id || idx) + '\')">Review Risk ↓</button>'
+          + '</div>'
           + '</div>';
-        if (ext.description) html += '<div style="font-size:13px;color:var(--color-on-surface-variant);line-height:1.6;margin-bottom:4px">' + escapeHtml(ext.description) + '</div>';
-        if (ext.why_needed) html += '<div style="font-size:12px;color:var(--color-on-surface-variant);font-style:italic;margin-bottom:8px">Why: ' + escapeHtml(ext.why_needed) + '</div>';
-        if (ext.suggested_action) html += '<div style="font-size:13px;color:var(--color-on-surface)">Action: ' + escapeHtml(ext.suggested_action) + '</div>';
-        html += '</div>';
       });
+
       html += '</div></div>';
     }
 
-    // Disclaimer
-    html += '<div class="innovation-disclaimer">' + icon('warning', 18) + '<div><strong>Risk &amp; Self-Extension Engine.</strong> Risks are decision-support indicators only. They are NOT legal, medical, regulatory, or patentability conclusions.</div></div>';
+    // 3. Domain Scores & 3x3 Risk Matrix Grid Container
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:20px;margin-bottom:28px">';
+
+    // Domain Scores Overview Card
+    html += '<div class="card" style="margin:0"><div class="card-head"><h3 style="font-size:16px;font-weight:700;margin:0">Risk Domain Overview</h3><p style="font-size:12px;color:#7a9c8f">Score breakdown by statutory &amp; IP domain</p></div><div class="card-body">';
+    if (domainScores.length > 0) {
+      domainScores.forEach(function(d) {
+        var dSev = (d.level || 'MODERATE').toUpperCase();
+        var dColor = levelColorMap[dSev] || '#f39c12';
+        html += '<div style="margin-bottom:14px">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+          + '<span style="font-size:13px;font-weight:600;color:#e0eee8">' + escapeHtml(d.domain) + '</span>'
+          + '<div style="display:flex;align-items:center;gap:8px">'
+          + '<span style="font-size:13px;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:' + dColor + '">' + d.score + '</span>'
+          + '<span class="risk-level-tag risk-tag-' + dSev.toLowerCase() + '" style="font-size:10px;padding:2px 6px">' + dSev + '</span>'
+          + '</div>'
+          + '</div>'
+          + '<div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">'
+          + '<div style="height:100%;width:' + d.score + '%;background:' + dColor + ';border-radius:3px;transition:width 400ms ease"></div>'
+          + '</div>'
+          + (d.summary ? '<div style="font-size:11px;color:#7a9c8f;margin-top:4px">' + escapeHtml(d.summary) + '</div>' : '')
+          + '</div>';
+      });
+    } else {
+      html += '<p style="color:#7a9c8f;font-size:13px">No domain scores recorded.</p>';
+    }
+    html += '</div></div>';
+
+    // 3x3 Likelihood × Impact Risk Matrix Card
+    html += '<div class="card" style="margin:0"><div class="card-head"><h3 style="font-size:16px;font-weight:700;margin:0">Likelihood × Impact Matrix</h3><p style="font-size:12px;color:#7a9c8f">Interactive prioritization grid</p></div><div class="card-body">'
+      + '<div class="risk-matrix-container">'
+      + '<div class="risk-matrix-grid">'
+      + '<div class="risk-matrix-header-cell"></div>'
+      + '<div class="risk-matrix-header-cell">Low Impact</div>'
+      + '<div class="risk-matrix-header-cell">Med Impact</div>'
+      + '<div class="risk-matrix-header-cell">High Impact</div>'
+
+      // Row 1: High Likelihood
+      + '<div class="risk-matrix-row-label">High Lik.</div>'
+      + '<div class="risk-matrix-cell risk-cell-med" id="matrix-cell-HIGH-LOW">' + renderMatrixDots(topRisks, 'HIGH', 'LOW') + '</div>'
+      + '<div class="risk-matrix-cell risk-cell-high" id="matrix-cell-HIGH-MEDIUM">' + renderMatrixDots(topRisks, 'HIGH', 'MEDIUM') + '</div>'
+      + '<div class="risk-matrix-cell risk-cell-critical" id="matrix-cell-HIGH-HIGH">' + renderMatrixDots(topRisks, 'HIGH', 'HIGH') + '</div>'
+
+      // Row 2: Med Likelihood
+      + '<div class="risk-matrix-row-label">Med Lik.</div>'
+      + '<div class="risk-matrix-cell risk-cell-low" id="matrix-cell-MEDIUM-LOW">' + renderMatrixDots(topRisks, 'MEDIUM', 'LOW') + '</div>'
+      + '<div class="risk-matrix-cell risk-cell-med" id="matrix-cell-MEDIUM-MEDIUM">' + renderMatrixDots(topRisks, 'MEDIUM', 'MEDIUM') + '</div>'
+      + '<div class="risk-matrix-cell risk-cell-high" id="matrix-cell-MEDIUM-HIGH">' + renderMatrixDots(topRisks, 'MEDIUM', 'HIGH') + '</div>'
+
+      // Row 3: Low Likelihood
+      + '<div class="risk-matrix-row-label">Low Lik.</div>'
+      + '<div class="risk-matrix-cell risk-cell-low" id="matrix-cell-LOW-LOW">' + renderMatrixDots(topRisks, 'LOW', 'LOW') + '</div>'
+      + '<div class="risk-matrix-cell risk-cell-low" id="matrix-cell-LOW-MEDIUM">' + renderMatrixDots(topRisks, 'LOW', 'MEDIUM') + '</div>'
+      + '<div class="risk-matrix-cell risk-cell-med" id="matrix-cell-LOW-HIGH">' + renderMatrixDots(topRisks, 'LOW', 'HIGH') + '</div>'
+
+      + '</div>'
+      + '</div>'
+      + '<div style="font-size:11px;color:#7a9c8f;text-align:center;margin-top:8px">Click chips in matrix to focus corresponding Risk Register entry.</div>'
+      + '</div></div>';
+
+    html += '</div>';
+
+    // 4. Detailed Risk Register
+    html += '<div class="card" style="margin-bottom:24px"><div class="card-head"><h3 style="font-size:18px;font-weight:700;margin:0">Detailed Risk Register</h3><p style="font-size:13px;color:#7a9c8f">Comprehensive risk breakdown with evidence traceability and mitigation</p></div><div class="card-body">';
+
+    if (topRisks.length > 0) {
+      topRisks.forEach(function(r, idx) {
+        var rSev = (r.severity || 'MODERATE').toUpperCase();
+        var tColor = levelColorMap[rSev] || '#f39c12';
+        var rTag = 'risk-tag-' + rSev.toLowerCase();
+        var regId = 'risk-reg-item-' + (r.id || idx);
+
+        html += '<div class="risk-register-item expanded" id="' + regId + '">'
+          + '<div class="risk-register-header" onclick="window.AYUR.toggleRiskAccordion(\'' + regId + '\')">'
+          + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+          + '<span class="risk-level-tag ' + rTag + '" style="font-size:11px">' + rSev + '</span>'
+          + '<span style="font-size:12px;color:#7a9c8f;font-weight:600">' + escapeHtml(r.domain) + '</span>'
+          + '<strong style="font-size:15px;color:#ffffff">' + escapeHtml(r.title) + '</strong>'
+          + '</div>'
+          + '<span class="material-symbols-outlined" style="font-size:20px;color:#7a9c8f">expand_more</span>'
+          + '</div>'
+
+          + '<div class="risk-register-body">'
+          + '<div style="margin-bottom:12px">'
+          + '<div style="font-size:11px;font-weight:700;color:#7a9c8f;text-transform:uppercase;margin-bottom:4px">Why This Matters</div>'
+          + '<div style="font-size:13px;color:#e0eee8;line-height:1.6">' + escapeHtml(r.why_it_matters || '') + '</div>'
+          + '</div>'
+
+          + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:10px;margin-bottom:14px;background:rgba(10,18,14,0.6);padding:10px 14px;border-radius:8px">'
+          + '<div><span style="font-size:11px;color:#7a9c8f">Likelihood:</span> <strong style="font-size:12px;color:#ffffff">' + escapeHtml(r.likelihood || 'Medium') + '</strong></div>'
+          + '<div><span style="font-size:11px;color:#7a9c8f">Impact:</span> <strong style="font-size:12px;color:#ffffff">' + escapeHtml(r.impact || 'Medium') + '</strong></div>'
+          + '<div><span style="font-size:11px;color:#7a9c8f">Confidence:</span> <strong style="font-size:12px;color:#ffffff">' + Math.round((r.confidence || 0.8) * 100) + '%</strong></div>'
+          + '<div><span style="font-size:11px;color:#7a9c8f">Evidence Status:</span> <strong style="font-size:12px;color:#2ecc71">' + escapeHtml(r.evidence_status || 'SUPPORTED') + '</strong></div>'
+          + '</div>'
+
+          // Evidence Traceability Pills
+          + '<div style="margin-bottom:14px">'
+          + '<div style="font-size:11px;font-weight:700;color:#7a9c8f;text-transform:uppercase;margin-bottom:6px">Based On Evidence:</div>'
+          + '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+
+        if (r.evidence_refs && r.evidence_refs.length > 0) {
+          r.evidence_refs.forEach(function(ev) {
+            var st = ev.source_type || 'passport';
+            var evLabel = ev.label || ev.reference_key || 'Evidence';
+            var onClickAction = 'void(0)';
+            if (st === 'patent') onClickAction = 'if(window.generatePatentIntelligence){window.generatePatentIntelligence();}';
+            else if (st === 'regulatory') onClickAction = 'if(window.generateRegulatoryAnalysis){window.generateRegulatoryAnalysis();}';
+            else if (st === 'passport') onClickAction = 'if(window.AYUR){window.AYUR.state.view=\'passport-wizard\';window.AYUR.render();}';
+
+            html += '<span class="risk-evidence-link-pill" onclick="' + onClickAction + '" title="Open source intelligence module">'
+              + icon('open_in_new', 14) + ' ' + escapeHtml(evLabel) + '</span>';
+          });
+        } else {
+          html += '<span style="font-size:12px;color:#7a9c8f">Verified from Product Passport specifications</span>';
+        }
+        html += '</div></div>'
+
+          // Recommended Action
+          + '<div style="background:rgba(46,204,113,0.06);border-left:3px solid #2ecc71;padding:10px 14px;border-radius:0 8px 8px 0;margin-bottom:10px">'
+          + '<div style="font-size:11px;font-weight:700;color:#2ecc71;text-transform:uppercase;margin-bottom:2px">Recommended Action</div>'
+          + '<div style="font-size:13px;color:#ffffff">' + escapeHtml(r.recommended_action || 'Review details with domain specialist.') + '</div>'
+          + '</div>'
+
+          + (r.requires_human_verification ? '<div style="font-size:11px;color:#7a9c8f;display:flex;align-items:center;gap:6px">' + icon('verified', 14) + ' Requires Human Specialist Review</div>' : '')
+          + '</div>'
+          + '</div>';
+      });
+    } else {
+      html += '<p style="color:#7a9c8f;font-size:13px">No detailed risk items recorded.</p>';
+    }
+
+    html += '</div></div>';
+
+    // 5. AI Mitigation Plan Section
+    var imm = mitigation.immediate || [];
+    var regSub = mitigation.before_regulatory_submission || [];
+    var mktLaunch = mitigation.before_market_launch || [];
+
+    html += '<div class="card" style="margin-bottom:24px"><div class="card-head"><h3 style="font-size:18px;font-weight:700;margin:0">AI Mitigation Roadmap</h3><p style="font-size:13px;color:#7a9c8f">Phased action items to de-risk commercialization</p></div><div class="card-body">'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px">'
+
+      // Column 1: Immediate
+      + '<div style="background:rgba(10,18,14,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px">'
+      + '<div style="font-size:13px;font-weight:700;color:#2ecc71;margin-bottom:12px;display:flex;align-items:center;gap:6px">' + icon('bolt', 18) + ' Immediate Actions</div>'
+      + '<ul style="margin:0;padding-left:18px;font-size:13px;color:#b0c8c0;line-height:1.6">';
+    imm.forEach(function(item) { html += '<li style="margin-bottom:8px">' + escapeHtml(item) + '</li>'; });
+    html += '</ul></div>'
+
+      // Column 2: Before Regulatory
+      + '<div style="background:rgba(10,18,14,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px">'
+      + '<div style="font-size:13px;font-weight:700;color:#f39c12;margin-bottom:12px;display:flex;align-items:center;gap:6px">' + icon('assignment', 18) + ' Pre-Submission</div>'
+      + '<ul style="margin:0;padding-left:18px;font-size:13px;color:#b0c8c0;line-height:1.6">';
+    regSub.forEach(function(item) { html += '<li style="margin-bottom:8px">' + escapeHtml(item) + '</li>'; });
+    html += '</ul></div>'
+
+      // Column 3: Before Market Launch
+      + '<div style="background:rgba(10,18,14,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:16px">'
+      + '<div style="font-size:13px;font-weight:700;color:#3498db;margin-bottom:12px;display:flex;align-items:center;gap:6px">' + icon('rocket_launch', 18) + ' Pre-Launch (Commercial)</div>'
+      + '<ul style="margin:0;padding-left:18px;font-size:13px;color:#b0c8c0;line-height:1.6">';
+    mktLaunch.forEach(function(item) { html += '<li style="margin-bottom:8px">' + escapeHtml(item) + '</li>'; });
+    html += '</ul></div>'
+
+      + '</div>'
+      + '</div></div>';
+
+    // 6. Evidence Gaps & Uncertainties
+    if (gaps.length > 0) {
+      html += '<div class="card" style="margin-bottom:24px;border-left:4px solid #f39c12"><div class="card-head"><h3 style="font-size:16px;font-weight:700;color:#ffffff;margin:0">Evidence Gaps &amp; Uncertainties</h3><p style="font-size:12px;color:#7a9c8f">Intelligence areas that require execution to increase certainty</p></div><div class="card-body">'
+        + '<ul style="margin:0;padding-left:18px;font-size:13px;color:#b0c8c0;line-height:1.6">';
+      gaps.forEach(function(g) {
+        html += '<li style="margin-bottom:8px">' + escapeHtml(g) + '</li>';
+      });
+      html += '</ul></div></div>';
+    }
+
+    // 7. Transparency Disclaimer Footer
+    html += '<div class="innovation-disclaimer" style="margin-top:20px">'
+      + icon('warning', 18)
+      + '<div><strong>Decision Support Only.</strong> ' + escapeHtml(disclaimer) + '</div>'
+      + '</div>';
 
     return html;
   }
+
+  function renderMatrixDots(topRisks, targetLikelihood, targetImpact) {
+    var matching = (topRisks || []).filter(function(r) {
+      var l = (r.likelihood || 'MEDIUM').toUpperCase();
+      var i = (r.impact || 'MEDIUM').toUpperCase();
+      return l === targetLikelihood && i === targetImpact;
+    });
+
+    if (matching.length === 0) return '<span style="font-size:11px;color:#4a6358">—</span>';
+
+    var html = '';
+    matching.forEach(function(r) {
+      var rSev = (r.severity || 'MODERATE').toUpperCase();
+      var bg = rSev === 'CRITICAL' ? '#ff6b6b' : (rSev === 'HIGH' ? '#e74c3c' : (rSev === 'MODERATE' ? '#f39c12' : '#2ecc71'));
+      html += '<div class="risk-chip-marker" style="background:' + bg + '22;color:' + bg + ';border:1px solid ' + bg + '55" onclick="window.AYUR.focusRiskInRegister(\'' + escapeHtml(r.id) + '\')" title="' + escapeHtml(r.title) + ' (' + rSev + ')">'
+        + '<span style="width:6px;height:6px;border-radius:50%;background:' + bg + '"></span>'
+        + '<span>' + escapeHtml(r.title) + '</span>'
+        + '</div>';
+    });
+    return html;
+  }
+
+  function focusRiskInRegister(riskId) {
+    var el = document.getElementById('risk-reg-item-' + riskId);
+    if (el) {
+      el.classList.add('expanded');
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.boxShadow = '0 0 16px rgba(46, 204, 113, 0.4)';
+      setTimeout(function() {
+        el.style.boxShadow = '';
+      }, 1500);
+    }
+  }
+  window.focusRiskInRegister = focusRiskInRegister;
+
+  function toggleRiskAccordion(regId) {
+    var el = document.getElementById(regId);
+    if (el) {
+      el.classList.toggle('expanded');
+    }
+  }
+  window.toggleRiskAccordion = toggleRiskAccordion;
+
+  // ----------------------------------------------------------------
+  // Evidence & Citation View (Phase 11)
+  // ----------------------------------------------------------------
+
 
   // ----------------------------------------------------------------
   // Evidence & Citation View (Phase 11)
@@ -4607,8 +4969,7 @@
     var cardRisk = document.getElementById("card-intel-risk");
     if (cardRisk) {
       cardRisk.addEventListener("click", function () {
-        if (!state.currentCase) return;
-        openCaseModule("riskData", "/api/cases/" + state.currentCase.id + "/risk-analysis", "risk", { method: "POST" });
+        generateRiskAssessment();
       });
     }
 
@@ -4794,8 +5155,7 @@
     var riskBtn = document.getElementById("open-risk-btn");
     if (riskBtn) {
       riskBtn.addEventListener("click", function () {
-        if (!state.currentCase) return;
-        openCaseModule("riskData", "/api/cases/" + state.currentCase.id + "/risk-analysis", "risk", { method: "POST" });
+        generateRiskAssessment();
       });
     }
 
@@ -5809,6 +6169,10 @@
     renderIPStrategy: renderIPStrategy,
     generateRegulatoryAnalysis: generateRegulatoryAnalysis,
     renderRegulatoryIntelligence: renderRegulatoryIntelligence,
+    generateRiskAssessment: generateRiskAssessment,
+    renderRiskView: renderRiskView,
+    focusRiskInRegister: focusRiskInRegister,
+    toggleRiskAccordion: toggleRiskAccordion,
     openRegulatoryGuide: openRegulatoryGuide,
     editProductPassport: editProductPassport,
     scrollToTop: scrollToTop,

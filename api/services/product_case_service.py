@@ -421,6 +421,7 @@ def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
         "DELETE FROM case_finding_evidence WHERE finding_id IN (SELECT id FROM case_findings WHERE product_case_id = :cid)",
         "DELETE FROM case_findings WHERE product_case_id = :cid",
         # Risks & Self Extension
+        "DELETE FROM risk_assessments WHERE product_case_id = :cid",
         "DELETE FROM risk_evidence WHERE risk_id IN (SELECT id FROM risks WHERE product_case_id = :cid)",
         "DELETE FROM risk_resolutions WHERE risk_id IN (SELECT id FROM risks WHERE product_case_id = :cid)",
         "DELETE FROM risks WHERE product_case_id = :cid",

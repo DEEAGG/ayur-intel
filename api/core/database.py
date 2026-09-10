@@ -107,7 +107,11 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_plant_discoveries_product_case_id ON plant_discoveries (product_case_id)",
             "CREATE INDEX IF NOT EXISTS ix_knowledge_findings_owner_id ON knowledge_findings (owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_knowledge_findings_product_case_id ON knowledge_findings (product_case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_risk_assessments_product_case_id ON risk_assessments (product_case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_risk_assessments_public_id ON risk_assessments (public_id)",
+            "CREATE INDEX IF NOT EXISTS ix_risk_assessments_owner_id ON risk_assessments (owner_id)",
         ]
+
 
         for idx_sql in indexes:
             try:
