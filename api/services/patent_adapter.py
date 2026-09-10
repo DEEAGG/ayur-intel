@@ -239,82 +239,99 @@ class EuropePMCPatentAdapter(PatentSourceAdapter):
         limit: int = 20,
     ) -> PatentSearchResponse:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        search_terms = [query] + (keywords or [])
-        clean_words = []
-        stop_words = {'formulation', 'process', 'delivery', 'composition', 'therapeutic', 'concept', 'enhancement', 'relief', 'extract', 'matrix', 'and', 'or', 'with', 'herbal'}
-        for term in search_terms:
-            t_clean = re.sub(r'[\"\']', '', term)
-            words = [w for w in re.findall(r'\b[a-zA-Z]{3,}\b', t_clean) if w.lower() not in stop_words]
-            clean_words.extend(words)
+        queries_to_run = keywords if keywords else [query]
 
-        unique_words = list(dict.fromkeys(clean_words))[:6]
-        q_or = " OR ".join(unique_words) if unique_words else query.replace('"', '').strip()
-
-        pmc_url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=({urllib.parse.quote(q_or)})%20SRC:PAT&format=json&pageSize={limit}"
-
-        results: List[PatentResult] = []
+        results_by_id: Dict[str, PatentResult] = {}
         is_live_success = False
-        try:
-            req = urllib.request.Request(pmc_url, headers={"User-Agent": "AYURINTEL-PatentBot/1.0 (Research)"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode('utf-8', errors='ignore'))
-                    raw_list = data.get("resultList", {}).get("result", [])
-                    for item in raw_list[:limit]:
-                        provider_id = item.get("id")
-                        if not provider_id:
-                            continue
+        error_msg = None
+        queries_executed = 0
+        queries_with_results = 0
 
-                        patent_details = item.get("patentDetails") if isinstance(item.get("patentDetails"), dict) else {}
-                        raw_pub_num = patent_details.get("publicationNumber") or patent_details.get("number")
-                        kind_code = patent_details.get("kindCode")
+        for q_str in queries_to_run:
+            q_clean = q_str.strip()
+            if not q_clean:
+                continue
 
-                        canonical_pub_num = None
-                        if raw_pub_num and kind_code and re.match(r'^[A-Z]{2}\d{6,12}[A-Z0-9]{1,3}$', f"{raw_pub_num}{kind_code}"):
-                            canonical_pub_num = f"{raw_pub_num}{kind_code}"
+            pmc_url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=({urllib.parse.quote(q_clean)})%20SRC:PAT&format=json&pageSize={limit}"
+            queries_executed += 1
+            query_had_hits = False
 
-                        raw_title = item.get("title") or ""
-                        raw_abstract = item.get("abstractText") or ""
-                        clean_title = re.sub(r'<[^>]+>', '', html.unescape(raw_title)).strip()
-                        clean_abstract = re.sub(r'<[^>]+>', '', html.unescape(raw_abstract)).strip()
+            try:
+                req = urllib.request.Request(pmc_url, headers={"User-Agent": "AYURINTEL-PatentBot/1.0 (Research)"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode('utf-8', errors='ignore'))
+                        raw_list = data.get("resultList", {}).get("result", [])
+                        if raw_list:
+                            query_had_hits = True
 
-                        applicant = item.get("authorString") or patent_details.get("applicant") or "Patent Applicant"
-                        pub_date = item.get("firstPublicationDate") or ""
-                        country = patent_details.get("countryCode") or (provider_id[:2] if provider_id else "GLOBAL")
+                        for item in raw_list[:limit]:
+                            provider_id = item.get("id")
+                            if not provider_id:
+                                continue
 
-                        # Extract family metadata ONLY if explicitly provided by provider response
-                        family_meta = item.get("family_metadata") if isinstance(item.get("family_metadata"), dict) else {}
-                        family_id = family_meta.get("family_id") if family_meta else None
-                        family_members = family_meta.get("publication_numbers") if family_meta and isinstance(family_meta.get("publication_numbers"), list) else None
+                            patent_details = item.get("patentDetails") if isinstance(item.get("patentDetails"), dict) else {}
+                            raw_pub_num = patent_details.get("publicationNumber") or patent_details.get("number")
+                            kind_code = patent_details.get("kindCode")
 
-                        source_url = f"https://patents.google.com/patent/{canonical_pub_num}/en" if canonical_pub_num else f"https://europepmc.org/article/PAT/{provider_id}"
+                            canonical_pub_num = None
+                            if raw_pub_num and kind_code and re.match(r'^[A-Z]{2}\d{6,12}[A-Z0-9]{1,3}$', f"{raw_pub_num}{kind_code}"):
+                                canonical_pub_num = f"{raw_pub_num}{kind_code}"
 
-                        results.append(PatentResult(
-                            provider_record_id=provider_id,
-                            publication_number=canonical_pub_num,
-                            title=clean_title,
-                            abstract=clean_abstract or clean_title,
-                            applicant=applicant,
-                            inventors=[applicant] if applicant else [],
-                            publication_date=pub_date,
-                            filing_date=pub_date,
-                            priority_date=pub_date,
-                            jurisdiction=country,
-                            status="Published",
-                            family_id=family_id,
-                            family_members=family_members,
-                            source_name="EUROPE_PMC_PATENTS",
-                            authority="Europe PMC Patent Index",
-                            source_url=source_url,
-                            matched_queries=[q_or]
-                        ))
-                    is_live_success = True
-        except Exception as e:
-            error_msg = f"Live public patent index query failed: {e}"
-            logger.warning(error_msg)
+                            dedup_key = canonical_pub_num or provider_id
 
-        # Truthful Live Search Result — ZERO silent seed substitution
-        return PatentSearchResponse(
+                            if dedup_key in results_by_id:
+                                if q_clean not in results_by_id[dedup_key].matched_queries:
+                                    results_by_id[dedup_key].matched_queries.append(q_clean)
+                                continue
+
+                            raw_title = item.get("title") or ""
+                            raw_abstract = item.get("abstractText") or ""
+                            clean_title = re.sub(r'<[^>]+>', '', html.unescape(raw_title)).strip()
+                            clean_abstract = re.sub(r'<[^>]+>', '', html.unescape(raw_abstract)).strip()
+
+                            applicant = item.get("authorString") or patent_details.get("applicant") or "Patent Applicant"
+                            pub_date = item.get("firstPublicationDate") or ""
+                            country = patent_details.get("countryCode") or (provider_id[:2] if provider_id else "GLOBAL")
+
+                            family_meta = item.get("family_metadata") if isinstance(item.get("family_metadata"), dict) else {}
+                            family_id = family_meta.get("family_id") if family_meta else None
+                            family_members = family_meta.get("publication_numbers") if family_meta and isinstance(family_meta.get("publication_numbers"), list) else None
+
+                            source_url = f"https://patents.google.com/patent/{canonical_pub_num}/en" if canonical_pub_num else f"https://europepmc.org/article/PAT/{provider_id}"
+
+                            results_by_id[dedup_key] = PatentResult(
+                                provider_record_id=provider_id,
+                                publication_number=canonical_pub_num,
+                                title=clean_title,
+                                abstract=clean_abstract or clean_title,
+                                applicant=applicant,
+                                inventors=[applicant] if applicant else [],
+                                publication_date=pub_date,
+                                filing_date=pub_date,
+                                priority_date=pub_date,
+                                jurisdiction=country,
+                                status="Published",
+                                family_id=family_id,
+                                family_members=family_members,
+                                source_name="EUROPE_PMC_PATENTS",
+                                authority="Europe PMC Patent Index",
+                                source_url=source_url,
+                                matched_queries=[q_clean]
+                            )
+
+                        is_live_success = True
+
+            except Exception as e:
+                error_msg = f"Live public patent index query failed for query '{q_clean}': {e}"
+                logger.warning(error_msg)
+
+            if query_had_hits:
+                queries_with_results += 1
+
+        results = list(results_by_id.values())
+
+        response = PatentSearchResponse(
             results=results,
             total=len(results),
             source_name="EUROPE_PMC_PATENTS",
@@ -324,6 +341,9 @@ class EuropePMCPatentAdapter(PatentSourceAdapter):
             message=None if is_live_success else (error_msg or "No patent records retrieved from live public patent query."),
             retrieval_date=now
         )
+        setattr(response, "queries_executed", queries_executed)
+        setattr(response, "queries_with_results", queries_with_results)
+        return response
 
 
 # Backward compatibility alias

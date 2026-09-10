@@ -172,123 +172,199 @@ def _relevance_to_dict(rel: PatentRelevance) -> dict:
 # Query Plan Generation (5-10 Categorized Structured Queries)
 # -------------------------------------------------------------------
 
+BOTANICAL_MARKERS = {
+    "withania": "withanolides",
+    "ashwagandha": "withanolides",
+    "bacopa": "bacosides",
+    "brahmi": "bacosides",
+    "ocimum": "eugenol",
+    "tulsi": "eugenol",
+    "azadirachta": "azadirachtin",
+    "neem": "azadirachtin",
+    "curcuma": "curcumin",
+    "turmeric": "curcumin",
+    "zingiber": "gingerol",
+    "ginger": "gingerol",
+    "phyllanthus": "tannins",
+    "amla": "tannins",
+}
+
+
 def generate_query_plan(case: ProductCase, components: List[InnovationComponent]) -> List[dict]:
-    """Generate 5–10 structured search queries categorized by prior-art classification."""
+    """Generate 7–10 short, concept-based search queries derived from product intelligence."""
     plan: List[dict] = []
 
     ingredients = _deserialize_list(case.ingredients) if case.ingredients else []
-    ing_names = []
-    botanical_names = []
+    ing_common = []
+    ing_botanical = []
+    markers = []
 
     for ing in ingredients:
         name = ing.get("name", "") if isinstance(ing, dict) else str(ing)
+        bot_val = ing.get("botanical", "") if isinstance(ing, dict) else ""
         name_clean = name.strip()
-        if name_clean:
-            if "(" in name_clean and ")" in name_clean:
-                common = name_clean.split("(")[0].strip()
-                botanical = name_clean.split("(")[1].split(")")[0].strip()
-                ing_names.append(common)
-                botanical_names.append(botanical)
-            else:
-                ing_names.append(name_clean)
 
-    # 1. BOTANICAL
-    if botanical_names:
-        bot_query = " OR ".join([f'"{b}"' for b in botanical_names[:3]])
+        common_name = ""
+        botanical_name = ""
+
+        if "(" in name_clean and ")" in name_clean:
+            common_name = name_clean.split("(")[0].strip()
+            botanical_name = name_clean.split("(")[1].split(")")[0].strip()
+        else:
+            common_name = name_clean
+
+        if bot_val and not botanical_name:
+            botanical_name = bot_val.strip()
+
+        if common_name:
+            ing_common.append(common_name)
+        if botanical_name:
+            ing_botanical.append(botanical_name)
+
+        check_str = (common_name + " " + botanical_name).lower()
+        for k, v in BOTANICAL_MARKERS.items():
+            if k in check_str and v not in markers:
+                markers.append(v)
+
+    # 1. BOTANICAL CONCEPT
+    if ing_botanical:
+        bot_query = " OR ".join([f'"{b}"' for b in ing_botanical[:3]])
         plan.append({
             "category": "BOTANICAL",
             "query": bot_query,
-            "rationale": "Screens for prior art covering key active botanical species."
-        })
-    elif ing_names:
-        plan.append({
-            "category": "BOTANICAL",
-            "query": " OR ".join([f'"{i}"' for i in ing_names[:3]]),
-            "rationale": "Screens for prior art covering primary active ingredients."
+            "signals": " · ".join(ing_botanical[:3]),
+            "rationale": "Screens for prior art covering key scientific botanical species."
         })
 
-    # 2. COMBINATION
-    if len(ing_names) >= 2 or (ing_names and botanical_names):
-        comb_terms = (botanical_names if botanical_names else ing_names)[:3]
-        comb_query = " AND ".join([f'"{t}"' for t in comb_terms])
+    # 2. COMMON NAMES
+    if ing_common:
+        common_query = " OR ".join([f'"{c}"' for c in ing_common[:3]])
+        plan.append({
+            "category": "COMMON_NAMES",
+            "query": common_query,
+            "signals": " · ".join(ing_common[:3]),
+            "rationale": "Screens for prior art matching primary common herbal names."
+        })
+
+    # 3. COMBINATION CONCEPT
+    if len(ing_botanical) >= 2:
+        comb_query = " AND ".join([f'"{b}"' for b in ing_botanical[:3]])
         plan.append({
             "category": "COMBINATION",
             "query": comb_query,
-            "rationale": "Screens for prior art covering multi-active synergistic combinations."
+            "signals": " · ".join(ing_botanical[:3]),
+            "rationale": "Screens for prior art covering multi-active botanical combinations."
+        })
+    elif len(ing_common) >= 2:
+        comb_query = " AND ".join([f'"{c}"' for c in ing_common[:3]])
+        plan.append({
+            "category": "COMBINATION",
+            "query": comb_query,
+            "signals": " · ".join(ing_common[:3]),
+            "rationale": "Screens for prior art covering multi-herbal combinations."
         })
 
-    # 3. FORMULATION
-    if case.formulation:
-        form_query = f'"{case.formulation}" formulation'
+    # 4. STANDARDIZATION / ACTIVE MARKER CONCEPT
+    if markers:
+        mark_query = " AND ".join(markers[:2]) if len(markers) >= 2 else markers[0]
         plan.append({
-            "category": "FORMULATION",
-            "query": form_query,
-            "rationale": f"Screens for prior art on matrix and galenic structure ({case.formulation})."
-        })
-    elif case.form:
-        plan.append({
-            "category": "FORMULATION",
-            "query": f'"{case.form}" herbal formulation',
-            "rationale": f"Screens for prior art in product form ({case.form})."
+            "category": "STANDARDIZATION",
+            "query": mark_query,
+            "signals": " · ".join(markers[:2]),
+            "rationale": "Screens for prior art targeting active phytochemical markers."
         })
 
-    # 4. PROCESS
+    # 5. PROCESS CONCEPT
+    clean_proc = ""
     if case.process:
-        proc_query = f'"{case.process}" extraction process'
+        p = case.process.lower()
+        if "supercritical" in p:
+            clean_proc = "supercritical fluid extraction"
+        elif "hydro-alcoholic" in p or "hydroalcoholic" in p:
+            clean_proc = "hydroalcoholic extraction"
+        elif "decoction" in p:
+            clean_proc = "herbal decoction process"
+        elif "vacuum" in p:
+            clean_proc = "vacuum concentration process"
+        elif ing_botanical:
+            clean_proc = f"{ing_botanical[0].split()[0]} extraction"
+
+    if clean_proc:
         plan.append({
             "category": "PROCESS",
-            "query": proc_query,
-            "rationale": f"Screens for prior art regarding extraction / manufacturing process ({case.process})."
+            "query": clean_proc,
+            "signals": clean_proc,
+            "rationale": "Screens for prior art regarding extraction and manufacturing process."
         })
 
-    # 5. DELIVERY
-    case_cat = getattr(case, "category", None)
-    case_ind = getattr(case, "indications", None)
-    if case.form or case_cat:
-        delivery_term = case.form or case_cat or "topical"
-        plan.append({
-            "category": "DELIVERY",
-            "query": f'"{delivery_term}" delivery composition',
-            "rationale": "Screens for prior art on delivery system and targeted site action."
-        })
+    # 6. FORMULATION CONCEPT
+    form_term = case.form or "capsule"
+    form_herb = ing_common[0] if ing_common else "herbal"
+    form_query = f"{form_herb} {form_term} formulation"
+    plan.append({
+        "category": "FORMULATION",
+        "query": form_query,
+        "signals": f"{form_herb} · {form_term}",
+        "rationale": "Screens for prior art in product galenic form and delivery matrix."
+    })
 
-    # 6. USE
-    if case_ind or case.intended_use:
-        inds = _deserialize_list(case_ind) if case_ind else []
-        ind_str = inds[0] if inds else (case.intended_use or "therapeutic")
+    # 7. USE / INDICATION CONCEPT
+    clean_use = ""
+    if case.intended_use:
+        u = case.intended_use.lower()
+        if "cognitive" in u or "memory" in u:
+            clean_use = "cognitive memory focus"
+        elif "stress" in u or "calm" in u:
+            clean_use = "stress relief anxiety"
+        elif "immune" in u or "purification" in u:
+            clean_use = "immune support wellness"
+        elif "skin" in u:
+            clean_use = "skin rejuvenation topical"
+        else:
+            words = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', u) if w not in ('support', 'relief', 'and', 'with', 'for')]
+            clean_use = " ".join(words[:3])
+
+    if clean_use:
         plan.append({
             "category": "USE",
-            "query": f'"{ind_str}" therapeutic composition',
-            "rationale": f"Screens for prior art targeting indication ({ind_str})."
+            "query": f"{ing_common[0] if ing_common else 'herbal'} {clean_use}",
+            "signals": clean_use,
+            "rationale": "Screens for prior art targeting key therapeutic indication."
         })
 
-    # 7. CLAIM_CONCEPT
+    # 8. CLAIM CONCEPT
     claims = _deserialize_list(case.claims) if case.claims else []
     if claims:
-        claim_str = claims[0] if isinstance(claims[0], str) else claims[0].get("text", "")
-        plan.append({
-            "category": "CLAIM_CONCEPT",
-            "query": f'"{claim_str[:40]}"',
-            "rationale": "Screens for prior art matching primary product claim concepts."
-        })
+        claim_raw = claims[0] if isinstance(claims[0], str) else claims[0].get("text", "")
+        claim_words = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', claim_raw) if w.lower() not in ('supports', 'enhances', 'promotes', 'and', 'with', 'for')]
+        claim_concept = " ".join(claim_words[:4])
+        if claim_concept:
+            plan.append({
+                "category": "CLAIM_CONCEPT",
+                "query": f"herbal {claim_concept}",
+                "signals": claim_concept,
+                "rationale": "Screens for prior art matching primary product claim concepts."
+            })
 
-    # Add innovation components if needed to reach 5-10 queries
     if components:
         for comp in components:
             if len(plan) >= 10:
                 break
             if comp.component_value:
-                plan.append({
-                    "category": "CLAIM_CONCEPT",
-                    "query": f'"{comp.component_value}"',
-                    "rationale": f"Screens for prior art on innovation component: {comp.component_type}."
-                })
+                val_words = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', comp.component_value) if w.lower() not in ('traditional', 'known', 'standard')]
+                if val_words:
+                    plan.append({
+                        "category": "CLAIM_CONCEPT",
+                        "query": f"{ing_common[0] if ing_common else 'herbal'} {' '.join(val_words[:3])}",
+                        "signals": f"{comp.component_type}: {comp.component_value[:20]}",
+                        "rationale": "Screens for prior art on innovation element."
+                    })
 
-    # Ensure minimum 5 queries
     if len(plan) < 5 and case.name:
         plan.append({
             "category": "CLAIM_CONCEPT",
             "query": f'"{case.name}"',
+            "signals": case.name,
             "rationale": "Screens for direct product name and exact term matches."
         })
 
@@ -321,12 +397,7 @@ def _pre_rank_candidate_patents(
         text = title + " " + abstract
 
         ing_matches = [t for t in ing_terms if t and t in text]
-        matched_queries = []
-        for q in query_plan:
-            q_raw = q.get("query", "").replace('"', '').lower()
-            terms = [t.strip() for t in q_raw.split() if len(t.strip()) > 3 and t not in ("and", "or", "process", "formulation")]
-            if any(t in text for t in terms):
-                matched_queries.append(q.get("query", ""))
+        matched_queries = res.matched_queries or []
 
         pre_score = len(ing_matches) * 20 + len(matched_queries) * 15
         if case.formulation and case.formulation.lower() in text:
@@ -361,7 +432,6 @@ def _calculate_score_and_category(breakdown: dict) -> Tuple[int, str]:
 
     raw_score = int(round(tech * 0.35 + ing * 0.25 + form_proc * 0.25 + claim_conc * 0.15))
 
-    # Clamp rule: if tech, form_proc, and claim_conc are all low (<= 20), cap score at 79 (HIGH)
     if tech <= 20 and form_proc <= 20 and claim_conc <= 20:
         raw_score = min(raw_score, 79)
 
@@ -468,8 +538,10 @@ def _analyze_patents_with_gemini(
         patent_payloads = []
         for item in candidates:
             res: PatentResult = item["result"]
+            rec_id = res.publication_number or res.application_number or res.provider_record_id
             patent_payloads.append({
-                "publication_number": res.publication_number or res.application_number,
+                "identifier": rec_id,
+                "publication_number": rec_id,
                 "title": res.title,
                 "abstract": res.abstract,
                 "applicant": res.applicant,
@@ -506,7 +578,7 @@ Evaluate each patent across 4 dimensions:
 Return ONLY a JSON array with objects containing:
 [
   {{
-    "publication_number": "...",
+    "identifier": "...",
     "matched_components": ["component1"],
     "matched_queries": ["query1"],
     "why_relevant": "Concise 1-2 sentence explanation of overlap.",
@@ -529,13 +601,18 @@ Return ONLY a JSON array with objects containing:
         text_resp = text_resp.strip()
 
         evaluations = json.loads(text_resp)
-        eval_map = {e.get("publication_number"): e for e in evaluations if isinstance(e, dict)}
+        eval_map = {}
+        for e in evaluations:
+            if isinstance(e, dict):
+                k = e.get("identifier") or e.get("publication_number")
+                if k:
+                    eval_map[k] = e
 
         analyzed = []
         for item in candidates:
             res: PatentResult = item["result"]
-            pub_num = res.publication_number or res.application_number
-            gem_eval = eval_map.get(pub_num)
+            rec_id = res.publication_number or res.application_number or res.provider_record_id
+            gem_eval = eval_map.get(rec_id)
 
             if gem_eval:
                 breakdown = {
@@ -554,7 +631,7 @@ Return ONLY a JSON array with objects containing:
                     "matched_components": gem_eval.get("matched_components", item.get("ing_matches", [])),
                     "matched_queries": gem_eval.get("matched_queries", item.get("matched_queries", [])),
                     "why_relevant": gem_eval.get("why_relevant", "Direct patent title/abstract overlap detected."),
-                    "important_difference": gem_eval.get("important_difference", "Product case specifies standardized herbal ratios."),
+                    "important_difference": gem_eval.get("important_difference", "Product case specifies standardized extract ratios."),
                     "limitations": gem_eval.get("limitations", "Abstract-level prior-art screening."),
                 })
             else:
@@ -579,7 +656,6 @@ def run_patent_intelligence(
     limit: int = 25,
 ) -> dict:
     """Execute full prior-art patent intelligence analysis for a Product Case."""
-    # Get components
     analysis = (
         db.query(InnovationAnalysis)
         .filter(InnovationAnalysis.product_case_id == case.id)
@@ -588,14 +664,11 @@ def run_patent_intelligence(
     )
     components = list(analysis.components) if analysis else []
 
-    # Generate Query Plan
     query_plan = generate_query_plan(case, components)
 
-    # Search Google Patents Adapter
     registry = get_patent_registry()
     search_jurisdictions = jurisdictions or ["IN", "US", "EP", "WO", "GLOBAL"]
 
-    # Gather search queries from plan
     keywords = [q["query"] for q in query_plan]
 
     responses = registry.search_all(
@@ -606,37 +679,43 @@ def run_patent_intelligence(
     )
 
     all_raw_results: List[PatentResult] = []
+    total_queries_executed = 0
+    total_queries_with_results = 0
+
     for resp in responses:
         all_raw_results.extend(resp.results)
+        total_queries_executed += getattr(resp, "queries_executed", len(query_plan))
+        total_queries_with_results += getattr(resp, "queries_with_results", 1 if resp.results else 0)
 
-    # Deduplicate by publication_number & group families
+    # Deduplicate by publication_number / provider_record_id & group families
     unique_candidates: Dict[str, PatentResult] = {}
     family_members_map: Dict[str, List[str]] = {}
 
     for res in all_raw_results:
-        pub_num = res.publication_number or res.application_number
-        if not pub_num:
+        rec_key = res.publication_number or res.application_number or res.provider_record_id
+        if not rec_key:
             continue
-        clean_pub = pub_num.replace(" ", "").upper()
+        clean_key = rec_key.replace(" ", "").upper()
 
-        if clean_pub not in unique_candidates:
-            unique_candidates[clean_pub] = res
-            family_members_map[clean_pub] = [pub_num]
+        if clean_key not in unique_candidates:
+            unique_candidates[clean_key] = res
+            family_members_map[clean_key] = [rec_key]
         else:
-            if pub_num not in family_members_map[clean_pub]:
-                family_members_map[clean_pub].append(pub_num)
+            existing = unique_candidates[clean_key]
+            for q in (res.matched_queries or []):
+                if q not in existing.matched_queries:
+                    existing.matched_queries.append(q)
+            if rec_key not in family_members_map[clean_key]:
+                family_members_map[clean_key].append(rec_key)
 
     deduped_results = list(unique_candidates.values())
 
-    # Pre-rank
     pre_ranked = _pre_rank_candidate_patents(deduped_results, case, query_plan)
 
-    # Semantic evaluation on top candidates
     analyzed_candidates = _analyze_patents_with_gemini(pre_ranked[:20], case)
 
     now = datetime.now(timezone.utc)
 
-    # Create Search session record
     search = PatentSearch(
         owner_id=owner.id,
         product_case_id=case.id,
@@ -657,10 +736,11 @@ def run_patent_intelligence(
     for item in analyzed_candidates:
         res: PatentResult = item["result"]
         pub_num = res.publication_number or res.application_number or ""
-        clean_pub = pub_num.replace(" ", "").upper()
-        f_members = family_members_map.get(clean_pub, [pub_num])
+        clean_pub = pub_num.replace(" ", "").upper() if pub_num else ""
+        rec_key = pub_num or res.provider_record_id or ""
+        clean_key = rec_key.replace(" ", "").upper() if rec_key else ""
+        f_members = family_members_map.get(clean_key, [rec_key])
 
-        # Check existing record
         record = None
         if res.provider_record_id:
             record = db.query(PatentRecord).filter(PatentRecord.provider_record_id == res.provider_record_id).first()
@@ -730,24 +810,60 @@ def run_patent_intelligence(
 
         persisted_relevances.append(_relevance_to_dict(relevance))
 
-    # Sort descending by relevance score (placing non-null score items first)
     persisted_relevances.sort(key=lambda x: (x["relevance_score"] is not None, x["relevance_score"] if x["relevance_score"] is not None else -1), reverse=True)
+
+    vh_cnt = sum(1 for i in persisted_relevances if i.get("relevance_level") == "VERY_HIGH")
+    h_cnt = sum(1 for i in persisted_relevances if i.get("relevance_level") == "HIGH")
+
+    if vh_cnt > 0:
+        prior_art_signal = "HIGH"
+    elif h_cnt > 0:
+        prior_art_signal = "MODERATE"
+    else:
+        prior_art_signal = "LOW"
+
+    if total_queries_with_results == total_queries_executed and total_queries_executed > 0:
+        discovery_coverage = "FULL"
+    elif total_queries_with_results > 0:
+        discovery_coverage = "PARTIAL"
+    else:
+        discovery_coverage = "ZERO"
 
     metrics = {
         "total_retrieved": len(persisted_relevances),
-        "very_high_count": sum(1 for i in persisted_relevances if i.get("relevance_level") == "VERY_HIGH"),
-        "high_count": sum(1 for i in persisted_relevances if i.get("relevance_level") == "HIGH"),
+        "very_high_count": vh_cnt,
+        "high_count": h_cnt,
         "moderate_count": sum(1 for i in persisted_relevances if i.get("relevance_level") == "MODERATE"),
         "low_count": sum(1 for i in persisted_relevances if i.get("relevance_level") == "LOW"),
         "not_analyzed_count": sum(1 for i in persisted_relevances if i.get("relevance_level") == "NOT_ANALYZED"),
+        "queries_executed": total_queries_executed or len(query_plan),
+        "queries_with_results": total_queries_with_results,
+        "prior_art_signal": prior_art_signal,
+        "discovery_coverage": discovery_coverage,
         "evidence_basis": "ABSTRACT-LEVEL SCREENING",
+        "last_searched": now.isoformat(),
     }
+
+    # Extract grounded potential differentiators
+    potential_differentiators = []
+    if persisted_relevances:
+        diff_texts = [p.get("important_difference", "") for p in persisted_relevances if p.get("important_difference")]
+        if case.formulation and "ratio" not in " ".join(diff_texts).lower():
+            potential_differentiators.append(f"Product formulation specifies defined matrix composition: {case.formulation}")
+        if case.process and "process" in case.process.lower():
+            potential_differentiators.append(f"Specific extraction and purification process: {case.process}")
+        if case.claims:
+            claims_list = _deserialize_list(case.claims)
+            if claims_list:
+                c_str = claims_list[0] if isinstance(claims_list[0], str) else claims_list[0].get("text", "")
+                potential_differentiators.append(f"Targeted claim concept from product case: {c_str}")
 
     return {
         "search_id": search.public_id,
         "product_case_id": case.public_id,
         "query_plan": query_plan,
         "summary_metrics": metrics,
+        "potential_differentiators": potential_differentiators[:3],
         "results": persisted_relevances,
         "patents": persisted_relevances,
         "has_searched": True,

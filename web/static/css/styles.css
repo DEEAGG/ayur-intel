@@ -8588,9 +8588,6 @@ input:checked + .ios-slider:before {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #94a3b8;
-  margin-bottom: 4px;
 }
 
 .patent-verification-box {
@@ -8599,4 +8596,66 @@ input:checked + .ios-slider:before {
   border-radius: var(--radius-lg, 12px);
   padding: 20px;
   margin-top: 30px;
+}
+
+/* ------------------------------------------------------------------
+   Disclaimer Contrast & Accessibility Overrides (Three Modules)
+   Patent Intelligence, Risk Assessment, Knowledge Hub
+   ------------------------------------------------------------------ */
+.innovation-disclaimer,
+.disclaimer-bar,
+.ip-disclaimer,
+.risk-disclaimer,
+.kg-disclaimer,
+.knowledge-disclaimer {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+  padding: 16px 20px !important;
+  border-radius: var(--radius-md, 8px) !important;
+  background: rgba(30, 41, 59, 0.85) !important;
+  border: 1px solid rgba(245, 158, 11, 0.35) !important;
+  color: #f1f5f9 !important;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+  margin-top: 20px !important;
+  margin-bottom: 20px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+}
+
+.innovation-disclaimer strong,
+.disclaimer-bar strong,
+.ip-disclaimer strong,
+.risk-disclaimer strong,
+.kg-disclaimer strong,
+.knowledge-disclaimer strong {
+  color: #fbbf24 !important;
+  font-weight: 700 !important;
+}
+
+.innovation-disclaimer p,
+.disclaimer-bar p,
+.ip-disclaimer p,
+.risk-disclaimer p,
+.kg-disclaimer p,
+.knowledge-disclaimer p {
+  color: #cbd5e1 !important;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+  margin: 0 !important;
+  font-family: inherit !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+}
+
+.innovation-disclaimer .material-symbols-outlined,
+.disclaimer-bar .material-symbols-outlined,
+.ip-disclaimer .material-symbols-outlined,
+.risk-disclaimer .material-symbols-outlined,
+.kg-disclaimer .material-symbols-outlined,
+.knowledge-disclaimer .material-symbols-outlined {
+  color: #fbbf24 !important;
+  font-size: 20px !important;
+  flex-shrink: 0 !important;
+  margin-top: 1px !important;
 }
