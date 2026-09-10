@@ -804,11 +804,11 @@
         + '<p>Identify IP, regulatory, and market risks.</p>'
         + '<button class="ws-btn" onclick="event.stopPropagation(); generateRiskAssessment()">Assess →</button>'
         + '</div>'
-        + '<div class="workspace-card">'
+        + '<div class="workspace-card" id="card-intel-graph" onclick="openKnowledgeGraph()">'
         + '<span class="ws-icon">🕸️</span>'
         + '<h4>Knowledge Graph</h4>'
         + '<p>Visualize relationships between ingredients, patents, and evidence.</p>'
-        + '<button class="ws-btn" onclick="showToast(\'🕸️ Knowledge Graph coming soon!\', \'info\')">View →</button>'
+        + '<button class="ws-btn" id="open-knowledge-graph-btn" onclick="event.stopPropagation(); openKnowledgeGraph()">Explore →</button>'
         + '</div>'
         + '</div>'
         + '</div>'
@@ -3154,8 +3154,23 @@
   }
 
   // ----------------------------------------------------------------
-  // Knowledge Graph View (Phase B: Evidence Intelligence Graph)
+  // Knowledge Graph Action & View (Phase B: Evidence Intelligence Graph)
   // ----------------------------------------------------------------
+  async function openKnowledgeGraph(caseId) {
+    var s = (window.AYUR && window.AYUR.state) || state;
+    var c = s.currentCase || (s.cases && s.cases.find(function(item) { return item.id === caseId; }));
+    if (!c && s.cases && s.cases.length > 0) {
+      c = s.cases[0];
+      s.currentCase = c;
+    }
+    if (!c) {
+      showToast('⚠️ Please select a product case first', 'error');
+      return;
+    }
+    openCaseModule("knowledgeGraphData", "/api/cases/" + c.id + "/knowledge-graph", "knowledge-graph");
+  }
+  window.openKnowledgeGraph = openKnowledgeGraph;
+
   function renderKnowledgeGraph() {
     var g = state.knowledgeGraphData;
     if (!g || !g.nodes || g.nodes.length === 0) {
@@ -6887,6 +6902,7 @@
     navigateTo: navigateTo,
     renderProfilePage: renderProfilePage,
     exploreDemoCase: exploreDemoCase,
+    openKnowledgeGraph: openKnowledgeGraph,
     invalidateClientApiCache: invalidateClientApiCache,
     invalidateCaseModuleCache: invalidateCaseModuleCache
   };
