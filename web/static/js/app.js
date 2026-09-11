@@ -5965,67 +5965,103 @@
   // ----------------------------------------------------------------
   const knowledgeSources = [
     {
+      id: 'charaka',
       icon: '📜',
       title: 'Charaka Samhita',
       category: 'classical',
       categoryLabel: 'Classical Text',
-      description: 'One of the foundational texts of Ayurveda, covering internal medicine and holistic health.'
+      description: 'One of the foundational texts of Ayurveda, covering internal medicine and holistic health.',
+      isLive: true,
+      badgeText: 'LIVE SOURCE',
+      badgeClass: 'kh-card-badge-live'
     },
     {
+      id: 'sushruta',
       icon: '📜',
       title: 'Sushruta Samhita',
       category: 'classical',
       categoryLabel: 'Classical Text',
-      description: 'Ancient Ayurvedic text focusing on surgery, anatomy, and surgical instruments.'
+      description: 'Ancient Ayurvedic text focusing on surgery, anatomy, and surgical instruments.',
+      isLive: true,
+      badgeText: 'LIVE SOURCE',
+      badgeClass: 'kh-card-badge-live'
     },
     {
+      id: 'ashtanga',
       icon: '📜',
       title: 'Ashtanga Hridaya',
       category: 'classical',
       categoryLabel: 'Classical Text',
-      description: 'Comprehensive summary of Ayurvedic knowledge covering all eight branches.'
+      description: 'Comprehensive summary of Ayurvedic knowledge covering all eight branches.',
+      isLive: false,
+      badgeText: 'EXPANDING COVERAGE',
+      badgeClass: 'kh-card-badge-expanding'
     },
     {
+      id: 'pmc',
       icon: '🔬',
       title: 'PubMed Central',
       category: 'research',
       categoryLabel: 'Research',
-      description: 'Free full-text archive of biomedical and life sciences journal literature.'
+      description: 'Free full-text archive of biomedical and life sciences journal literature.',
+      isLive: true,
+      badgeText: 'LIVE SOURCE',
+      badgeClass: 'kh-card-badge-live'
     },
     {
+      id: 'ayush_portal',
       icon: '🔬',
       title: 'Ayush Research Portal',
       category: 'research',
       categoryLabel: 'Research',
-      description: 'Government of India research database on Ayurveda, Yoga, and traditional medicine.'
+      description: 'Government of India research database on Ayurveda, Yoga, and traditional medicine.',
+      isLive: false,
+      badgeText: 'EXPANDING COVERAGE',
+      badgeClass: 'kh-card-badge-expanding'
     },
     {
+      id: 'ayush_guidelines',
       icon: '📋',
       title: 'AYUSH Guidelines',
       category: 'regulatory',
       categoryLabel: 'Regulatory',
-      description: 'Official guidelines for Ayurvedic product manufacturing, licensing, and quality control.'
+      description: 'Official guidelines for Ayurvedic product manufacturing, licensing, and quality control.',
+      isLive: false,
+      badgeText: 'EXPANDING COVERAGE',
+      badgeClass: 'kh-card-badge-expanding'
     },
     {
+      id: 'fssai',
       icon: '📋',
       title: 'FSSAI Regulations',
       category: 'regulatory',
       categoryLabel: 'Regulatory',
-      description: 'Food safety regulations for Ayurvedic and herbal products in India.'
+      description: 'Food safety regulations for Ayurvedic and herbal products in India.',
+      isLive: true,
+      badgeText: 'LIVE SOURCE',
+      badgeClass: 'kh-card-badge-live'
     },
     {
+      id: 'patent',
       icon: '📜',
       title: 'Indian Patent Office',
       category: 'patent',
       categoryLabel: 'Patents',
-      description: 'Search Indian patents related to Ayurvedic formulations and herbal products.'
+      description: 'Search Indian patents related to Ayurvedic formulations and herbal products.',
+      isLive: false,
+      badgeText: 'PATENT INTEL',
+      badgeClass: 'kh-card-badge-patent'
     },
     {
-      icon: '📜',
+      id: 'drugs_act',
+      icon: '📋',
       title: 'Drugs & Cosmetics Act',
       category: 'regulatory',
       categoryLabel: 'Regulatory',
-      description: 'Regulatory framework for Ayurvedic, Siddha, and Unani drugs in India.'
+      description: 'Regulatory framework for Ayurvedic, Siddha, and Unani drugs in India.',
+      isLive: false,
+      badgeText: 'EXPANDING COVERAGE',
+      badgeClass: 'kh-card-badge-expanding'
     }
   ];
 
@@ -6057,7 +6093,302 @@
   window.filterKnowledgeSources = filterKnowledgeSources;
   window.filterKnowledge = filterKnowledge;
 
+  function goKnowledgeHubHome() {
+    state.khSubView = 'HUB';
+    state.khActiveSource = null;
+    state.khActiveDocId = null;
+    render({ scroll: 'restore' });
+  }
+
+  async function openKnowledgeLibrary(sourceId) {
+    state.khPrevScroll = window.scrollY || 0;
+    state.khSubView = 'LIBRARY';
+    state.khActiveSource = sourceId;
+    state.khActiveDocId = null;
+    state.khLibraryLoading = true;
+    state.khLibraryItems = [];
+    render({ scroll: 'top' });
+
+    var queryMap = {
+      charaka: 'Charaka',
+      sushruta: 'Sushruta',
+      pmc: 'PMC',
+      fssai: 'FSSAI'
+    };
+    var q = queryMap[sourceId] || '';
+
+    try {
+      var data = await api('/api/knowledge/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, limit: 20 })
+      });
+      var items = [];
+      if (data && data.sources) {
+        data.sources.forEach(function (src) {
+          if (src.results && src.results.length > 0) {
+            src.results.forEach(function (r) {
+              if (sourceId === 'charaka' && r.title.indexOf('Charaka') === -1) return;
+              if (sourceId === 'sushruta' && r.title.indexOf('Sushruta') === -1) return;
+              items.push(r);
+            });
+          }
+        });
+      }
+      state.khLibraryItems = items;
+    } catch (e) {
+      toast('Failed to load library items: ' + e.message, 'error');
+    }
+    state.khLibraryLoading = false;
+    render({ scroll: 'top' });
+  }
+
+  async function openKnowledgeReader(docId) {
+    if (!docId) return;
+    state.khPrevScroll = window.scrollY || 0;
+    state.khSubView = 'READER';
+    state.khActiveDocId = docId;
+    state.khReaderLoading = true;
+    state.khReaderDoc = null;
+    render({ scroll: 'top' });
+
+    try {
+      var data = await api('/api/knowledge/synthesis/' + encodeURIComponent(docId));
+      state.khReaderDoc = data;
+    } catch (e) {
+      toast('Failed to load document synthesis: ' + e.message, 'error');
+    }
+    state.khReaderLoading = false;
+    render({ scroll: 'top' });
+  }
+
+  async function generateKnowledgeSynthesisForDoc(docId) {
+    if (!docId) return;
+    var btn = document.getElementById('kh-generate-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = icon('sync', 16) + ' Generating Grounded AI Explanation...';
+    }
+
+    try {
+      var data = await api('/api/knowledge/synthesis/generate?document_identifier=' + encodeURIComponent(docId), {
+        method: 'POST'
+      });
+      state.khReaderDoc = data;
+      toast('Grounded Knowledge Synthesis generated!', 'success');
+      render({ scroll: 'preserve' });
+    } catch (e) {
+      toast('Failed to generate synthesis: ' + e.message, 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '✨ Generate Grounded Explanation';
+      }
+    }
+  }
+
+  window.goKnowledgeHubHome = goKnowledgeHubHome;
+  window.openKnowledgeLibrary = openKnowledgeLibrary;
+  window.openKnowledgeReader = openKnowledgeReader;
+  window.generateKnowledgeSynthesisForDoc = generateKnowledgeSynthesisForDoc;
+
+  function renderKnowledgeLibraryView(sourceId) {
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || {
+      title: 'Knowledge Source',
+      icon: '📚',
+      description: 'Official digital repository',
+      badgeClass: 'kh-card-badge-live',
+      badgeText: 'LIVE SOURCE'
+    };
+
+    var items = state.khLibraryItems || [];
+    var itemsHtml = '';
+
+    if (state.khLibraryLoading) {
+      itemsHtml = '<div style="padding:40px;text-align:center;"><div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:8px;"></div><div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:8px;"></div><p style="color:var(--text-secondary);margin-top:12px;">Loading official library evidence...</p></div>';
+    } else if (items.length === 0) {
+      itemsHtml = '<div class="empty-state"><h3>No documents loaded</h3><p>Could not find evidence documents for this source.</p></div>';
+    } else {
+      items.forEach(function (item) {
+        var docId = item.source_identifier || item.doc_id || item.title;
+        var locator = item.evidence_locator || docId;
+        var excerpt = item.excerpt || item.summary || 'No excerpt available.';
+        itemsHtml += `
+          <div class="kh-item-card" style="background:rgba(30,41,59,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:18px 20px;margin-bottom:16px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">
+              <h3 style="margin:0;font-size:16px;font-weight:600;color:#f8fafc;">${escapeHtml(item.title)}</h3>
+              <span class="case-badge case-badge-stage" style="white-space:nowrap;">${escapeHtml(item.jurisdiction || 'IN')}</span>
+            </div>
+            <div style="font-size:12px;color:var(--botanical-green,#34d399);margin-bottom:8px;font-weight:500;">
+              📍 ${escapeHtml(locator)}
+            </div>
+            <p class="kh-item-excerpt" style="font-size:13px;color:#cbd5e1;line-height:1.5;margin-bottom:12px;">
+              "${escapeHtml(excerpt)}"
+            </p>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-size:11px;color:var(--text-secondary);">${escapeHtml(item.source_authority || item.source_name || 'Official Text')}</span>
+              <button class="btn btn-primary btn-sm" onclick="openKnowledgeReader('${escapeHtml(docId)}')">Read &amp; Synthesize Evidence →</button>
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    return `
+      <div class="knowledge-library">
+        <div class="kh-breadcrumb" style="margin-bottom:16px;font-size:13px;color:var(--text-secondary);">
+          <a href="#" onclick="goKnowledgeHubHome(); return false;" style="color:#34d399;text-decoration:none;">📚 Knowledge Hub</a>
+          <span style="margin:0 6px;">&gt;</span>
+          <span style="color:#f8fafc;font-weight:600;">${escapeHtml(sourceMeta.title)}</span>
+        </div>
+        <div class="kh-library-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);padding:20px 24px;border-radius:12px;">
+          <div>
+            <h2 style="margin:0;font-size:22px;color:#f8fafc;display:flex;align-items:center;gap:10px;">
+              <span>${sourceMeta.icon}</span> ${escapeHtml(sourceMeta.title)}
+            </h2>
+            <p style="margin:6px 0 0 0;font-size:13px;color:var(--text-secondary);">${escapeHtml(sourceMeta.description)}</p>
+          </div>
+          <div>
+            <span class="kh-card-badge ${sourceMeta.badgeClass}">${sourceMeta.badgeText}</span>
+          </div>
+        </div>
+        <div class="kh-library-content">
+          ${itemsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderKnowledgeReaderView(docId) {
+    if (state.khReaderLoading || !state.khReaderDoc) {
+      return `
+        <div class="kh-reader-container">
+          <div class="kh-breadcrumb" style="margin-bottom:16px;font-size:13px;">
+            <a href="#" onclick="openKnowledgeLibrary('${state.khActiveSource || 'charaka'}'); return false;" style="color:#34d399;text-decoration:none;">← Back to Source Library</a>
+          </div>
+          <div style="padding:40px;text-align:center;">
+            <div class="skeleton" style="height:120px;margin-bottom:16px;border-radius:12px;"></div>
+            <div class="skeleton" style="height:200px;margin-bottom:16px;border-radius:12px;"></div>
+            <p style="color:var(--text-secondary);">Loading document evidence &amp; synthesis...</p>
+          </div>
+        </div>
+      `;
+    }
+
+    var doc = state.khReaderDoc;
+    var sections = doc.structured_sections || {};
+    var evidenceItems = doc.evidence_items || [];
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === state.khActiveSource; }) || { title: 'Source Library' };
+
+    var isGrounded = doc.grounding_status === 'GROUNDED' || doc.grounding_status === 'PARTIALLY_GROUNDED';
+    var statusBadgeClass = isGrounded ? 'confidence-high' : 'confidence-unknown';
+    var statusBadgeText = isGrounded ? doc.grounding_status : 'RAW EVIDENCE PRESERVED';
+
+    var summaryBox = '';
+    if (isGrounded && doc.summary_60s) {
+      summaryBox = `
+        <div class="kh-summary-card">
+          <div class="kh-ai-badge">✨ AI EXPLANATION · GROUNDED IN SOURCE</div>
+          <p style="font-size:14px;color:#f8fafc;line-height:1.6;margin:0 0 8px 0;">${escapeHtml(doc.summary_60s)}</p>
+          ${doc.model_used ? `<div style="font-size:11px;color:var(--text-secondary);">Synthesized via ${escapeHtml(doc.model_used)} · Zero Hallucination Guarded</div>` : ''}
+        </div>
+      `;
+    } else {
+      summaryBox = `
+        <div class="kh-summary-card" style="border-color:rgba(255,255,255,0.15);background:rgba(30,41,59,0.5);">
+          <div class="kh-ai-badge" style="background:rgba(148,163,184,0.15);color:#94a3b8;border-color:rgba(148,163,184,0.3);">📄 RAW SOURCE EVIDENCE</div>
+          <p style="font-size:14px;color:#e2e8f0;line-height:1.6;margin:0 0 14px 0;">
+            ${escapeHtml(doc.summary_60s || 'AI synthesis has not been generated for this official record yet. Original source text and evidence provenance are fully preserved below.')}
+          </p>
+          <button class="btn btn-primary btn-sm" id="kh-generate-btn" onclick="generateKnowledgeSynthesisForDoc('${escapeHtml(docId)}')">✨ Generate Grounded Explanation</button>
+        </div>
+      `;
+    }
+
+    var sectionsHtml = '';
+    Object.keys(sections).forEach(function (key) {
+      if (key === 'summary_60s' || key === 'evidence_references') return;
+      var val = sections[key];
+      if (!val) return;
+      var label = key.replace(/_/g, ' ').toUpperCase();
+      var valContent = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
+      sectionsHtml += `
+        <div style="background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px;margin-bottom:12px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:#34d399;margin-bottom:6px;">${escapeHtml(label)}</div>
+          <div style="font-size:13px;color:#cbd5e1;line-height:1.5;white-space:pre-wrap;">${escapeHtml(valContent)}</div>
+        </div>
+      `;
+    });
+
+    var evidenceHtml = '';
+    var officialUrl = '';
+    evidenceItems.forEach(function (ev, idx) {
+      if (!officialUrl && (ev.official_url || ev.source_url)) {
+        officialUrl = ev.official_url || ev.source_url;
+      }
+      evidenceHtml += `
+        <div style="margin-bottom:14px;">
+          <div style="font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:4px;">
+            Evidence #${idx + 1}: ${escapeHtml(ev.evidence_locator || ev.source_identifier || 'Record')}
+          </div>
+          <div class="kh-evidence-text">${escapeHtml(ev.excerpt || ev.raw_text || ev.summary || 'No raw text excerpt available.')}</div>
+          ${ev.content_hash ? `<div style="font-size:10px;font-family:monospace;color:#64748b;">SHA256: ${escapeHtml(ev.content_hash)}</div>` : ''}
+        </div>
+      `;
+    });
+
+    return `
+      <div class="kh-reader-container">
+        <div class="kh-breadcrumb" style="margin-bottom:16px;font-size:13px;color:var(--text-secondary);">
+          <a href="#" onclick="goKnowledgeHubHome(); return false;" style="color:#34d399;text-decoration:none;">📚 Knowledge Hub</a>
+          <span style="margin:0 6px;">&gt;</span>
+          <a href="#" onclick="openKnowledgeLibrary('${state.khActiveSource || 'charaka'}'); return false;" style="color:#34d399;text-decoration:none;">${escapeHtml(sourceMeta.title)}</a>
+          <span style="margin:0 6px;">&gt;</span>
+          <span style="color:#f8fafc;font-weight:600;">${escapeHtml(doc.title || docId)}</span>
+        </div>
+
+        <div class="kh-reader-topbar">
+          <div>
+            <h1 style="font-size:22px;font-weight:700;color:#f8fafc;margin:0 0 6px 0;">${escapeHtml(doc.title || docId)}</h1>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <span class="case-badge case-badge-stage">${escapeHtml(doc.category || 'EVIDENCE')}</span>
+              <span class="confidence-badge ${statusBadgeClass}">${escapeHtml(statusBadgeText)}</span>
+              ${doc.generated_at ? `<span style="font-size:11px;color:var(--text-secondary);">Updated: ${escapeHtml(doc.generated_at)}</span>` : ''}
+            </div>
+          </div>
+          ${officialUrl ? `
+            <a class="btn btn-secondary btn-sm" href="${escapeHtml(officialUrl)}" target="_blank" rel="noopener">
+              Read Original Source ↗
+            </a>
+          ` : ''}
+        </div>
+
+        ${summaryBox}
+
+        ${sectionsHtml ? `
+          <div style="margin-bottom:24px;">
+            <h3 style="font-size:15px;font-weight:700;color:#f8fafc;margin-bottom:12px;">Grounding &amp; Key Takeaways</h3>
+            ${sectionsHtml}
+          </div>
+        ` : ''}
+
+        <div class="kh-evidence-section">
+          <h3 class="kh-evidence-title">
+            <span>📜 Preserved Source Evidence</span>
+          </h3>
+          ${evidenceHtml || '<p style="font-size:13px;color:var(--text-secondary);">No raw evidence excerpts stored for this document.</p>'}
+        </div>
+      </div>
+    `;
+  }
+
   function renderKnowledgeHub() {
+    var subView = state.khSubView || 'HUB';
+    if (subView === 'LIBRARY' && state.khActiveSource) {
+      return renderKnowledgeLibraryView(state.khActiveSource);
+    } else if (subView === 'READER' && state.khActiveDocId) {
+      return renderKnowledgeReaderView(state.khActiveDocId);
+    }
+
     const html = `
         <div class="knowledge-hub">
             <div class="kh-header">
@@ -6082,17 +6413,27 @@
             
             <!-- Sources Grid -->
             <div class="kh-grid" id="kh-grid">
-                ${knowledgeSources.map(source => `
+                ${knowledgeSources.map(source => {
+                    let onclickAction = '';
+                    if (source.id === 'patent') {
+                        onclickAction = "navigate('patent-intelligence')";
+                    } else if (source.isLive) {
+                        onclickAction = `openKnowledgeLibrary('${source.id}')`;
+                    } else {
+                        onclickAction = `showToast('🔍 ${escapeHtml(source.title)} - Expanding coverage (Official digital sources only)', 'info')`;
+                    }
+                    return `
                     <div class="kh-card" data-category="${source.category}" data-title="${source.title.toLowerCase()}" data-desc="${source.description.toLowerCase()}">
                         <div class="kh-card-icon">${source.icon}</div>
                         <div class="kh-card-content">
                             <h4>${source.title}</h4>
-                            <span class="kh-card-badge ${source.category}">${source.categoryLabel}</span>
+                            <span class="kh-card-badge ${source.badgeClass}">${source.badgeText}</span>
                             <p>${source.description}</p>
-                            <button class="kh-card-btn" onclick="showToast('🔍 ${source.title} - Coming soon!', 'info')">Explore →</button>
+                            <button class="kh-card-btn" onclick="${onclickAction}">Explore →</button>
                         </div>
                     </div>
-                `).join('')}
+                    `;
+                }).join('')}
             </div>
         </div>
     `;

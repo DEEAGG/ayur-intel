@@ -150,3 +150,45 @@ def init_db() -> None:
             logger.warning("Unique index creation deferred (duplicate cleanup required first): %s", e)
 
     logger.info("Database initialized with performance indexes successfully")
+    _seed_initial_knowledge_hub_if_empty()
+
+
+def _seed_initial_knowledge_hub_if_empty() -> None:
+    """Seed initial source-backed evidence records into DB if empty."""
+    from api.models.models import KnowledgeEvidence
+    from api.services.knowledge_source_adapters import (
+        ClassicalSamhitaAdapter,
+        PubMedCentralAdapter,
+        FssaiRegulationsAdapter,
+    )
+    from api.services.knowledge_ingestion_service import KnowledgeIngestionService
+    from api.services.product_case_service import get_or_create_demo_user
+
+    db = SessionLocal()
+    try:
+        total_ev = db.query(KnowledgeEvidence).count()
+        if total_ev > 0:
+            return  # Already seeded
+
+        user = get_or_create_demo_user(db)
+
+        # 1. Classical Samhita (Charaka & Sushruta)
+        c_adapter = ClassicalSamhitaAdapter()
+        c_res = c_adapter.search(query="", limit=10)
+        KnowledgeIngestionService.ingest_results(db, user.id, c_res.results)
+
+        # 2. PubMed Central
+        p_adapter = PubMedCentralAdapter()
+        p_res = p_adapter.search(query="ayurveda OR medicinal plants", limit=5)
+        KnowledgeIngestionService.ingest_results(db, user.id, p_res.results)
+
+        # 3. FSSAI Regulations
+        f_adapter = FssaiRegulationsAdapter()
+        f_res = f_adapter.search(query="", limit=10)
+        KnowledgeIngestionService.ingest_results(db, user.id, f_res.results)
+
+        logger.info("Successfully seeded initial Knowledge Hub evidence records.")
+    except Exception as e:
+        logger.warning("Initial Knowledge Hub seeding skipped: %s", e)
+    finally:
+        db.close()
