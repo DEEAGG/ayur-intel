@@ -173,7 +173,7 @@
   // ----------------------------------------------------------------
 
   var DEMO_PASSPORT_DATA = {
-    name: "AYUR-INTEL NeuroAdapt Botanical Complex (Product Showcase Concept)",
+    name: "AYUR-INTEL NeuroAdapt Botanical Complex",
     product_type: "Ayurvedic Proprietary Medicine",
     formulation: "Ayurvedic Proprietary Medicine",
     form: "Hard Gelatin Capsule",

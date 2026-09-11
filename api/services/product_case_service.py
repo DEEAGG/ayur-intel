@@ -573,6 +573,10 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
 
         # Check if already updated to 6-ingredient showcase concept
         if len(curr_ings) == 6 and demo_case.name.startswith("AYUR-INTEL NeuroAdapt"):
+            if demo_case.name != "AYUR-INTEL NeuroAdapt Botanical Complex":
+                demo_case.name = "AYUR-INTEL NeuroAdapt Botanical Complex"
+                db.commit()
+                db.refresh(demo_case)
             return _case_to_dict(demo_case)
 
         # Stale demo case found — Perform IN-PLACE MIGRATION of canonical demo-001
@@ -617,7 +621,7 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
         # Update canonical demo-001 IN-PLACE
         demo_case.public_id = "demo-001"
         demo_case.owner_id = owner.id
-        demo_case.name = "AYUR-INTEL NeuroAdapt Botanical Complex (Product Showcase Concept)"
+        demo_case.name = "AYUR-INTEL NeuroAdapt Botanical Complex"
         demo_case.stage = "IDEA"
         demo_case.jurisdictions = json.dumps(["IN"])
         demo_case.status = "DRAFT"
@@ -662,7 +666,7 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
     demo_case = ProductCase(
         public_id="demo-001",
         owner_id=owner.id,
-        name="AYUR-INTEL NeuroAdapt Botanical Complex (Product Showcase Concept)",
+        name="AYUR-INTEL NeuroAdapt Botanical Complex",
         stage="IDEA",
         jurisdictions=json.dumps(["IN"]),
         status="DRAFT",
