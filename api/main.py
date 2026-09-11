@@ -168,8 +168,19 @@ async def startup():
     logger.info("Database: %s", settings.AYURINTEL_DB_PATH)
     logger.info("Demo mode: %s", settings.AYURINTEL_DEMO_MODE)
 
-    # Initialize database tables
+    # Initialize database tables & perform canonical demo migration if needed
     init_db()
+    try:
+        from api.core.database import SessionLocal
+        from api.services.product_case_service import get_or_create_demo_user, get_or_create_demo_case
+        db = SessionLocal()
+        try:
+            demo_user = get_or_create_demo_user(db)
+            get_or_create_demo_case(db, demo_user)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("Startup demo initialization note: %s", e)
 
     logger.info("AYUR-INTEL ready at http://%s:%s", settings.AYURINTEL_HOST, settings.AYURINTEL_PORT)
     logger.info("API docs at http://%s:%s/api/docs", settings.AYURINTEL_HOST, settings.AYURINTEL_PORT)

@@ -470,19 +470,7 @@ def delete_product_case(db: Session, owner: User, public_id: str) -> bool:
 
 
 def get_or_create_demo_case(db: Session, owner: User) -> dict:
-    """Get or create the pre-filled official Ayurvedic Demo Product Case."""
-    demo_case = (
-        db.query(ProductCase)
-        .filter(
-            (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001")
-        )
-        .first()
-    )
-    if demo_case is not None:
-        return _case_to_dict(demo_case)
-
-    # Pre-filled Demo Product Specifications
-    now = datetime.now(timezone.utc)
+    """Get or create/migrate the pre-filled official Ayurvedic Demo Product Case."""
     demo_ingredients = [
         {
             "name": "Ashwagandha",
@@ -567,6 +555,110 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
         "consistency and delivery characteristics."
     )
 
+    demo_case = (
+        db.query(ProductCase)
+        .filter(
+            (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001")
+        )
+        .first()
+    )
+
+    now = datetime.now(timezone.utc)
+
+    if demo_case is not None:
+        try:
+            curr_ings = json.loads(demo_case.ingredients) if demo_case.ingredients else []
+        except Exception:
+            curr_ings = []
+
+        # Check if already updated to 6-ingredient showcase concept
+        if len(curr_ings) == 6 and demo_case.name.startswith("AYUR-INTEL NeuroAdapt"):
+            return _case_to_dict(demo_case)
+
+        # Stale demo case found — Perform IN-PLACE MIGRATION of canonical demo-001
+        logger.info("Migrating existing stale demo-001 case to approved showcase product specifications...")
+        cid = demo_case.id
+
+        # Invalidate stale dependent intelligence for demo-001 ONLY
+        queries = [
+            "DELETE FROM monitoring_alerts WHERE product_case_id = :cid",
+            "DELETE FROM monitoring_configs WHERE product_case_id = :cid",
+            "DELETE FROM monitoring_change_records WHERE product_case_id = :cid",
+            "DELETE FROM risk_mitigation_actions WHERE risk_id IN (SELECT id FROM risks WHERE product_case_id = :cid)",
+            "DELETE FROM risk_matrix_entries WHERE risk_id IN (SELECT id FROM risks WHERE product_case_id = :cid)",
+            "DELETE FROM risk_assessments WHERE product_case_id = :cid",
+            "DELETE FROM risks WHERE product_case_id = :cid",
+            "DELETE FROM patent_relevances WHERE product_case_id = :cid",
+            "DELETE FROM patent_searches WHERE product_case_id = :cid",
+            "DELETE FROM patent_analyses WHERE product_case_id = :cid",
+            "DELETE FROM ip_strategy_items WHERE strategy_id IN (SELECT id FROM ip_strategies WHERE product_case_id = :cid)",
+            "DELETE FROM ip_strategies WHERE product_case_id = :cid",
+            "DELETE FROM innovation_components WHERE analysis_id IN (SELECT id FROM innovation_analyses WHERE product_case_id = :cid)",
+            "DELETE FROM innovation_analyses WHERE product_case_id = :cid",
+            "DELETE FROM regulatory_profiles WHERE product_case_id = :cid",
+            "DELETE FROM case_finding_evidence WHERE finding_id IN (SELECT id FROM case_findings WHERE product_case_id = :cid)",
+            "DELETE FROM case_findings WHERE product_case_id = :cid",
+            "DELETE FROM comparison_values WHERE comparison_item_id IN (SELECT id FROM comparison_items WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid))",
+            "DELETE FROM comparison_items WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+            "DELETE FROM comparison_jurisdictions WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+            "DELETE FROM jurisdiction_comparisons WHERE product_case_id = :cid",
+            "DELETE FROM knowledge_evidence WHERE finding_id IN (SELECT id FROM knowledge_findings WHERE product_case_id = :cid)",
+            "DELETE FROM knowledge_findings WHERE product_case_id = :cid",
+            "DELETE FROM plant_discoveries WHERE product_case_id = :cid",
+            "DELETE FROM case_versions WHERE case_id = :cid",
+        ]
+        for q in queries:
+            try:
+                db.execute(text(q), {"cid": cid})
+            except Exception as e:
+                logger.debug("Stale demo migration cleanup note (%s): %s", q[:30], e)
+        db.commit()
+
+        # Update canonical demo-001 IN-PLACE
+        demo_case.public_id = "demo-001"
+        demo_case.owner_id = owner.id
+        demo_case.name = "AYUR-INTEL NeuroAdapt Botanical Complex (Product Showcase Concept)"
+        demo_case.stage = "IDEA"
+        demo_case.jurisdictions = json.dumps(["IN"])
+        demo_case.status = "DRAFT"
+        demo_case.is_demo = True
+        demo_case.ingredients = json.dumps(demo_ingredients)
+        demo_case.form = "Hard Gelatin Capsule"
+        demo_case.formulation = "Ayurvedic Proprietary Medicine"
+        demo_case.intended_use = "Cognitive wellness & focus support\nAdaptogenic stress & vitality support\nMemory & mental clarity support"
+        demo_case.claims = json.dumps(demo_claims)
+        demo_case.process = demo_process
+        demo_case.brand = "AYUR-INTEL Showcase"
+        demo_case.packaging = "Blister pack in outer carton with moisture barrier (500 mg per capsule)"
+        demo_case.notes = demo_notes
+        demo_case.current_version = 1
+        demo_case.updated_at = now
+        db.commit()
+        db.refresh(demo_case)
+
+        # Update initial version snapshot
+        version = CaseVersion(
+            case_id=demo_case.id,
+            version_number=1,
+            snapshot=json.dumps({
+                "name": demo_case.name,
+                "stage": demo_case.stage,
+                "jurisdictions": ["IN"],
+                "ingredients": demo_ingredients,
+                "form": demo_case.form,
+                "intended_use": demo_case.intended_use,
+                "process": demo_case.process,
+                "claims": demo_claims,
+            }),
+            created_at=now,
+        )
+        db.add(version)
+        db.commit()
+
+        logger.info("Successfully migrated demo-001 to approved showcase product specifications (in-place ID %s)", demo_case.id)
+        return _case_to_dict(demo_case)
+
+    # Create new demo-001 case if non-existent
     demo_case = ProductCase(
         public_id="demo-001",
         owner_id=owner.id,
@@ -592,7 +684,6 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
     db.commit()
     db.refresh(demo_case)
 
-    # Create initial version snapshot
     version = CaseVersion(
         case_id=demo_case.id,
         version_number=1,
@@ -611,31 +702,6 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
     db.add(version)
     db.commit()
 
-    # Pre-generate analytical components for instant sub-second response
-    try:
-        from api.services.innovation_service import analyze_innovation
-        analyze_innovation(db=db, owner=owner, case_public_id=demo_case.public_id)
-    except Exception as e:
-        logger.debug("Demo innovation analysis pre-seed note: %s", e)
-
-    try:
-        from api.services.regulatory_service import generate_regulatory_profile
-        generate_regulatory_profile(db=db, owner=owner, case_public_id=demo_case.public_id, jurisdiction="IN")
-    except Exception as e:
-        logger.debug("Demo regulatory pre-seed note: %s", e)
-
-    try:
-        from api.services.ip_strategy_service import generate_ip_strategy
-        generate_ip_strategy(db=db, owner=owner, case_public_id=demo_case.public_id)
-    except Exception as e:
-        logger.debug("Demo IP strategy pre-seed note: %s", e)
-
-    try:
-        from api.services.risk_service import generate_risk_analysis
-        generate_risk_analysis(db=db, owner=owner, case_public_id=demo_case.public_id)
-    except Exception as e:
-        logger.debug("Demo risk analysis pre-seed note: %s", e)
-
-    logger.info("Successfully created and pre-analyzed demo product case: %s", demo_case.public_id)
+    logger.info("Successfully created demo product case: %s", demo_case.public_id)
     return _case_to_dict(demo_case)
 
