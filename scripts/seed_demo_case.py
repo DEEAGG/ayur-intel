@@ -87,6 +87,53 @@ def cleanup_duplicate_cases(db):
         logger.info("✅ Cleaned duplicate 'Herbis' products.")
 
 
+def invalidate_demo_dependent_intelligence(db):
+    """Safely clear stale demo-001 intelligence records without touching normal user cases."""
+    demo_cases = db.query(models.ProductCase).filter(
+        (models.ProductCase.public_id == "demo-001") | (models.ProductCase.is_demo == True)
+    ).all()
+    if not demo_cases:
+        return
+    for demo in demo_cases:
+        cid = demo.id
+        logger.info(f"Invalidating stale dependent intelligence for demo case ID {cid} (public_id: {demo.public_id})...")
+        queries = [
+            "DELETE FROM monitoring_alerts WHERE product_case_id = :cid",
+            "DELETE FROM monitoring_configs WHERE product_case_id = :cid",
+            "DELETE FROM monitoring_change_records WHERE product_case_id = :cid",
+            "DELETE FROM risk_mitigation_actions WHERE risk_id IN (SELECT id FROM risks WHERE product_case_id = :cid)",
+            "DELETE FROM risk_matrix_entries WHERE risk_id IN (SELECT id FROM risks WHERE product_case_id = :cid)",
+            "DELETE FROM risk_assessments WHERE product_case_id = :cid",
+            "DELETE FROM risks WHERE product_case_id = :cid",
+            "DELETE FROM patent_relevances WHERE product_case_id = :cid",
+            "DELETE FROM patent_searches WHERE product_case_id = :cid",
+            "DELETE FROM patent_analyses WHERE product_case_id = :cid",
+            "DELETE FROM ip_strategy_items WHERE strategy_id IN (SELECT id FROM ip_strategies WHERE product_case_id = :cid)",
+            "DELETE FROM ip_strategies WHERE product_case_id = :cid",
+            "DELETE FROM innovation_components WHERE analysis_id IN (SELECT id FROM innovation_analyses WHERE product_case_id = :cid)",
+            "DELETE FROM innovation_analyses WHERE product_case_id = :cid",
+            "DELETE FROM regulatory_profiles WHERE product_case_id = :cid",
+            "DELETE FROM case_finding_evidence WHERE finding_id IN (SELECT id FROM case_findings WHERE product_case_id = :cid)",
+            "DELETE FROM case_findings WHERE product_case_id = :cid",
+            "DELETE FROM comparison_values WHERE comparison_item_id IN (SELECT id FROM comparison_items WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid))",
+            "DELETE FROM comparison_items WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+            "DELETE FROM comparison_jurisdictions WHERE comparison_id IN (SELECT id FROM jurisdiction_comparisons WHERE product_case_id = :cid)",
+            "DELETE FROM jurisdiction_comparisons WHERE product_case_id = :cid",
+            "DELETE FROM knowledge_evidence WHERE finding_id IN (SELECT id FROM knowledge_findings WHERE product_case_id = :cid)",
+            "DELETE FROM knowledge_findings WHERE product_case_id = :cid",
+            "DELETE FROM plant_discoveries WHERE product_case_id = :cid",
+            "DELETE FROM case_versions WHERE case_id = :cid",
+            "DELETE FROM product_cases WHERE id = :cid",
+        ]
+        for q in queries:
+            try:
+                db.execute(text(q), {"cid": cid})
+            except Exception as e:
+                logger.debug("Table deletion note (%s): %s", q[:30], e)
+    db.commit()
+    logger.info("✅ Stale demo intelligence invalidated safely.")
+
+
 def seed_demo():
     migrate_sqlite_schema()
 
@@ -96,11 +143,22 @@ def seed_demo():
     db = SessionLocal()
     try:
         user = get_or_create_demo_user(db)
+        invalidate_demo_dependent_intelligence(db)
         cleanup_duplicate_cases(db)
 
         logger.info("Seeding pre-filled official Ayurvedic Demo Product Case...")
         demo_case = get_or_create_demo_case(db, user)
         logger.info(f"✅ Demo case ready: {demo_case['name']} (ID: {demo_case['id']}, is_demo: {demo_case.get('is_demo')})")
+
+        # Explicitly pre-generate Patent search and Gemini analysis for demo presentation
+        try:
+            from api.services.patent_service import get_or_run_patent_intelligence
+            logger.info("Generating real Patent Intelligence prior-art search for showcase demo...")
+            p_res = get_or_run_patent_intelligence(db=db, owner=user, case_public_id="demo-001", force_rerun=True)
+            if p_res:
+                logger.info(f"✅ Patent search pre-generated: Discovered={p_res['summary_metrics']['raw_discovered_count']}, Screened={p_res['summary_metrics']['unique_screened_count']}, Shortlisted={p_res['summary_metrics']['shortlisted_count']}, Analyzed={p_res['summary_metrics']['analyzed_count']}")
+        except Exception as pe:
+            logger.warning("Could not pre-generate patent intelligence for demo: %s", pe)
 
         # Verify active cases
         active_cases = db.query(models.ProductCase).filter(models.ProductCase.is_demo == False).all()

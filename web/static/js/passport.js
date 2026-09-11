@@ -173,55 +173,88 @@
   // ----------------------------------------------------------------
 
   var DEMO_PASSPORT_DATA = {
-    name: "Ashwagandha & Brahmi Cognitive Wellness Capsules",
-    product_type: "Ayurvedic Product",
-    formulation: "Ayurvedic Product",
-    form: "Capsule Formulation",
-    description: "A classical Ayurvedic formulation combining Ashwagandha (Withania somnifera) and Brahmi (Bacopa monnieri) in a modern capsule delivery system. Standardized extracts with 5% withanolides and 20% bacosides for optimal cognitive support and stress management.",
-    normalized_description: "A classical Ayurvedic formulation combining Ashwagandha (Withania somnifera) and Brahmi (Bacopa monnieri) in a modern capsule delivery system. Standardized extracts with 5% withanolides and 20% bacosides for optimal cognitive support and stress management.",
+    name: "AYUR-INTEL NeuroAdapt Botanical Complex (Product Showcase Concept)",
+    product_type: "Ayurvedic Proprietary Medicine",
+    formulation: "Ayurvedic Proprietary Medicine",
+    form: "Hard Gelatin Capsule",
+    description: "A multi-botanical neuro-adaptogenic product showcase concept designed for cognitive wellness support, focus support, and adaptogenic stress management. It combines six standardized Indian botanical extracts in a defined oral dosage form with a piperine-containing bio-enhancement strategy under evaluation.",
+    normalized_description: "A multi-botanical neuro-adaptogenic product showcase concept designed for cognitive wellness support, focus support, and adaptogenic stress management. It combines six standardized Indian botanical extracts in a defined oral dosage form with a piperine-containing bio-enhancement strategy under evaluation.",
     ingredients: [
       {
         name: "Ashwagandha",
         botanical: "Withania somnifera",
-        quantity: "500 mg",
+        quantity: "175 mg",
+        standardization: "5% Withanolides (HPLC)",
         status: "VERIFIED",
         source: "Charaka Samhita Chikitsa Sthana Rasayana",
         verification_status: "VERIFIED",
-        therapeutic_indication: "Stress Management, Neuroprotection & Rasayana"
+        therapeutic_indication: "Adaptogenic stress & neuro-wellness support"
       },
       {
         name: "Brahmi",
         botanical: "Bacopa monnieri",
-        quantity: "300 mg",
+        quantity: "125 mg",
+        standardization: "20% Bacosides (HPLC)",
         status: "VERIFIED",
         source: "Charaka Samhita Sutra Sthana Medhya",
         verification_status: "VERIFIED",
-        therapeutic_indication: "Cognitive Enhancement & Memory Support"
+        therapeutic_indication: "Cognitive wellness & memory support"
+      },
+      {
+        name: "Mandukaparni",
+        botanical: "Centella asiatica",
+        quantity: "100 mg",
+        standardization: "10% Asiaticosides",
+        status: "VERIFIED",
+        source: "Sushruta Samhita Sutra Sthana",
+        verification_status: "VERIFIED",
+        therapeutic_indication: "Nootropic & focus support"
       },
       {
         name: "Tulsi",
         botanical: "Ocimum sanctum",
-        quantity: "100 mg",
+        quantity: "50 mg",
+        standardization: "2.5% Ursolic Acid",
         status: "VERIFIED",
         source: "Sushruta Samhita Sutra Sthana",
         verification_status: "VERIFIED",
-        therapeutic_indication: "Adaptogen, Respiratory Health & Bio-enhancement"
+        therapeutic_indication: "Stress resilience & bio-wellness support"
+      },
+      {
+        name: "Haridra",
+        botanical: "Curcuma longa",
+        quantity: "45 mg",
+        standardization: "95% Curcuminoids",
+        status: "VERIFIED",
+        source: "Astanga Hridaya",
+        verification_status: "VERIFIED",
+        therapeutic_indication: "Cellular wellness & balance support"
+      },
+      {
+        name: "Maricha",
+        botanical: "Piper nigrum",
+        quantity: "5 mg",
+        standardization: "95% Piperine",
+        status: "VERIFIED",
+        source: "Charaka Samhita",
+        verification_status: "VERIFIED",
+        therapeutic_indication: "Bio-enhancer strategy under evaluation"
       }
     ],
     intended_use: [
-      "Cognitive Health & Focus",
-      "Stress Relief & Relaxation",
-      "Memory Enhancement"
+      "Cognitive wellness & focus support",
+      "Adaptogenic stress & vitality support",
+      "Memory & mental clarity support"
     ],
-    process: "Standardized extraction process with HPLC verification. Each ingredient is individually extracted and standardized to ensure consistent potency (5% withanolides, 20% bacosides). Blended in GMP-certified facility with quality control testing for heavy metals, microbial contamination, and aflatoxins.",
+    process: "Standardized botanical extract fractions prepared using controlled extraction and phytochemical standardization parameters, followed by staged blending and dry granulation into a defined oral capsule formulation. The formulation includes hydro-ethanolic extraction, HPLC phytochemical fingerprinting, staged blending, and dry granulation, incorporating a defined piperine-containing bio-enhancement strategy for intelligence evaluation.",
     claims: [
-      "Supports cognitive function and mental clarity",
-      "Helps manage stress and promote relaxation",
-      "Traditional Ayurvedic adaptogen formula"
+      "Cognitive wellness & focus support",
+      "Adaptogenic stress & vitality support",
+      "Memory & mental clarity support"
     ],
-    brand: "Cognitive Wellness",
-    packaging: "Blister pack in outer carton with moisture barrier",
-    notes: "A classical Ayurvedic formulation combining Ashwagandha (Withania somnifera) and Brahmi (Bacopa monnieri) in a modern capsule delivery system. Standardized extracts with 5% withanolides and 20% bacosides for optimal cognitive support and stress management.",
+    brand: "AYUR-INTEL Showcase",
+    packaging: "Blister pack in outer carton with moisture barrier (500 mg per capsule)",
+    notes: "A quantitative multi-botanical formulation combining standardized extract fractions of adaptogenic and cognitive-support botanicals with a defined piperine-containing bio-enhancement strategy and controlled extraction / standardization characteristics for improved formulation consistency and delivery characteristics.",
     id: "demo-001",
     public_id: "demo-001",
     is_demo: true,

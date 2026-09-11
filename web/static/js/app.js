@@ -1511,25 +1511,56 @@
   }
   window.openPatentIntelligence = openPatentIntelligence;
 
-  async function rerunPatentSearch() {
+  var _isRerunningPatent = false;
+  async function rerunPatentSearch(evt) {
     var s = (window.AYUR && window.AYUR.state) || state;
-    if (!s.currentCase) return;
-    s.loading = true;
-    render({ scroll: "top" });
+    if (!s.currentCase || _isRerunningPatent) return;
+    _isRerunningPatent = true;
+
+    var btn = (evt && evt.target) ? evt.target.closest("button") : document.querySelector(".btn-rerun-patent, [onclick*='rerunPatentSearch']");
+    var originalHTML = btn ? btn.innerHTML : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-sm"></span> Re-running Prior-Art Search…';
+    }
+
+    var stages = [
+      "Searching patent literature…",
+      "Normalizing and deduplicating…",
+      "Ranking candidates…",
+      "AI comparing shortlisted evidence…",
+      "Saving refreshed intelligence…"
+    ];
+    var stageIdx = 0;
+    var stageTimer = setInterval(function () {
+      stageIdx = (stageIdx + 1) % stages.length;
+      if (btn) {
+        btn.innerHTML = '<span class="spinner-sm"></span> ' + stages[stageIdx];
+      }
+    }, 1800);
+
     try {
       var data = await api("/api/cases/" + s.currentCase.id + "/patent-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ force_rerun: true })
       });
+      clearInterval(stageTimer);
       setCachedModule(s.currentCase.id, "patentSearchResults", data);
       s.patentSearchResults = data;
       showToast("✅ Patent Intelligence prior-art re-run complete", "success");
+      render({ scroll: "preserve" });
     } catch (e) {
-      s.error = "Failed to run patent discovery search.";
+      clearInterval(stageTimer);
+      console.error("Patent rerun error:", e);
+      showToast("⚠️ Could not re-run patent discovery: " + (e.message || "Server error"), "error");
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+      }
+    } finally {
+      _isRerunningPatent = false;
     }
-    s.loading = false;
-    render({ scroll: "top" });
   }
   window.rerunPatentSearch = rerunPatentSearch;
 
@@ -2005,11 +2036,172 @@
       + '</div>'
       + '</div>';
 
+    // Highlighted "File Your Patent in India" CTA Card
+    html += '<div class="card patent-filing-cta-card" style="margin-top:24px;background:linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(15,23,42,0.85) 100%);border:1px solid rgba(16,185,129,0.35);padding:24px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;">'
+      + '<div>'
+      + '<h3 style="font-size:17px;font-weight:700;color:#f8fafc;margin-bottom:6px;display:flex;align-items:center;gap:8px;">'
+      + '🛡️ Protect Your Innovation — Ready to Take the Next Step?'
+      + '</h3>'
+      + '<p style="font-size:13px;color:#cbd5e1;max-width:620px;margin:0;line-height:1.5;">'
+      + 'Understand the official Indian patent filing process, provisional vs complete specifications, required forms, fees, and access official IP India e-Filing services.'
+      + '</p>'
+      + '</div>'
+      + '<div>'
+      + '<button class="btn btn-primary" onclick="openPatentFilingGuideModal()" style="background:linear-gradient(135deg, #10b981 0%, #059669 100%);border:none;padding:12px 20px;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(16,185,129,0.3);cursor:pointer;">'
+      + '🇮🇳 File Your Patent in India →'
+      + '</button>'
+      + '</div>'
+      + '</div>';
+
     // Disclaimer
     html += '<div class="innovation-disclaimer" style="margin-top:20px;">' + icon("warning", 18) + '<div><strong>Decision-Support & Prior-Art Screening Notice.</strong> Patent Intelligence assessments are generated for early prior-art research and product strategy. They do not constitute formal legal patentability opinions or freedom-to-operate (FTO) clearances. Always verify claims against official patent registers.</div></div>';
 
     return html;
   }
+
+  // ----------------------------------------------------------------
+  // Patent Filing Guide Modal (0 API calls, Instant Local Modal)
+  // ----------------------------------------------------------------
+  function openPatentFilingGuideModal() {
+    var existing = document.getElementById("patent-filing-modal-root");
+    if (existing) existing.remove();
+
+    var modalDiv = document.createElement("div");
+    modalDiv.id = "patent-filing-modal-root";
+    modalDiv.className = "patent-filing-modal-overlay";
+    modalDiv.onclick = function (e) {
+      if (e.target === modalDiv) closePatentFilingGuideModal();
+    };
+
+    var html = '<div class="patent-filing-modal-container">'
+      + '<div class="patent-filing-modal-header">'
+      + '<h3>🏛️ How to File a Patent Application in India</h3>'
+      + '<button class="patent-filing-modal-close" onclick="closePatentFilingGuideModal()">✕</button>'
+      + '</div>'
+      + '<div class="patent-filing-modal-body">'
+      + '<div style="margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.5;">'
+      + 'A practical, beginner-friendly roadmap based on official Indian Patent Office (CGPDTM / IP India) procedures for botanical, herbal, and Ayurvedic innovations.'
+      + '</div>'
+
+      // Step 1
+      + '<div class="patent-filing-step">'
+      + '<div class="patent-filing-step-num">1</div>'
+      + '<div class="patent-filing-step-content">'
+      + '<h4>Step 1 — Check Existing Prior Art</h4>'
+      + '<p>Search existing patent literature before filing. Use <strong>AYUR-INTEL Patent Intelligence</strong> and the official <strong>IP India / InPASS Public Search Portal</strong> to evaluate potential prior-art overlap and freedom-to-operate.</p>'
+      + '</div></div>'
+
+      // Step 2
+      + '<div class="patent-filing-step">'
+      + '<div class="patent-filing-step-num">2</div>'
+      + '<div class="patent-filing-step-content">'
+      + '<h4>Step 2 — Define the Invention</h4>'
+      + '<p>Clearly identify what is technically new: specific composition ratios, standardized extract parameters, unique extraction/purification processes, bio-enhancement strategies, or delivery systems. <em>Note: A botanical ingredient or known traditional use alone is not patentable.</em></p>'
+      + '</div></div>'
+
+      // Step 3
+      + '<div class="patent-filing-step">'
+      + '<div class="patent-filing-step-num">3</div>'
+      + '<div class="patent-filing-step-content">'
+      + '<h4>Step 3 — Prepare Provisional or Complete Specification</h4>'
+      + '<p><strong>Provisional Specification:</strong> Useful to secure an early priority date while formulation details are being finalized.<br>'
+      + '<strong>Complete Specification:</strong> Contains full technical disclosure, drawings, and patent claims.<br>'
+      + '<em>IMPORTANT: If a provisional specification is filed, official IP India guidance requires submitting the complete specification within <strong>12 months</strong>.</em></p>'
+      + '</div></div>'
+
+      // Step 4
+      + '<div class="patent-filing-step">'
+      + '<div class="patent-filing-step-num">4</div>'
+      + '<div class="patent-filing-step-content">'
+      + '<h4>Step 4 — Prepare Applicable Forms & Documents</h4>'
+      + '<p>Common filing components include:<br>'
+      + '• <strong>Form 1:</strong> Application for Grant of Patent<br>'
+      + '• <strong>Form 2:</strong> Provisional or Complete Specification<br>'
+      + '• Abstract of invention and drawings (where applicable)<br>'
+      + '• <strong>Form 26:</strong> Power of Attorney (when filing through a registered patent agent/attorney, where applicable)<br>'
+      + '<em>Requirements vary by applicant type. Always verify current forms and fees on IP India before filing.</em></p>'
+      + '</div></div>'
+
+      // Step 5
+      + '<div class="patent-filing-step">'
+      + '<div class="patent-filing-step-num">5</div>'
+      + '<div class="patent-filing-step-content">'
+      + '<h4>Step 5 — Access IP India e-Filing Portal</h4>'
+      + '<p>The official Patent Office provides online patent submission via <strong>ipindiaonline.gov.in</strong>. A Digital Signature Certificate (DSC) or E-sign is required for online submission per current official guidelines.</p>'
+      + '</div></div>'
+
+      // Step 6
+      + '<div class="patent-filing-step">'
+      + '<div class="patent-filing-step-num">6</div>'
+      + '<div class="patent-filing-step-content">'
+      + '<h4>Step 6 — File Application & Pay Official Fee</h4>'
+      + '<p>Complete the required forms, upload specifications, digitally sign, and pay the applicable official statutory fee. Fee structure varies by applicant category (natural person, startup, small entity, large entity).</p>'
+      + '</div></div>'
+
+      // Step 7
+      + '<div class="patent-filing-step">'
+      + '<div class="patent-filing-step-num">7</div>'
+      + '<div class="patent-filing-step-content">'
+      + '<h4>Step 7 — Publication & Examination</h4>'
+      + '<p>Filing does NOT mean the patent has been granted. The application is published after 18 months (or earlier upon request). A <strong>Request for Examination (Form 18 / 18A)</strong> must be submitted. The Patent Office may issue a First Examination Report (FER) to which the applicant must respond.</p>'
+      + '</div></div>'
+
+      // Step 8
+      + '<div class="patent-filing-step">'
+      + '<div class="patent-filing-step-num">8</div>'
+      + '<div class="patent-filing-step-content">'
+      + '<h4>Step 8 — Grant & Post-Grant Maintenance</h4>'
+      + '<p>A patent is granted only if statutory patentability requirements under the Indian Patents Act are satisfied. After grant, statutory renewal fees apply to maintain the patent term.</p>'
+      + '</div></div>'
+
+      // Highlighted Ayurvedic / Herbal Note Card
+      + '<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:16px;margin-top:20px;margin-bottom:20px;">'
+      + '<h4 style="margin:0 0 8px 0;font-size:14px;font-weight:700;color:#fbbf24;display:flex;align-items:center;gap:8px;">🌿 Ayurvedic & Botanical Innovation Note</h4>'
+      + '<p style="margin:0 0 10px 0;font-size:13px;color:#cbd5e1;line-height:1.5;">'
+      + 'Traditional knowledge or known traditional use is not automatically patentable under Section 3(p) of the Indian Patents Act. Patent evaluation depends on the actual technical contribution, such as a genuinely novel formulation composition, standardized extract ratio, specific extraction/purification process, or delivery system.'
+      + '</p>'
+      + '<div style="font-size:12px;color:#cbd5e1;display:flex;gap:12px;flex-wrap:wrap;">'
+      + '<a href="https://ipindia.gov.in/resource/patents-resources-guidelines" target="_blank" rel="noopener noreferrer" style="color:#fbbf24;text-decoration:underline;">IP India Examination Guidelines (AYUSH 2025) ↗</a>'
+      + '<a href="https://www.tkdl.res.in" target="_blank" rel="noopener noreferrer" style="color:#fbbf24;text-decoration:underline;">TKDL Resource Portal ↗</a>'
+      + '<a href="https://ipindia.gov.in/patents-before-you-apply-public-search" target="_blank" rel="noopener noreferrer" style="color:#fbbf24;text-decoration:underline;">Official Public Search ↗</a>'
+      + '</div>'
+      + '</div>'
+
+      // Disclaimer
+      + '<div class="innovation-disclaimer" style="margin:0;background:rgba(30,41,59,0.85);">'
+      + icon("info", 18)
+      + '<div><strong>Informational Filing Guidance Disclaimer:</strong> AYUR-INTEL provides informational filing guidance only. It does not file a patent on your behalf, provide legal advice, or guarantee patentability or grant. Always verify current requirements, forms, fees, and procedures with the Indian Patent Office (CGPDTM) or a qualified patent agent/attorney.</div>'
+      + '</div>'
+      + '</div>'
+
+      // Footer Action Buttons
+      + '<div class="patent-filing-modal-footer">'
+      + '<a href="https://ipindia.gov.in/patents-e-services-comprehensive-e-filing-services" target="_blank" rel="noopener noreferrer" class="btn btn-primary" style="background:linear-gradient(135deg, #10b981 0%, #059669 100%);border:none;padding:10px 18px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:6px;">🇮🇳 Continue to Official IP India e-Filing ↗</a>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+      + '<a href="https://ipindia.gov.in/patents-before-you-apply-public-search" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display:inline-flex;align-items:center;gap:6px;">🔍 Search Existing Indian Patents ↗</a>'
+      + '<a href="https://ipindia.gov.in/patents-before-you-apply-forms-official-fees" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="display:inline-flex;align-items:center;gap:6px;">📄 Forms & Official Fees ↗</a>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+
+    modalDiv.innerHTML = html;
+    document.body.appendChild(modalDiv);
+
+    var escHandler = function (e) {
+      if (e.key === "Escape") {
+        closePatentFilingGuideModal();
+        document.removeEventListener("keydown", escHandler);
+      }
+    };
+    document.addEventListener("keydown", escHandler);
+  }
+  window.openPatentFilingGuideModal = openPatentFilingGuideModal;
+
+  function closePatentFilingGuideModal() {
+    var root = document.getElementById("patent-filing-modal-root");
+    if (root) root.remove();
+  }
+  window.closePatentFilingGuideModal = closePatentFilingGuideModal;
 
   // ----------------------------------------------------------------
   // Patent Deep Analysis View
