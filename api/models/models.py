@@ -352,6 +352,10 @@ class KnowledgeEvidence(Base):
     retrieval_date = Column(String(50), nullable=True)
     source_version = Column(String(100), nullable=True)
 
+    # Provenance & Hash
+    content_hash = Column(String(64), nullable=True, index=True)
+    license_note = Column(Text, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=_now_utc)
 
     # Relationships

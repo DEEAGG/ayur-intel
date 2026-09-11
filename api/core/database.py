@@ -100,6 +100,8 @@ def init_db() -> None:
             ("patent_relevances", "limitations", "TEXT"),
             ("patent_searches", "raw_discovered_count", "INTEGER DEFAULT 0"),
             ("patent_searches", "unique_screened_count", "INTEGER DEFAULT 0"),
+            ("knowledge_evidence", "content_hash", "VARCHAR(64)"),
+            ("knowledge_evidence", "license_note", "TEXT"),
         ]
 
         for table, col, col_type in new_cols:
@@ -125,6 +127,7 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_plant_discoveries_product_case_id ON plant_discoveries (product_case_id)",
             "CREATE INDEX IF NOT EXISTS ix_knowledge_findings_owner_id ON knowledge_findings (owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_knowledge_findings_product_case_id ON knowledge_findings (product_case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_knowledge_evidence_content_hash ON knowledge_evidence (content_hash)",
             "CREATE INDEX IF NOT EXISTS ix_risk_assessments_product_case_id ON risk_assessments (product_case_id)",
             "CREATE INDEX IF NOT EXISTS ix_risk_assessments_public_id ON risk_assessments (public_id)",
             "CREATE INDEX IF NOT EXISTS ix_risk_assessments_owner_id ON risk_assessments (owner_id)",

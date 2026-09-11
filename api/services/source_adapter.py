@@ -57,6 +57,15 @@ class SourceResult:
     is_conflicting: bool = False
     conflicting_details: Optional[str] = None  # JSON — other sources' positions
 
+    # Provenance & Hierarchy (Phase 2)
+    license_note: Optional[str] = None
+    content_hash: Optional[str] = None
+    sthana: Optional[str] = None
+    chapter: Optional[str] = None
+    verse: Optional[str] = None
+    section: Optional[str] = None
+    document_type: Optional[str] = None
+
 
 @dataclass
 class SourceSearchResponse:
@@ -335,7 +344,20 @@ def get_source_registry() -> SourceRegistry:
 
     _registry = SourceRegistry()
 
-    # Always register the unconfigured placeholder
+    # Import and register Phase 2 production adapters
+    try:
+        from api.services.knowledge_source_adapters import (
+            PubMedCentralAdapter,
+            FssaiRegulationsAdapter,
+            ClassicalSamhitaAdapter,
+        )
+        _registry.register(PubMedCentralAdapter())
+        _registry.register(FssaiRegulationsAdapter())
+        _registry.register(ClassicalSamhitaAdapter())
+    except Exception as e:
+        logger.warning("Failed to register real knowledge adapters: %s", e)
+
+    # Always register unconfigured placeholders
     _registry.register(UnconfiguredSourceAdapter(
         source_name="AYUSH_TK_DB",
         authority="AYUSH",
