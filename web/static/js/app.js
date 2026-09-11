@@ -2359,10 +2359,10 @@
         
         <div class="ip-readiness-card ${result.readiness_color || 'medium'}">
           <div class="ip-readiness-left">
-            <span class="ip-readiness-icon">${result.readiness_icon || '🟡'}</span>
+            <span class="ip-readiness-icon">${result.readiness_icon || '🟢'}</span>
             <div>
               <div class="ip-readiness-label">IP Readiness</div>
-              <div class="ip-readiness-value">${escapeHtml(result.readiness || 'Medium')}</div>
+              <div class="ip-readiness-value">${result.readiness_score !== undefined ? result.readiness_score + ' / 100 · ' : ''}${escapeHtml(result.readiness_level || result.readiness || 'HIGH')}</div>
             </div>
           </div>
           <div class="ip-readiness-right">
@@ -2370,6 +2370,53 @@
             ${result.readiness_note ? `<p style="font-size:13px;color:#8aaaa0;margin-top:4px;">💡 ${escapeHtml(result.readiness_note)}</p>` : ''}
           </div>
         </div>
+
+        ${result.readiness_breakdown ? `
+        <div class="ip-breakdown-card" style="background:rgba(255,255,255,0.02);border:1px solid var(--color-outline);border-radius:var(--radius-md);padding:14px 18px;margin-bottom:16px;">
+          <h4 style="margin:0 0 10px 0;font-size:13px;color:var(--color-on-surface-variant);">📊 Grounded Readiness Score Breakdown (0–100)</h4>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:10px;">
+            <div style="background:rgba(0,0,0,0.25);padding:8px 12px;border-radius:6px;border-left:3px solid var(--color-primary);">
+              <div style="font-size:11px;color:#8aaaa0;">Product Definition</div>
+              <div style="font-size:14px;font-weight:700;color:var(--color-on-surface);margin-top:2px;">${result.readiness_breakdown.product_definition.score} / ${result.readiness_breakdown.product_definition.max_score}</div>
+            </div>
+            <div style="background:rgba(0,0,0,0.25);padding:8px 12px;border-radius:6px;border-left:3px solid var(--color-primary);">
+              <div style="font-size:11px;color:#8aaaa0;">Innovation Articulation</div>
+              <div style="font-size:14px;font-weight:700;color:var(--color-on-surface);margin-top:2px;">${result.readiness_breakdown.innovation_articulation.score} / ${result.readiness_breakdown.innovation_articulation.max_score}</div>
+            </div>
+            <div style="background:rgba(0,0,0,0.25);padding:8px 12px;border-radius:6px;border-left:3px solid var(--color-primary);">
+              <div style="font-size:11px;color:#8aaaa0;">Prior-Art Intelligence</div>
+              <div style="font-size:14px;font-weight:700;color:var(--color-on-surface);margin-top:2px;">${result.readiness_breakdown.prior_art_intelligence.score} / ${result.readiness_breakdown.prior_art_intelligence.max_score}</div>
+            </div>
+            <div style="background:rgba(0,0,0,0.25);padding:8px 12px;border-radius:6px;border-left:3px solid var(--color-primary);">
+              <div style="font-size:11px;color:#8aaaa0;">Technical Differentiation</div>
+              <div style="font-size:14px;font-weight:700;color:var(--color-on-surface);margin-top:2px;">${result.readiness_breakdown.technical_differentiation.score} / ${result.readiness_breakdown.technical_differentiation.max_score}</div>
+            </div>
+            <div style="background:rgba(0,0,0,0.25);padding:8px 12px;border-radius:6px;border-left:3px solid var(--color-primary);">
+              <div style="font-size:11px;color:#8aaaa0;">Strategy Preparedness</div>
+              <div style="font-size:14px;font-weight:700;color:var(--color-on-surface);margin-top:2px;">${result.readiness_breakdown.strategy_preparedness.score} / ${result.readiness_breakdown.strategy_preparedness.max_score}</div>
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
+        ${(result.strengths && result.strengths.length > 0) || (result.gaps && result.gaps.length > 0) ? `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:12px;margin-bottom:16px;">
+          ${result.strengths && result.strengths.length > 0 ? `
+          <div style="background:rgba(81,207,102,0.04);border:1px solid rgba(81,207,102,0.2);border-radius:8px;padding:12px 14px;">
+            <h5 style="margin:0 0 6px 0;color:#51cf66;font-size:12px;display:flex;align-items:center;gap:6px;">💪 Key Strengths</h5>
+            <ul style="margin:0;padding-left:16px;font-size:12px;color:var(--color-on-surface-variant);line-height:1.5;">
+              ${result.strengths.map(s => `<li>${escapeHtml(s)}</li>`).join('')}
+            </ul>
+          </div>` : ''}
+          ${result.gaps && result.gaps.length > 0 ? `
+          <div style="background:rgba(255,146,43,0.04);border:1px solid rgba(255,146,43,0.2);border-radius:8px;padding:12px 14px;">
+            <h5 style="margin:0 0 6px 0;color:#ff922b;font-size:12px;display:flex;align-items:center;gap:6px;">⚠️ Preparedness Gaps</h5>
+            <ul style="margin:0;padding-left:16px;font-size:12px;color:var(--color-on-surface-variant);line-height:1.5;">
+              ${result.gaps.map(g => `<li>${escapeHtml(g)}</li>`).join('')}
+            </ul>
+          </div>` : ''}
+        </div>
+        ` : ''}
         
         <div class="ip-summary-card">
           <div class="ip-summary-icon">📋</div>
@@ -2968,10 +3015,11 @@
 
     // IP Card
     var ipColor = statusColors[summary.ip_status] || 'var(--color-outline)';
+    var ipReadinessText = (ipSum.ip_readiness_score !== undefined) ? (ipSum.ip_readiness_score + ' / 100 · ' + (ipSum.ip_readiness_level || '')) : (statusLabels[summary.ip_status] || summary.ip_status);
     html += '<div class="card" style="border-left:4px solid ' + ipColor + '"><div class="card-body">'
-      + '<div class="label-caps" style="color:var(--color-on-surface-variant);margin-bottom:4px">IP INTELLIGENCE</div>'
-      + '<div style="font-size:16px;font-weight:700;color:' + ipColor + ';margin-bottom:4px">' + (statusLabels[summary.ip_status] || summary.ip_status) + '</div>'
-      + '<div style="font-size:12px;color:var(--color-on-surface-variant)">' + escapeHtml(summary.ip_reason || '') + '</div>'
+      + '<div class="label-caps" style="color:var(--color-on-surface-variant);margin-bottom:4px">IP READINESS & STRATEGY</div>'
+      + '<div style="font-size:16px;font-weight:700;color:' + ipColor + ';margin-bottom:4px">' + escapeHtml(ipReadinessText) + '</div>'
+      + '<div style="font-size:12px;color:var(--color-on-surface-variant)">' + (ipSum.ip_strategy_items || 0) + ' Strategy Actions · ' + escapeHtml(summary.ip_reason || '') + '</div>'
       + '</div></div>';
 
     // Regulatory Card

@@ -23,6 +23,7 @@ from api.models.models import (
 from api.models.evidence import CaseFinding, UnifiedEvidence
 from api.models.risk import Risk, SelfExtensionRequest
 from api.services.evidence_service import aggregate_case_evidence
+from api.services.ip_strategy_service import calculate_ip_readiness
 from api.services.risk_service import (
     _detect_patent_risks, _detect_regulatory_risks, _detect_claims_risks,
     _detect_info_risks, _detect_jurisdiction_risks, _detect_self_extensions,
@@ -346,12 +347,17 @@ def generate_decision_dashboard(db: Session, user: User, case_public_id: str) ->
             "action_view": ext.get("resolve_url"),
         })
 
+    ip_readiness = calculate_ip_readiness(case, db=db)
+
     # IP summary
     ip_summary = {
         "innovation_components": innovation_components,
         "differentiated_count": differentiated_count,
         "patent_review_status": patent_review_status,
         "ip_strategy_items": ip_strategy_items,
+        "ip_readiness_score": ip_readiness["readiness_score"],
+        "ip_readiness_level": ip_readiness["readiness_level"],
+        "ip_readiness": ip_readiness,
     }
 
     # Regulatory summary

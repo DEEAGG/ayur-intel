@@ -13,11 +13,17 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
-from api.models.models import (
+from api.models import (
     IPStrategy,
     IPStrategyItem,
     ProductCase,
     User,
+    InnovationAnalysis,
+    InnovationComponent,
+    PatentSearch,
+    PatentRelevance,
+    PatentAnalysis,
+    RiskAssessment,
 )
 
 logger = logging.getLogger("ayur_intel.ip_strategy_service")
@@ -114,11 +120,23 @@ def _extract_case_dict(case_input: Any) -> Dict[str, Any]:
     if isinstance(case_input, dict):
         return case_input
 
-    # ORM Model extraction
     name = getattr(case_input, "name", "Unnamed Product")
     form = getattr(case_input, "form", "") or ""
     process = getattr(case_input, "process", "") or ""
     intended_use = getattr(case_input, "intended_use", "") or ""
+    notes = getattr(case_input, "notes", "") or ""
+    packaging = getattr(case_input, "packaging", "") or ""
+
+    raw_claims = getattr(case_input, "claims", None)
+    if isinstance(raw_claims, str):
+        try:
+            claims = json.loads(raw_claims)
+        except Exception:
+            claims = []
+    elif isinstance(raw_claims, list):
+        claims = raw_claims
+    else:
+        claims = []
 
     raw_ingredients = getattr(case_input, "ingredients", None)
     if isinstance(raw_ingredients, str):
@@ -132,10 +150,15 @@ def _extract_case_dict(case_input: Any) -> Dict[str, Any]:
         ingredients = []
 
     return {
+        "id": getattr(case_input, "id", None),
+        "public_id": getattr(case_input, "public_id", None),
         "name": name,
         "form": form,
         "process": process,
         "intended_use": intended_use,
+        "notes": notes,
+        "packaging": packaging,
+        "claims": claims,
         "ingredients": ingredients,
         "traditional_elements": getattr(case_input, "traditional_elements", []),
         "innovative_elements": getattr(case_input, "innovative_elements", []),
@@ -143,41 +166,322 @@ def _extract_case_dict(case_input: Any) -> Dict[str, Any]:
     }
 
 
-def generate_ip_roadmap(case_input: Any) -> Dict[str, Any]:
-    """Generate complete IP strategy roadmap for a product"""
+def calculate_ip_readiness(case_input: Any, db: Optional[Session] = None) -> Dict[str, Any]:
+    """Calculate deterministic 0-100 IP Readiness score based on grounded multi-module intelligence.
+
+    Component A: Product Definition (max 20)
+    Component B: Innovation Articulation (max 20)
+    Component C: Prior-Art Intelligence (max 25)
+    Component D: Technical Differentiation Evidence (max 20)
+    Component E: Strategy Preparedness (max 15)
+    Total: 0-100
+    """
+    case_data = _extract_case_dict(case_input)
+    name = case_data.get("name", "Unnamed Product")
+    ingredients = case_data.get("ingredients", [])
+    form = case_data.get("form", "")
+    intended_use = case_data.get("intended_use", "")
+    process = case_data.get("process", "")
+    notes = case_data.get("notes", "")
+    claims = case_data.get("claims", [])
+    packaging = case_data.get("packaging", "")
+
+    case_id = case_data.get("id")
+    if case_id is None and hasattr(case_input, "id"):
+        case_id = case_input.id
+
+    # If db is not explicitly passed, attempt session recovery from ORM object
+    if db is None and hasattr(case_input, "__table__"):
+        try:
+            db = Session.object_session(case_input)
+        except Exception:
+            db = None
+
+    # -------------------------------------------------------------------
+    # A. Product Definition (max 20 pts)
+    # -------------------------------------------------------------------
+    reasons_a = []
+    score_a = 0
+    if name and name != "Unnamed Product":
+        score_a += 3
+        reasons_a.append("Product identity and title defined.")
+
+    if ingredients and len(ingredients) > 0:
+        score_a += 5
+        reasons_a.append(f"Composition structured with {len(ingredients)} botanical ingredient(s).")
+        has_qty = any(isinstance(i, dict) and ("quantity" in i or "mg" in i or "amount" in i) for i in ingredients)
+        if has_qty:
+            score_a += 4
+            reasons_a.append("Quantitative ingredient amounts / dosage breakdown specified.")
+
+    if form:
+        score_a += 3
+        reasons_a.append(f"Dosage form specified ({form}).")
+
+    if intended_use:
+        score_a += 3
+        reasons_a.append("Intended use and therapeutic indication defined.")
+
+    if process or packaging:
+        score_a += 2
+        reasons_a.append("Preparation process or packaging parameters present.")
+
+    score_a = min(20, score_a)
+
+    # -------------------------------------------------------------------
+    # B. Innovation Articulation (max 20 pts)
+    # -------------------------------------------------------------------
+    reasons_b = []
+    score_b = 0
+
+    innov_analysis = None
+    if db and case_id:
+        try:
+            innov_analysis = db.query(InnovationAnalysis).filter(InnovationAnalysis.product_case_id == case_id).first()
+        except Exception:
+            innov_analysis = None
+
+    if innov_analysis:
+        score_b += 5
+        reasons_b.append("Innovation Analysis pipeline executed.")
+        if (innov_analysis.total_components or 0) > 0:
+            score_b += 5
+            reasons_b.append(f"{innov_analysis.total_components} product component(s) structured.")
+        if (innov_analysis.differentiated_count or 0) > 0:
+            score_b += 5
+            reasons_b.append(f"{innov_analysis.differentiated_count} technical differentiation factor(s) identified.")
+        if (innov_analysis.traditional_count or 0) + (innov_analysis.investigation_count or 0) > 0:
+            score_b += 5
+            reasons_b.append("Classical vs innovative component grounding completed.")
+    else:
+        comb_text = f"{process} {notes} {' '.join(str(c) for c in claims)}".lower()
+        if any(w in comb_text for w in ["standardized", "extract", "hplc", "fraction", "ratio", "bio-enhancer", "piperine"]):
+            score_b += 6
+            reasons_b.append("Technical innovation & standardization terms present in formulation description.")
+        else:
+            reasons_b.append("Innovation Analysis has not been executed yet for this product case.")
+
+    score_b = min(20, score_b)
+
+    # -------------------------------------------------------------------
+    # C. Prior-Art Intelligence (max 25 pts)
+    # -------------------------------------------------------------------
+    reasons_c = []
+    score_c = 0
+
+    p_searches = 0
+    p_relevances = 0
+    p_analyses = 0
+
+    if db and case_id:
+        try:
+            p_searches = db.query(PatentSearch).filter(PatentSearch.product_case_id == case_id).count()
+            p_relevances = db.query(PatentRelevance).filter(PatentRelevance.product_case_id == case_id).count()
+            p_analyses = db.query(PatentAnalysis).filter(PatentAnalysis.product_case_id == case_id).count()
+        except Exception:
+            pass
+
+    if p_searches > 0:
+        score_c += 10
+        reasons_c.append("Prior-art patent search completed.")
+        if p_relevances > 0:
+            score_c += 5
+            reasons_c.append(f"{p_relevances} prior-art patent document(s) screened for relevance.")
+    else:
+        reasons_c.append("Prior-art patent search has not yet been conducted.")
+
+    if p_relevances >= 5:
+        score_c += 5
+        reasons_c.append("Comprehensive candidate patent dataset analyzed.")
+    elif p_relevances > 0:
+        score_c += 3
+
+    if p_analyses > 0:
+        score_c += 5
+        reasons_c.append("Deep patent analysis and technical comparison performed.")
+
+    score_c = min(25, score_c)
+
+    # -------------------------------------------------------------------
+    # D. Technical Differentiation Evidence (max 20 pts)
+    # -------------------------------------------------------------------
+    reasons_d = []
+    score_d = 0
+
+    d_components = []
+    if db and innov_analysis:
+        try:
+            d_components = db.query(InnovationComponent).filter(
+                InnovationComponent.analysis_id == innov_analysis.id
+            ).all()
+        except Exception:
+            d_components = []
+
+    if d_components:
+        diff_types = set(getattr(c, "component_type", "") for c in d_components if getattr(c, "status", "") == "DIFFERENTIATED")
+        if any(t in diff_types for t in ["COMPOSITION", "RATIO", "INGREDIENT"]):
+            score_d += 5
+            reasons_d.append("Compositional or quantitative ratio differentiation established.")
+        if any(t in diff_types for t in ["PROCESS", "EXTRACTION"]):
+            score_d += 5
+            reasons_d.append("Extraction or processing technical distinction documented.")
+        if any(t in diff_types for t in ["STANDARDIZATION", "QUALITY"]):
+            score_d += 5
+            reasons_d.append("Phytochemical standardization parameters defined.")
+        if any(t in diff_types for t in ["FORMULATION", "DELIVERY"]):
+            score_d += 5
+            reasons_d.append("Dosage form or bio-delivery mechanism articulated.")
+    else:
+        comb_text = f"{process} {notes}".lower()
+        if "hplc" in comb_text or "standardized" in comb_text or "%" in comb_text:
+            score_d += 4
+            reasons_d.append("Phytochemical standardization parameters present in processing text.")
+        if "piperine" in comb_text or "bio-enhanc" in comb_text:
+            score_d += 4
+            reasons_d.append("Bio-enhancer strategy defined in processing text.")
+        if not reasons_d:
+            reasons_d.append("No technical differentiation evidence documented yet.")
+
+    score_d = min(20, score_d)
+
+    # -------------------------------------------------------------------
+    # E. IP Documentation & Strategy Preparedness (max 15 pts)
+    # -------------------------------------------------------------------
+    reasons_e = []
+    score_e = 0
+
+    # 1. Baseline roadmap generated & persisted (+3)
+    score_e += 3
+    reasons_e.append("Baseline India IP Protection Roadmap generated.")
+
+    # 2. Case-specific formulation parameters grounded in roadmap (+3)
+    if ingredients and len(ingredients) > 0 and (form or process):
+        score_e += 3
+        reasons_e.append("Roadmap incorporates case-specific formulation composition and dosage form parameters.")
+
+    # 3. Strategy integrates prior-art intelligence findings (+3)
+    if p_searches > 0 or p_relevances > 0:
+        score_e += 3
+        reasons_e.append("Strategy integrates prior-art patent search and document screening findings.")
+
+    # 4. Strategy integrates technical differentiation / innovation findings (+3)
+    if innov_analysis or d_components or (score_b > 0 and score_d > 0):
+        score_e += 3
+        reasons_e.append("Strategy incorporates grounded technical differentiation and innovation components.")
+
+    # 5. Risk matrix alignment and evidence gap / verification steps identified (+3)
+    r_count = 0
+    if db and case_id:
+        try:
+            r_count = db.query(RiskAssessment).filter(RiskAssessment.product_case_id == case_id).count()
+        except Exception:
+            r_count = 0
+
+    if r_count > 0:
+        score_e += 3
+        reasons_e.append(f"Risk matrix and IP mitigation strategy active ({r_count} risk findings).")
+
+    score_e = min(15, score_e)
+
+    # -------------------------------------------------------------------
+    # Total Score & Centralized Level Threshold Mapping
+    # -------------------------------------------------------------------
+    total_score = score_a + score_b + score_c + score_d + score_e
+    total_score = max(0, min(100, total_score))
+
+    if total_score >= 85:
+        level = "VERY HIGH"
+        color = "very_high"
+        icon = "💎"
+        desc = "Your product is exceptionally well-prepared with comprehensive formulation, prior-art intelligence, and technical differentiation."
+        note = "Strong IP evaluation baseline established across product identity, prior-art screening, and strategy preparedness."
+    elif total_score >= 70:
+        level = "HIGH"
+        color = "high"
+        icon = "🟢"
+        desc = "Your product has strong technical documentation and prior-art intelligence for IP evaluation."
+        note = "Well-prepared for IP strategy review. Focus on addressing specific evidence gaps before filing."
+    elif total_score >= 50:
+        level = "MODERATE"
+        color = "medium"
+        icon = "🟡"
+        desc = "Your product has moderate IP preparedness. Essential identity is present, but prior art or technical differentiation can be strengthened."
+        note = "Consider conducting a prior-art search or running Innovation Analysis to build technical differentiation."
+    elif total_score >= 25:
+        level = "LOW"
+        color = "low"
+        icon = "🟠"
+        desc = "Your product has basic identity information but limited prior-art search or technical differentiation evidence."
+        note = "Complete the Product Passport and execute Prior-Art Intelligence to improve IP readiness."
+    else:
+        level = "VERY LOW"
+        color = "very_low"
+        icon = "🔴"
+        desc = "Your product case has minimal structured information. Initial data entry and prior art screening are required."
+        note = "Fill in the Product Passport ingredients, intended use, and dosage form to begin IP evaluation."
+
+    strengths = []
+    gaps = []
+    next_actions = []
+
+    if score_a >= 15:
+        strengths.append("Structured Product Identity & quantitative composition well-defined")
+    else:
+        gaps.append("Incomplete Product Passport identity details (ingredients, quantities, form)")
+        next_actions.append("Complete missing Product Passport details in formulation tab")
+
+    if score_c >= 15:
+        strengths.append("Prior-art patent intelligence search and screening completed")
+    else:
+        gaps.append("Prior-art patent search has not been executed or screened")
+        next_actions.append("Run Patent Intelligence to screen Indian & international patent databases")
+
+    if score_b >= 10 or score_d >= 10:
+        strengths.append("Technical differentiation and innovation components identified")
+    else:
+        gaps.append("Technical differentiation and innovation claims need further articulation")
+        next_actions.append("Run Innovation Analysis to identify unique composition or process features")
+
+    if score_e >= 10:
+        strengths.append("IP Strategy roadmap and regulatory registration guidance prepared")
+
+    return {
+        "readiness_score": total_score,
+        "readiness_level": level,
+        "readiness_color": color,
+        "readiness_icon": icon,
+        "readiness_description": desc,
+        "readiness_note": note,
+        "readiness_breakdown": {
+            "product_definition": {"score": score_a, "max_score": 20, "reasons": reasons_a},
+            "innovation_articulation": {"score": score_b, "max_score": 20, "reasons": reasons_b},
+            "prior_art_intelligence": {"score": score_c, "max_score": 25, "reasons": reasons_c},
+            "technical_differentiation": {"score": score_d, "max_score": 20, "reasons": reasons_d},
+            "strategy_preparedness": {"score": score_e, "max_score": 15, "reasons": reasons_e},
+        },
+        "strengths": strengths,
+        "gaps": gaps,
+        "next_actions": next_actions,
+    }
+
+
+def generate_ip_roadmap(case_input: Any, db: Optional[Session] = None) -> Dict[str, Any]:
+    """Generate complete IP strategy roadmap for a product case with grounded 0-100 IP readiness scoring."""
     case_data = _extract_case_dict(case_input)
 
-    name = case_data.get('name', 'Unnamed Product')
-    ingredients = case_data.get('ingredients', [])
-    traditional_elements = case_data.get('traditional_elements', [])
-    innovative_elements = case_data.get('innovative_elements', [])
+    name = case_data.get("name", "Unnamed Product")
+    ingredients = case_data.get("ingredients", [])
+    traditional_elements = case_data.get("traditional_elements", [])
+    innovative_elements = case_data.get("innovative_elements", [])
 
-    # Derive elements if not already passed
     if not traditional_elements and ingredients:
         traditional_elements = [{"name": i.get("name", "") if isinstance(i, dict) else str(i), "reason": "Classical Ayurvedic herb"} for i in ingredients]
 
     innovative_count = len(innovative_elements)
     traditional_count = len(traditional_elements)
 
-    # Determine IP Readiness
-    if innovative_count >= 3:
-        readiness = "High"
-        readiness_color = "high"
-        readiness_icon = "🟢"
-        readiness_desc = "Your product has strong innovative elements. You're ready for patent filing and comprehensive IP protection."
-        readiness_note = "Your product has innovative elements that can be protected through patents. This gives you strong IP protection potential."
-    elif innovative_count >= 1:
-        readiness = "Medium"
-        readiness_color = "medium"
-        readiness_icon = "🟡"
-        readiness_desc = "Your product has some innovative elements. Consider strengthening them before patent filing."
-        readiness_note = "Your product has some innovative elements. Focus on strengthening them for better IP protection."
-    else:
-        readiness = "Low"
-        readiness_color = "low"
-        readiness_icon = "🔴"
-        readiness_desc = "Your product is primarily traditional. Focus on brand protection, AYUSH registration, and trade secrets."
-        readiness_note = "Your product uses classical Ayurvedic ingredients. This means it's safe, trusted, and based on traditional knowledge. IP strategy is tailored accordingly."
+    # Calculate grounded 0-100 IP Readiness Score & Breakdown
+    readiness_data = calculate_ip_readiness(case_input, db=db)
 
     # Generate steps with portal data
     steps = generate_roadmap_steps(case_data, innovative_count, traditional_count)
@@ -188,16 +492,22 @@ def generate_ip_roadmap(case_input: Any) -> Dict[str, Any]:
     # Generate summary
     summary = generate_summary(case_data, innovative_count, traditional_count)
 
-    total_cost_min = sum(step.get('cost_min', 0) for step in steps)
-    total_cost_max = sum(step.get('cost_max', 0) for step in steps)
+    total_cost_min = sum(step.get("cost_min", 0) for step in steps)
+    total_cost_max = sum(step.get("cost_max", 0) for step in steps)
 
     return {
         "product_name": name,
-        "readiness": readiness,
-        "readiness_color": readiness_color,
-        "readiness_icon": readiness_icon,
-        "readiness_description": readiness_desc,
-        "readiness_note": readiness_note,
+        "readiness_score": readiness_data["readiness_score"],
+        "readiness_level": readiness_data["readiness_level"],
+        "readiness": readiness_data["readiness_level"],  # Legacy compatibility field
+        "readiness_color": readiness_data["readiness_color"],
+        "readiness_icon": readiness_data["readiness_icon"],
+        "readiness_description": readiness_data["readiness_description"],
+        "readiness_note": readiness_data["readiness_note"],
+        "readiness_breakdown": readiness_data["readiness_breakdown"],
+        "strengths": readiness_data["strengths"],
+        "gaps": readiness_data["gaps"],
+        "next_actions": readiness_data["next_actions"],
         "steps": steps,
         "success_indicators": success_indicators,
         "summary": summary,
@@ -205,7 +515,7 @@ def generate_ip_roadmap(case_input: Any) -> Dict[str, Any]:
         "total_cost_max": total_cost_max,
         "jurisdiction": "India (IPO/CGPDTM/AYUSH)",
         "generated_on": datetime.now().strftime("%d %B, %Y"),
-        "disclaimer": "This roadmap is advisory only. Consult a qualified patent attorney for legal advice on IP protection. All costs and timelines are estimates and may vary."
+        "disclaimer": "IP Readiness represents preparedness for IP evaluation and filing strategy. It is NOT legal advice and does NOT guarantee patentability or non-infringement."
     }
 
 
@@ -472,7 +782,7 @@ def generate_ip_strategy(db: Session, user: User, case_id: str) -> Optional[IPSt
         strategy = IPStrategy(
             product_case_id=case.id,
             owner_id=user.id,
-            status="GENERATED",
+            status="COMPLETED",
             total_items=4,
             high_priority_count=1,
             medium_priority_count=2,
@@ -482,11 +792,22 @@ def generate_ip_strategy(db: Session, user: User, case_id: str) -> Optional[IPSt
         db.add(strategy)
         db.commit()
         db.refresh(strategy)
+    else:
+        # Update existing strategy row to ensure status and items are accurate
+        strategy.total_items = 4
+        strategy.status = "COMPLETED"
+        db.commit()
+        db.refresh(strategy)
 
     return strategy
 
 
-def strategy_to_dict(strategy: IPStrategy) -> Dict[str, Any]:
-    """Convert IPStrategy model to dictionary."""
+def strategy_to_dict(strategy: IPStrategy, db: Optional[Session] = None) -> Dict[str, Any]:
+    """Convert IPStrategy model to dictionary with grounded 0-100 IP readiness scoring."""
     case = strategy.product_case
-    return generate_ip_roadmap(case)
+    if db is None and hasattr(strategy, "__table__"):
+        try:
+            db = Session.object_session(strategy)
+        except Exception:
+            db = None
+    return generate_ip_roadmap(case, db=db)

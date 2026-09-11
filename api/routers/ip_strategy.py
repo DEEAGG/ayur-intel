@@ -56,7 +56,8 @@ def generate_ip_roadmap_endpoint(
     if not case:
         raise HTTPException(status_code=404, detail="Product Case not found")
 
-    result = generate_ip_roadmap(case)
+    generate_ip_strategy(db, user, case_id)
+    result = generate_ip_roadmap(case, db=db)
     return result
 
 
@@ -78,7 +79,8 @@ def create_ip_strategy(
     if not case:
         raise HTTPException(status_code=404, detail="Product Case not found")
 
-    return generate_ip_roadmap(case)
+    generate_ip_strategy(db, user, case_id)
+    return generate_ip_roadmap(case, db=db)
 
 
 @router.get("/cases/{case_id}/ip-strategy")
@@ -109,9 +111,9 @@ def get_ip_strategy(
         .first()
     )
     if not strategy:
-        raise HTTPException(status_code=404, detail="No IP Strategy found. Generate one first.")
+        strategy = generate_ip_strategy(db, user, case_id)
 
-    return strategy_to_dict(strategy)
+    return strategy_to_dict(strategy, db=db)
 
 
 @router.patch("/ip-strategy-items/{item_id}")
