@@ -121,20 +121,45 @@ class KnowledgeSynthesisService:
     def gather_document_evidence(
         cls, db: Session, document_identifier: str
     ) -> Tuple[List[Dict[str, Any]], Optional[Source], str]:
-        """Fetch all evidence units associated with a document_identifier."""
+        """Fetch all evidence units associated with a document_identifier using robust multi-stage matching."""
+        doc_str = str(document_identifier).strip()
+
+        # Stage 1: Exact matches on source_identifier, public_id, or title
         evidence_rows = (
             db.query(KnowledgeEvidence)
-            .filter(KnowledgeEvidence.source_identifier == document_identifier)
+            .filter(
+                (KnowledgeEvidence.source_identifier == doc_str)
+                | (KnowledgeEvidence.public_id == doc_str)
+                | (KnowledgeEvidence.title == doc_str)
+            )
             .all()
         )
 
+        # Stage 2: Substring matches on evidence_locator, title, or source_identifier
         if not evidence_rows:
-            # Fallback: search by prefix or locator
             evidence_rows = (
                 db.query(KnowledgeEvidence)
-                .filter(KnowledgeEvidence.evidence_locator.like(f"%{document_identifier}%"))
+                .filter(
+                    (KnowledgeEvidence.evidence_locator.like(f"%{doc_str}%"))
+                    | (KnowledgeEvidence.title.like(f"%{doc_str}%"))
+                    | (KnowledgeEvidence.source_identifier.like(f"%{doc_str}%"))
+                )
                 .all()
             )
+
+        # Stage 3: Match via KnowledgeFinding title or public_id
+        if not evidence_rows:
+            finding = (
+                db.query(KnowledgeFinding)
+                .filter(
+                    (KnowledgeFinding.public_id == doc_str)
+                    | (KnowledgeFinding.title == doc_str)
+                    | (KnowledgeFinding.evidence_locator.like(f"%{doc_str}%"))
+                )
+                .first()
+            )
+            if finding and hasattr(finding, "evidence_records") and finding.evidence_records:
+                evidence_rows = finding.evidence_records
 
         evidence_list = []
         source_obj = None
@@ -145,7 +170,7 @@ class KnowledgeSynthesisService:
             evidence_list.append({
                 "id": ev.public_id,
                 "title": ev.title or "Evidence Record",
-                "source_identifier": ev.source_identifier,
+                "source_identifier": ev.source_identifier or ev.public_id,
                 "evidence_locator": ev.evidence_locator or "",
                 "excerpt": ev.excerpt or "",
                 "confidence": ev.confidence or "HIGH",
@@ -154,11 +179,13 @@ class KnowledgeSynthesisService:
                 "source_version": ev.source_version or "",
                 "license_note": ev.license_note or "",
                 "content_hash": ev.content_hash or "",
+                "official_url": ev.source.url if ev.source else "",
             })
 
         source_type = source_obj.source_type if source_obj else "TRADITIONAL_KNOWLEDGE"
-        category = detect_source_category(source_type, document_identifier)
+        category = detect_source_category(source_type, doc_str)
         return evidence_list, source_obj, category
+
 
     @classmethod
     def get_synthesis(
@@ -504,3 +531,147 @@ RETRIEVED EVIDENCE BOUNDED CONTEXT:
 
         val_notes_str = "; ".join(validation_notes) if validation_notes else "All evidence references and required sections validated cleanly."
         return parsed_json, grounding_status, val_notes_str
+
+    @classmethod
+    def get_product_source_analysis(
+        cls, db: Session, source_name: str, case_id: str
+    ) -> Dict[str, Any]:
+        """GET-First Product-Specific Source Analysis (0 Gemini calls)."""
+        doc_id = f"SOURCE_ANALYSIS_{source_name.upper()}_{case_id}"
+        return cls.get_synthesis(db, doc_id)
+
+    @classmethod
+    def generate_product_source_analysis(
+        cls, db: Session, source_name: str, case_id: str, force_regenerate: bool = False
+    ) -> Dict[str, Any]:
+        """Explicit POST generation endpoint for Product-Specific Grounded Source Analysis."""
+        import hashlib
+        from api.models.models import ProductCase, Source, KnowledgeEvidence, KnowledgeSynthesis
+        doc_id = f"SOURCE_ANALYSIS_{source_name.upper()}_{case_id}"
+
+        p_case = db.query(ProductCase).filter(
+            (ProductCase.public_id == case_id) | (ProductCase.id == case_id)
+        ).first()
+
+        if not p_case:
+            return {
+                "id": None,
+                "document_identifier": doc_id,
+                "has_synthesis": False,
+                "summary_60s": "Product Case not found.",
+                "ai_available": False,
+                "structured_sections": {},
+                "evidence_items": [],
+            }
+
+        src_obj = db.query(Source).filter(Source.name == source_name.upper()).first()
+        evidence_query = db.query(KnowledgeEvidence)
+        if src_obj:
+            evidence_query = evidence_query.filter(KnowledgeEvidence.source_id == src_obj.id)
+
+        evidence_rows = evidence_query.all()
+        evidence_list = []
+        for ev in evidence_rows:
+            evidence_list.append({
+                "id": ev.public_id,
+                "title": ev.title or "Evidence Record",
+                "source_identifier": ev.source_identifier or ev.public_id,
+                "evidence_locator": ev.evidence_locator or "",
+                "excerpt": ev.excerpt or "",
+                "confidence": ev.confidence or "HIGH",
+            })
+
+        if not evidence_list:
+            evidence_list, _, _ = cls.gather_document_evidence(db, source_name)
+
+        current_fp = compute_evidence_fingerprint(evidence_list) if evidence_list else ""
+        prod_data_str = f"{p_case.name}|{p_case.ingredients}|{p_case.intended_use}"
+        combined_fp = hashlib.sha256(f"{prod_data_str}|{current_fp}".encode("utf-8")).hexdigest()
+
+        if not force_regenerate:
+            existing = (
+                db.query(KnowledgeSynthesis)
+                .filter(
+                    KnowledgeSynthesis.document_identifier == doc_id,
+                    KnowledgeSynthesis.evidence_fingerprint == combined_fp,
+                    KnowledgeSynthesis.is_stale == False,
+                )
+                .first()
+            )
+            if existing and existing.grounding_status in ("GROUNDED", "PARTIALLY_GROUNDED"):
+                return cls.get_synthesis(db, doc_id)
+
+        api_key = (
+            os.getenv("GEMINI_API_KEY")
+            or settings.GEMINI_API_KEY
+            or settings.AYURINTEL_GEMINI_API_KEY
+        )
+        if not api_key:
+            return cls._build_evidence_fallback(doc_id, "CLASSICAL", evidence_list, src_obj, validation_notes="Gemini API key not configured")
+
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(model_name=model_name, generation_config={"response_mime_type": "application/json"})
+
+            prompt = f"""You are an Expert AYUSH Phytomedicine & Regulatory Analyst.
+Analyze the following retrieved evidence records from source '{source_name}' specifically for product '{p_case.name}'.
+
+PRODUCT DATA CONTEXT:
+- Product Name: {p_case.name}
+- Stage: {p_case.stage}
+- Ingredients: {p_case.ingredients}
+- Intended Use: {p_case.intended_use}
+- Form: {p_case.form}
+
+STRICT GROUNDING & SAFETY RULES:
+1. ONLY reference evidence records provided below.
+2. For classical sources: state TRADITIONAL TEXTUAL CONTEXT clearly. NEVER claim traditional mention proves clinical efficacy.
+3. For regulatory sources (FSSAI): highlight relevant provisions. NEVER guarantee regulatory approval.
+4. For PMC sources: note scientific study findings and preserve study limitations.
+5. All statements MUST be grounded in the provided evidence.
+
+REQUIRED JSON OUTPUT FIELDS:
+- "summary_60s": Executive 60-second summary of what this source contains relevant to product '{p_case.name}'.
+- "relevant_ingredients": List of product ingredients matched in source evidence.
+- "source_findings": Specific findings from source relevant to formulation.
+- "what_you_should_read": Recommended passages or documents to inspect.
+- "limitations": Statutory/scientific grounding limitations.
+- "evidence_references": Array of valid evidence IDs used from input.
+
+RETRIEVED EVIDENCE BOUNDED CONTEXT FOR SOURCE '{source_name}':
+{json.dumps(evidence_list, indent=2)}
+"""
+            logger.info("Calling Gemini API (%s) for Product-Source Analysis (%s)...", model_name, doc_id)
+            response = model.generate_content(prompt)
+            raw_text = response.text.strip() if response and response.text else ""
+            if raw_text.startswith("```json"): raw_text = raw_text[7:]
+            if raw_text.startswith("```"): raw_text = raw_text[3:]
+            if raw_text.endswith("```"): raw_text = raw_text[:-3]
+            parsed_json = json.loads(raw_text.strip())
+
+            validated_data, grounding_status, val_notes = cls.validate_synthesis_output(parsed_json, evidence_list, "CLASSICAL")
+            now_utc = datetime.now(timezone.utc)
+
+            syn_rec = db.query(KnowledgeSynthesis).filter(KnowledgeSynthesis.document_identifier == doc_id).first()
+            if not syn_rec:
+                syn_rec = KnowledgeSynthesis(source_id=src_obj.id if src_obj else None, source_type=source_name, document_identifier=doc_id)
+
+            syn_rec.evidence_fingerprint = combined_fp
+            syn_rec.evidence_ids_json = json.dumps([e["id"] for e in evidence_list])
+            syn_rec.title = f"Product-Grounded Analysis: {p_case.name} x {source_name}"
+            syn_rec.summary_60s = validated_data.get("summary_60s", "")
+            syn_rec.structured_sections_json = json.dumps(validated_data)
+            syn_rec.grounding_status = grounding_status
+            syn_rec.validation_notes = val_notes
+            syn_rec.is_stale = False
+            syn_rec.model_used = model_name
+            syn_rec.generated_at = now_utc
+
+            db.add(syn_rec)
+            db.commit()
+            return cls.get_synthesis(db, doc_id)
+        except Exception as e:
+            logger.warning("Product-Source analysis failed: %s", e)
+            return cls._build_evidence_fallback(doc_id, "CLASSICAL", evidence_list, src_obj, validation_notes=f"Analysis failed: {str(e)}")

@@ -5970,10 +5970,19 @@
       title: 'Charaka Samhita',
       category: 'classical',
       categoryLabel: 'Classical Text',
-      description: 'One of the foundational texts of Ayurveda, covering internal medicine and holistic health.',
+      description: 'Foundational Ayurvedic internal medicine & holistic health text.',
       isLive: true,
       badgeText: 'LIVE SOURCE',
-      badgeClass: 'kh-card-badge-live'
+      badgeClass: 'kh-card-badge-live',
+      searchPlaceholder: 'Search herbs, concepts or classical terms (e.g. Rasayana, Sthana, Medha)...',
+      overviewText: 'Explore traditional Ayurvedic descriptions of health, herbs, formulations, therapeutic concepts and classical principles documented in the Charaka Samhita.',
+      capabilities: [
+        'Find classical references to herbs and formulation ingredients',
+        'Explore traditional preparation methods and therapeutic indications',
+        'Understand classical Ayurvedic terminology (Dravya, Tridosha, Rasayana)',
+        'Locate passages relevant to product formulation research'
+      ],
+      disclaimer: 'Traditional textual references represent historical and classical evidence. They describe traditional Ayurvedic context and are not proof of modern clinical efficacy.'
     },
     {
       id: 'sushruta',
@@ -5981,10 +5990,19 @@
       title: 'Sushruta Samhita',
       category: 'classical',
       categoryLabel: 'Classical Text',
-      description: 'Ancient Ayurvedic text focusing on surgery, anatomy, and surgical instruments.',
+      description: 'Ancient Ayurvedic text on surgery, anatomy, and surgical preparations.',
       isLive: true,
       badgeText: 'LIVE SOURCE',
-      badgeClass: 'kh-card-badge-live'
+      badgeClass: 'kh-card-badge-live',
+      searchPlaceholder: 'Search herbs, preparations or anatomical concepts (e.g. Svastha, Agni, Vedautpatti)...',
+      overviewText: 'Explore classical Ayurvedic textual evidence covering surgical concepts, anatomy, plant-based preparations, and holistic health definitions contained in the Sushruta Samhita.',
+      capabilities: [
+        'Research classical definitions of health (Svastha) and Agni-Dosha equilibrium',
+        'Study ancient mineral/herb combination preparations and processing methods',
+        'Understand traditional anatomical and physiological frameworks',
+        'Trace historical usage of Ayurvedic botanicals in therapeutic passages'
+      ],
+      disclaimer: 'Classical textual passages provide historical context. They do not constitute modern clinical validation.'
     },
     {
       id: 'ashtanga',
@@ -5992,10 +6010,17 @@
       title: 'Ashtanga Hridaya',
       category: 'classical',
       categoryLabel: 'Classical Text',
-      description: 'Comprehensive summary of Ayurvedic knowledge covering all eight branches.',
+      description: 'Comprehensive synthesis of Ayurvedic medicine covering all eight branches.',
       isLive: false,
       badgeText: 'EXPANDING COVERAGE',
-      badgeClass: 'kh-card-badge-expanding'
+      badgeClass: 'kh-card-badge-expanding',
+      overviewText: 'Ashtanga Hridaya synthesizes the core principles of Charaka and Sushruta across all eight branches of Ayurveda into concise verse form.',
+      capabilities: [
+        'Cross-reference internal medicine, pediatrics, toxicology, and rejuvenation',
+        'Analyze practical formulation guidelines and classical dosage rules',
+        'Examine standardized treatment protocols across Ayurvedic specializations'
+      ],
+      disclaimer: 'EXPANDING COVERAGE · OFFICIAL DIGITAL SOURCE VERIFICATION IN PROGRESS. AYUR-INTEL ingests evidence strictly from verified digital repositories (NIIMH / CCRAS e-Samhita). Coverage will become searchable once full-text digital verification is completed.'
     },
     {
       id: 'pmc',
@@ -6006,7 +6031,16 @@
       description: 'Free full-text archive of biomedical and life sciences journal literature.',
       isLive: true,
       badgeText: 'LIVE SOURCE',
-      badgeClass: 'kh-card-badge-live'
+      badgeClass: 'kh-card-badge-live',
+      searchPlaceholder: 'Search ingredients, botanicals or research topics (e.g. Ashwagandha, Bacopa, Stress)...',
+      overviewText: 'Search open-access scientific literature for biomedical research, pharmacological studies, clinical trials, and phytochemical analyses of Ayurvedic herbs and ingredients.',
+      capabilities: [
+        'Investigate published research on botanical active constituents and bioactives',
+        'Review in vitro, in vivo, and clinical study outcomes',
+        'Assess safety profiles, dosage studies, and pharmacological mechanisms',
+        'Retrieve full-text journal citations and PMID/PMC references'
+      ],
+      disclaimer: 'Individual scientific studies describe preliminary experimental or observational findings. A single study does not automatically establish clinical efficacy or regulatory approval.'
     },
     {
       id: 'ayush_portal',
@@ -6017,7 +6051,14 @@
       description: 'Government of India research database on Ayurveda, Yoga, and traditional medicine.',
       isLive: false,
       badgeText: 'EXPANDING COVERAGE',
-      badgeClass: 'kh-card-badge-expanding'
+      badgeClass: 'kh-card-badge-expanding',
+      overviewText: 'Official repository of research evidence on Ayurveda, Yoga, Unani, Siddha, and Homeopathy maintained by the Ministry of Ayush, Government of India.',
+      capabilities: [
+        'Access government-sponsored clinical trial reports and observational studies',
+        'Review drug standardization reports published by official research councils (CCRAS)',
+        'Track evidence-based clinical protocols for traditional medicine formulations'
+      ],
+      disclaimer: 'EXPANDING COVERAGE · GOV PORTAL API INTEGRATION IN PROGRESS. Official digital integration underway.'
     },
     {
       id: 'ayush_guidelines',
@@ -6028,7 +6069,14 @@
       description: 'Official guidelines for Ayurvedic product manufacturing, licensing, and quality control.',
       isLive: false,
       badgeText: 'EXPANDING COVERAGE',
-      badgeClass: 'kh-card-badge-expanding'
+      badgeClass: 'kh-card-badge-expanding',
+      overviewText: 'Official Ministry of Ayush regulatory directives, Good Manufacturing Practices (GMP), Pharmacopoeial Standards of Ayurveda (API), and licensing guidelines.',
+      capabilities: [
+        'Verify official manufacturing compliance standards and Schedule T requirements',
+        'Review mandatory quality control specifications and stability parameters',
+        'Track regulatory licensing frameworks for Ayurvedic proprietary medicines'
+      ],
+      disclaimer: 'EXPANDING COVERAGE · OFFICIAL GAZETTE INTEGRATION IN PROGRESS.'
     },
     {
       id: 'fssai',
@@ -6039,7 +6087,16 @@
       description: 'Food safety regulations for Ayurvedic and herbal products in India.',
       isLive: true,
       badgeText: 'LIVE SOURCE',
-      badgeClass: 'kh-card-badge-live'
+      badgeClass: 'kh-card-badge-live',
+      searchPlaceholder: 'Search regulations, ingredients or requirements (e.g. Ayurveda Aahara, Category A, Labeling)...',
+      overviewText: 'Explore official Indian food safety regulatory framework documents governing Ayurveda Aahara products, Category A approvals, permissible additives, and labeling compliance.',
+      capabilities: [
+        'Check Ayurveda Aahara 2022 regulation requirements and statutory definitions',
+        'Review 2025 Category A product approval exemptions and FoSCoS portal guidelines',
+        'Inspect permissible food additives, processing aids, and Schedule A text lists',
+        'Verify mandatory packaging declarations, logo guidelines, and warning statements'
+      ],
+      disclaimer: 'Preserves official document dates, notification versions, and gazette authority context. Regulatory information is provided for compliance research and decision-support.'
     },
     {
       id: 'patent',
@@ -6050,7 +6107,14 @@
       description: 'Search Indian patents related to Ayurvedic formulations and herbal products.',
       isLive: false,
       badgeText: 'PATENT INTEL',
-      badgeClass: 'kh-card-badge-patent'
+      badgeClass: 'kh-card-badge-patent',
+      overviewText: 'Indian Patent Intelligence helps investigate published patent literature for herbal formulations, active fractions, extraction processes, and technical concepts.',
+      capabilities: [
+        'Screen patent prior art to identify potential novelty barriers and freedom-to-operate risks',
+        'Compare formulation claims against published patent claims and specifications',
+        'Evaluate patent family members, filing dates, and legal status'
+      ],
+      disclaimer: 'Search and prior art screening are performed via AYUR-INTEL Patent Intelligence module.'
     },
     {
       id: 'drugs_act',
@@ -6061,7 +6125,14 @@
       description: 'Regulatory framework for Ayurvedic, Siddha, and Unani drugs in India.',
       isLive: false,
       badgeText: 'EXPANDING COVERAGE',
-      badgeClass: 'kh-card-badge-expanding'
+      badgeClass: 'kh-card-badge-expanding',
+      overviewText: 'Primary statutory framework governing Ayurvedic, Siddha, and Unani drugs under Chapter IV-A of the Drugs and Cosmetics Act 1940 and Rules 1945.',
+      capabilities: [
+        'Review statutory drug definitions, manufacturing license rules, and misbranding laws',
+        'Inspect Schedule T Good Manufacturing Practice (GMP) requirements',
+        'Track official regulations for Ayurvedic drug labeling and prohibited claims'
+      ],
+      disclaimer: 'EXPANDING COVERAGE · STATUTORY DIGEST IN PROGRESS.'
     }
   ];
 
@@ -6077,12 +6148,10 @@
   }
 
   function filterKnowledge(category) {
-    // Update chips
     document.querySelectorAll('.kh-filter-chip').forEach(chip => {
       chip.classList.toggle('active', chip.dataset.filter === category);
     });
 
-    // Filter cards
     const cards = document.querySelectorAll('.kh-card');
     cards.forEach(card => {
       const show = category === 'all' || card.dataset.category === category;
@@ -6097,7 +6166,22 @@
     state.khSubView = 'HUB';
     state.khActiveSource = null;
     state.khActiveDocId = null;
+    state.khSearchQuery = '';
     render({ scroll: 'restore' });
+  }
+
+  function openExpandingCoverageInfo(sourceId) {
+    state.khPrevScroll = window.scrollY || 0;
+    state.khSubView = 'INFO';
+    state.khActiveSource = sourceId;
+    render({ scroll: 'top' });
+  }
+
+  function openPatentSourceInfo() {
+    state.khPrevScroll = window.scrollY || 0;
+    state.khSubView = 'PATENT_INFO';
+    state.khActiveSource = 'patent';
+    render({ scroll: 'top' });
   }
 
   async function openKnowledgeLibrary(sourceId) {
@@ -6107,6 +6191,9 @@
     state.khActiveDocId = null;
     state.khLibraryLoading = true;
     state.khLibraryItems = [];
+    state.khFilteredItems = null;
+    state.khSearchQuery = '';
+    state.khProductAnalysis = null;
     render({ scroll: 'top' });
 
     var queryMap = {
@@ -6121,7 +6208,7 @@
       var data = await api('/api/knowledge/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, limit: 20 })
+        body: JSON.stringify({ query: q, limit: 30 })
       });
       var items = [];
       if (data && data.sources) {
@@ -6136,11 +6223,51 @@
         });
       }
       state.khLibraryItems = items;
+      state.khFilteredItems = items;
     } catch (e) {
       toast('Failed to load library items: ' + e.message, 'error');
     }
     state.khLibraryLoading = false;
+
+    var activeCase = state.currentCase || (state.cases && state.cases[0]);
+    if (activeCase) {
+      try {
+        var paData = await api('/api/knowledge/source-analysis/' + sourceId + '/' + activeCase.id);
+        if (paData && paData.ai_available) {
+          state.khProductAnalysis = paData;
+        }
+      } catch (e) {
+        // Silently skip if no product analysis exists yet
+      }
+    }
+
     render({ scroll: 'top' });
+  }
+
+  function filterSourceLibrarySearch(query) {
+    state.khSearchQuery = query;
+    var q = (query || '').toLowerCase().trim();
+    var allItems = state.khLibraryItems || [];
+    if (!q) {
+      state.khFilteredItems = allItems;
+    } else {
+      state.khFilteredItems = allItems.filter(function (item) {
+        var title = (item.title || '').toLowerCase();
+        var excerpt = (item.excerpt || item.summary || '').toLowerCase();
+        var locator = (item.evidence_locator || '').toLowerCase();
+        var authority = (item.source_authority || item.source_name || '').toLowerCase();
+        return title.indexOf(q) !== -1 || excerpt.indexOf(q) !== -1 || locator.indexOf(q) !== -1 || authority.indexOf(q) !== -1;
+      });
+    }
+
+    var contentEl = document.getElementById('kh-library-items-list');
+    var countEl = document.getElementById('kh-search-count-pill');
+    if (contentEl) {
+      contentEl.innerHTML = renderLibraryItemsContent(state.khFilteredItems);
+    }
+    if (countEl) {
+      countEl.textContent = 'Showing ' + (state.khFilteredItems ? state.khFilteredItems.length : 0) + ' of ' + allItems.length + ' evidence records';
+    }
   }
 
   async function openKnowledgeReader(docId) {
@@ -6186,10 +6313,69 @@
     }
   }
 
+  async function generateProductSourceAnalysis(sourceId, caseId) {
+    if (!sourceId || !caseId) return;
+    var btn = document.getElementById('kh-analyze-prod-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = icon('sync', 16) + ' Analyzing Source for Product...';
+    }
+
+    try {
+      var data = await api('/api/knowledge/source-analysis/generate?source_name=' + encodeURIComponent(sourceId) + '&case_id=' + encodeURIComponent(caseId), {
+        method: 'POST'
+      });
+      state.khProductAnalysis = data;
+      toast('Grounded Product Source Analysis completed!', 'success');
+      render({ scroll: 'preserve' });
+    } catch (e) {
+      toast('Failed to analyze source: ' + e.message, 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '✨ Analyze Source for My Product';
+      }
+    }
+  }
+
   window.goKnowledgeHubHome = goKnowledgeHubHome;
   window.openKnowledgeLibrary = openKnowledgeLibrary;
   window.openKnowledgeReader = openKnowledgeReader;
+  window.openExpandingCoverageInfo = openExpandingCoverageInfo;
+  window.openPatentSourceInfo = openPatentSourceInfo;
+  window.filterSourceLibrarySearch = filterSourceLibrarySearch;
   window.generateKnowledgeSynthesisForDoc = generateKnowledgeSynthesisForDoc;
+  window.generateProductSourceAnalysis = generateProductSourceAnalysis;
+
+  function renderLibraryItemsContent(items) {
+    if (!items || items.length === 0) {
+      return '<div class="empty-state" style="padding:32px 20px;text-align:center;"><div class="empty-icon">' + icon('search_off', 28) + '</div><h3 style="color:#f8fafc;font-size:16px;">No evidence records match your search</h3><p style="color:var(--text-secondary);font-size:13px;">Try searching for a different herb, formulation term, or concept.</p></div>';
+    }
+    var html = '';
+    items.forEach(function (item) {
+      var docId = item.source_identifier || item.doc_id || item.title;
+      var locator = item.evidence_locator || docId;
+      var excerpt = item.excerpt || item.summary || 'No excerpt available.';
+      html += `
+        <div class="kh-item-card" style="background:rgba(30,41,59,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:18px 20px;margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">
+            <h3 style="margin:0;font-size:16px;font-weight:600;color:#f8fafc;">${escapeHtml(item.title)}</h3>
+            <span class="case-badge case-badge-stage" style="white-space:nowrap;">${escapeHtml(item.jurisdiction || 'IN')}</span>
+          </div>
+          <div style="font-size:12px;color:var(--botanical-green,#34d399);margin-bottom:8px;font-weight:500;">
+            📍 ${escapeHtml(locator)}
+          </div>
+          <p class="kh-item-excerpt" style="font-size:13px;color:#cbd5e1;line-height:1.5;margin-bottom:12px;">
+            "${escapeHtml(excerpt)}"
+          </p>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:11px;color:var(--text-secondary);">${escapeHtml(item.source_authority || item.source_name || 'Official Text')}</span>
+            <button class="btn btn-primary btn-sm" onclick="openKnowledgeReader('${escapeHtml(docId)}')">Read &amp; Synthesize Evidence →</button>
+          </div>
+        </div>
+      `;
+    });
+    return html;
+  }
 
   function renderKnowledgeLibraryView(sourceId) {
     var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || {
@@ -6197,74 +6383,150 @@
       icon: '📚',
       description: 'Official digital repository',
       badgeClass: 'kh-card-badge-live',
-      badgeText: 'LIVE SOURCE'
+      badgeText: 'LIVE SOURCE',
+      searchPlaceholder: 'Search herbs, concepts or terms...',
+      overviewText: 'Explore official evidence records preserved in this repository.',
+      capabilities: ['Search classical references', 'Review verified excerpts'],
+      disclaimer: 'Evidence records represent preserved source text.'
     };
 
-    var items = state.khLibraryItems || [];
-    var itemsHtml = '';
+    var items = state.khFilteredItems || state.khLibraryItems || [];
+    var totalItems = (state.khLibraryItems || []).length;
+    var activeCase = state.currentCase || (state.cases && state.cases[0]);
 
+    var itemsHtml = '';
     if (state.khLibraryLoading) {
       itemsHtml = '<div style="padding:40px;text-align:center;"><div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:8px;"></div><div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:8px;"></div><p style="color:var(--text-secondary);margin-top:12px;">Loading official library evidence...</p></div>';
-    } else if (items.length === 0) {
-      itemsHtml = '<div class="empty-state"><h3>No documents loaded</h3><p>Could not find evidence documents for this source.</p></div>';
     } else {
-      items.forEach(function (item) {
-        var docId = item.source_identifier || item.doc_id || item.title;
-        var locator = item.evidence_locator || docId;
-        var excerpt = item.excerpt || item.summary || 'No excerpt available.';
-        itemsHtml += `
-          <div class="kh-item-card" style="background:rgba(30,41,59,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:18px 20px;margin-bottom:16px;">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;">
-              <h3 style="margin:0;font-size:16px;font-weight:600;color:#f8fafc;">${escapeHtml(item.title)}</h3>
-              <span class="case-badge case-badge-stage" style="white-space:nowrap;">${escapeHtml(item.jurisdiction || 'IN')}</span>
+      itemsHtml = renderLibraryItemsContent(items);
+    }
+
+    var prodAnalysisHtml = '';
+    if (activeCase) {
+      var pa = state.khProductAnalysis;
+      var paSections = (pa && pa.structured_sections) || {};
+      prodAnalysisHtml = `
+        <div class="kh-prod-analysis-card">
+          <div class="kh-prod-analysis-header">
+            <div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:#34d399;text-transform:uppercase;margin-bottom:4px;">
+                RESEARCH THIS SOURCE FOR YOUR PRODUCT
+              </div>
+              <h3 style="margin:0;font-size:17px;font-weight:700;color:#f8fafc;">
+                Selected Product: <span style="color:#34d399;">${escapeHtml(activeCase.name)}</span>
+              </h3>
             </div>
-            <div style="font-size:12px;color:var(--botanical-green,#34d399);margin-bottom:8px;font-weight:500;">
-              📍 ${escapeHtml(locator)}
-            </div>
-            <p class="kh-item-excerpt" style="font-size:13px;color:#cbd5e1;line-height:1.5;margin-bottom:12px;">
-              "${escapeHtml(excerpt)}"
-            </p>
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-size:11px;color:var(--text-secondary);">${escapeHtml(item.source_authority || item.source_name || 'Official Text')}</span>
-              <button class="btn btn-primary btn-sm" onclick="openKnowledgeReader('${escapeHtml(docId)}')">Read &amp; Synthesize Evidence →</button>
-            </div>
+            <button class="btn btn-primary btn-sm" id="kh-analyze-prod-btn" onclick="generateProductSourceAnalysis('${escapeHtml(sourceId)}', '${escapeHtml(activeCase.id)}')">
+              ✨ ${pa ? 'Re-Analyze Source for Product' : 'Analyze Source for My Product'}
+            </button>
           </div>
-        `;
-      });
+
+          ${pa && pa.summary_60s ? `
+            <div style="background:rgba(15,23,42,0.7);border:1px solid rgba(52,211,153,0.3);border-radius:10px;padding:16px;margin-top:12px;">
+              <div style="font-size:11px;font-weight:800;color:#34d399;margin-bottom:6px;letter-spacing:0.5px;">GROUNDED PRODUCT INTELLIGENCE OVERVIEW</div>
+              <p style="font-size:13.5px;color:#f8fafc;line-height:1.6;margin:0 0 12px 0;">${escapeHtml(pa.summary_60s)}</p>
+              ${paSections.relevant_ingredients ? `
+                <div style="margin-bottom:10px;">
+                  <span style="font-size:11px;font-weight:700;color:#94a3b8;display:block;margin-bottom:4px;">MATCHED PRODUCT INGREDIENTS:</span>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    ${(Array.isArray(paSections.relevant_ingredients) ? paSections.relevant_ingredients : [paSections.relevant_ingredients]).map(ing => `<span class="chip" style="background:rgba(52,211,153,0.15);color:#34d399;font-size:11px;">${escapeHtml(String(ing))}</span>`).join('')}
+                  </div>
+                </div>
+              ` : ''}
+              ${paSections.source_findings ? `
+                <div style="margin-top:10px;font-size:12.5px;color:#cbd5e1;line-height:1.5;">
+                  <strong style="color:#e2e8f0;">Source Findings:</strong> ${escapeHtml(typeof paSections.source_findings === 'object' ? JSON.stringify(paSections.source_findings) : String(paSections.source_findings))}
+                </div>
+              ` : ''}
+              ${paSections.limitations ? `
+                <div style="margin-top:8px;font-size:11.5px;color:#94a3b8;font-style:italic;">
+                  ⚠️ ${escapeHtml(String(paSections.limitations))}
+                </div>
+              ` : ''}
+            </div>
+          ` : `
+            <p style="font-size:13px;color:#94a3b8;margin:0;">
+              Click <strong>Analyze Source for My Product</strong> to evaluate how evidence in ${escapeHtml(sourceMeta.title)} specifically applies to your active formulation (<em>${escapeHtml(activeCase.name)}</em>).
+            </p>
+          `}
+        </div>
+      `;
+    } else {
+      prodAnalysisHtml = `
+        <div class="kh-prod-analysis-card">
+          <div class="kh-prod-analysis-header">
+            <div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px;">
+                PRODUCT-SPECIFIC SOURCE RESEARCH
+              </div>
+              <h3 style="margin:0;font-size:15px;font-weight:600;color:#f8fafc;">Select a product case to analyze this source against your formulation</h3>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="if(window.AYUR){state.view='product-cases';render();}">
+              Select Product →
+            </button>
+          </div>
+        </div>
+      `;
     }
 
     return `
       <div class="knowledge-library">
-        <div class="kh-breadcrumb" style="margin-bottom:16px;font-size:13px;color:var(--text-secondary);">
-          <a href="#" onclick="goKnowledgeHubHome(); return false;" style="color:#34d399;text-decoration:none;">📚 Knowledge Hub</a>
-          <span style="margin:0 6px;">&gt;</span>
-          <span style="color:#f8fafc;font-weight:600;">${escapeHtml(sourceMeta.title)}</span>
-        </div>
-        <div class="kh-library-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);padding:20px 24px;border-radius:12px;">
-          <div>
-            <h2 style="margin:0;font-size:22px;color:#f8fafc;display:flex;align-items:center;gap:10px;">
+        <!-- Simple Back Navigation -->
+        <button class="kh-back-btn" onclick="goKnowledgeHubHome()">← Back to Knowledge Hub</button>
+
+        <!-- Source Introduction Panel (5-Second Orientation) -->
+        <div class="kh-intro-panel">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">
+            <h2 class="kh-intro-title">
               <span>${sourceMeta.icon}</span> ${escapeHtml(sourceMeta.title)}
             </h2>
-            <p style="margin:6px 0 0 0;font-size:13px;color:var(--text-secondary);">${escapeHtml(sourceMeta.description)}</p>
-          </div>
-          <div>
             <span class="kh-card-badge ${sourceMeta.badgeClass}">${sourceMeta.badgeText}</span>
           </div>
+          <p class="kh-intro-subtitle">${escapeHtml(sourceMeta.overviewText)}</p>
+
+          <div style="font-size:12px;font-weight:700;color:#34d399;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WHAT YOU CAN FIND HERE:</div>
+          <div class="kh-intro-capabilities">
+            ${(sourceMeta.capabilities || []).map(cap => `
+              <div class="kh-capability-item">
+                <span class="material-symbols-outlined">check_circle</span>
+                <span>${escapeHtml(cap)}</span>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="kh-notice-box">
+            <span class="material-symbols-outlined" style="font-size:18px;">info</span>
+            <div>${escapeHtml(sourceMeta.disclaimer)}</div>
+          </div>
         </div>
-        <div class="kh-library-content">
+
+        <!-- Prominent In-Library Search Bar -->
+        <div class="kh-source-search-wrap">
+          <span class="kh-source-search-icon">🔍</span>
+          <input type="text" class="kh-source-search-input" id="kh-library-search-input" placeholder="${escapeHtml(sourceMeta.searchPlaceholder)}" value="${escapeHtml(state.khSearchQuery || '')}" onkeyup="filterSourceLibrarySearch(this.value)">
+          <span class="chip" id="kh-search-count-pill" style="background:rgba(52,211,153,0.15);color:#34d399;font-weight:600;font-size:12px;white-space:nowrap;padding:6px 12px;">
+            Showing ${items.length} of ${totalItems} evidence records
+          </span>
+        </div>
+
+        <!-- Library Evidence Records List -->
+        <div class="kh-library-content" id="kh-library-items-list">
           ${itemsHtml}
         </div>
+
+        <!-- Product-Specific AI Analysis Section -->
+        ${prodAnalysisHtml}
       </div>
     `;
   }
 
   function renderKnowledgeReaderView(docId) {
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === state.khActiveSource; }) || { title: 'Source Library', id: 'charaka' };
+
     if (state.khReaderLoading || !state.khReaderDoc) {
       return `
         <div class="kh-reader-container">
-          <div class="kh-breadcrumb" style="margin-bottom:16px;font-size:13px;">
-            <a href="#" onclick="openKnowledgeLibrary('${state.khActiveSource || 'charaka'}'); return false;" style="color:#34d399;text-decoration:none;">← Back to Source Library</a>
-          </div>
+          <button class="kh-back-btn" onclick="openKnowledgeLibrary('${sourceMeta.id}')">← Back to ${escapeHtml(sourceMeta.title)}</button>
           <div style="padding:40px;text-align:center;">
             <div class="skeleton" style="height:120px;margin-bottom:16px;border-radius:12px;"></div>
             <div class="skeleton" style="height:200px;margin-bottom:16px;border-radius:12px;"></div>
@@ -6277,7 +6539,6 @@
     var doc = state.khReaderDoc;
     var sections = doc.structured_sections || {};
     var evidenceItems = doc.evidence_items || [];
-    var sourceMeta = knowledgeSources.find(function (s) { return s.id === state.khActiveSource; }) || { title: 'Source Library' };
 
     var isGrounded = doc.grounding_status === 'GROUNDED' || doc.grounding_status === 'PARTIALLY_GROUNDED';
     var statusBadgeClass = isGrounded ? 'confidence-high' : 'confidence-unknown';
@@ -6290,6 +6551,12 @@
           <div class="kh-ai-badge">✨ AI EXPLANATION · GROUNDED IN SOURCE</div>
           <p style="font-size:14px;color:#f8fafc;line-height:1.6;margin:0 0 8px 0;">${escapeHtml(doc.summary_60s)}</p>
           ${doc.model_used ? `<div style="font-size:11px;color:var(--text-secondary);">Synthesized via ${escapeHtml(doc.model_used)} · Zero Hallucination Guarded</div>` : ''}
+          ${doc.is_stale ? `
+            <div style="margin-top:10px;padding:8px 12px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);border-radius:6px;font-size:12px;color:#fcd34d;display:flex;justify-content:space-between;align-items:center;">
+              <span>Source evidence has changed since this explanation was generated.</span>
+              <button class="btn btn-xs" style="background:#f59e0b;color:#000;font-weight:700;" onclick="generateKnowledgeSynthesisForDoc('${escapeHtml(docId)}')">Regenerate Explanation</button>
+            </div>
+          ` : ''}
         </div>
       `;
     } else {
@@ -6338,13 +6605,8 @@
 
     return `
       <div class="kh-reader-container">
-        <div class="kh-breadcrumb" style="margin-bottom:16px;font-size:13px;color:var(--text-secondary);">
-          <a href="#" onclick="goKnowledgeHubHome(); return false;" style="color:#34d399;text-decoration:none;">📚 Knowledge Hub</a>
-          <span style="margin:0 6px;">&gt;</span>
-          <a href="#" onclick="openKnowledgeLibrary('${state.khActiveSource || 'charaka'}'); return false;" style="color:#34d399;text-decoration:none;">${escapeHtml(sourceMeta.title)}</a>
-          <span style="margin:0 6px;">&gt;</span>
-          <span style="color:#f8fafc;font-weight:600;">${escapeHtml(doc.title || docId)}</span>
-        </div>
+        <!-- Simple Back Navigation -->
+        <button class="kh-back-btn" onclick="openKnowledgeLibrary('${sourceMeta.id}')">← Back to ${escapeHtml(sourceMeta.title)}</button>
 
         <div class="kh-reader-topbar">
           <div>
@@ -6375,7 +6637,111 @@
           <h3 class="kh-evidence-title">
             <span>📜 Preserved Source Evidence</span>
           </h3>
-          ${evidenceHtml || '<p style="font-size:13px;color:var(--text-secondary);">No raw evidence excerpts stored for this document.</p>'}
+          ${evidenceHtml || '<p style="font-size:13px;color:var(--text-secondary);">Source excerpt is not available in the current curated evidence set.</p>'}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderExpandingCoverageInfoView(sourceId) {
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || {
+      title: 'Expanding Coverage Source',
+      icon: '📚',
+      description: 'Official digital repository',
+      badgeClass: 'kh-card-badge-expanding',
+      badgeText: 'EXPANDING COVERAGE',
+      overviewText: 'Official repository in pipeline for digital verification.',
+      capabilities: ['Target capability 1', 'Target capability 2'],
+      disclaimer: 'EXPANDING COVERAGE · DIGITAL SOURCE VERIFICATION IN PROGRESS.'
+    };
+
+    return `
+      <div class="kh-reader-container">
+        <!-- Simple Back Navigation -->
+        <button class="kh-back-btn" onclick="goKnowledgeHubHome()">← Back to Knowledge Hub</button>
+
+        <div class="kh-intro-panel">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">
+            <h2 class="kh-intro-title">
+              <span>${sourceMeta.icon}</span> ${escapeHtml(sourceMeta.title)}
+            </h2>
+            <span class="kh-card-badge ${sourceMeta.badgeClass}">${sourceMeta.badgeText}</span>
+          </div>
+          <p class="kh-intro-subtitle">${escapeHtml(sourceMeta.overviewText)}</p>
+
+          <div style="font-size:12px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WHAT THIS SOURCE WILL PROVIDE WHEN LIVE:</div>
+          <div class="kh-intro-capabilities">
+            ${(sourceMeta.capabilities || []).map(cap => `
+              <div class="kh-capability-item">
+                <span class="material-symbols-outlined" style="color:#f59e0b;">hourglass_top</span>
+                <span>${escapeHtml(cap)}</span>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="kh-notice-box">
+            <span class="material-symbols-outlined" style="font-size:18px;">verified_user</span>
+            <div>${escapeHtml(sourceMeta.disclaimer)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderPatentSourceInfoView() {
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === 'patent'; }) || {
+      title: 'Indian Patent Office',
+      icon: '📜',
+      description: 'Search Indian patents',
+      badgeClass: 'kh-card-badge-patent',
+      badgeText: 'PATENT INTEL',
+      overviewText: 'Indian Patent Intelligence helps investigate published patent literature for herbal formulations, active fractions, extraction processes, and technical concepts.',
+      capabilities: [
+        'Screen patent prior art to identify potential novelty barriers and freedom-to-operate risks',
+        'Compare formulation claims against published patent claims and specifications',
+        'Evaluate patent family members, filing dates, and legal status'
+      ],
+      disclaimer: 'Patent search and prior art screening are performed via AYUR-INTEL Patent Intelligence module.'
+    };
+
+    var activeCase = state.currentCase || (state.cases && state.cases[0]);
+    var btnOnClick = activeCase
+      ? "navigate('patent-intelligence')"
+      : "if(window.AYUR){state.view='product-cases';render();}";
+
+    return `
+      <div class="kh-reader-container">
+        <!-- Simple Back Navigation -->
+        <button class="kh-back-btn" onclick="goKnowledgeHubHome()">← Back to Knowledge Hub</button>
+
+        <div class="kh-intro-panel">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">
+            <h2 class="kh-intro-title">
+              <span>${sourceMeta.icon}</span> ${escapeHtml(sourceMeta.title)}
+            </h2>
+            <span class="kh-card-badge ${sourceMeta.badgeClass}">${sourceMeta.badgeText}</span>
+          </div>
+          <p class="kh-intro-subtitle">${escapeHtml(sourceMeta.overviewText)}</p>
+
+          <div style="font-size:12px;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">PATENT INTELLIGENCE CAPABILITIES:</div>
+          <div class="kh-intro-capabilities">
+            ${(sourceMeta.capabilities || []).map(cap => `
+              <div class="kh-capability-item">
+                <span class="material-symbols-outlined" style="color:#3b82f6;">verified</span>
+                <span>${escapeHtml(cap)}</span>
+              </div>
+            `).join('')}
+          </div>
+
+          <div style="margin-top:20px;padding:16px;background:rgba(15,23,42,0.8);border:1px solid rgba(59,130,246,0.3);border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+            <div>
+              <strong style="color:#f8fafc;font-size:14px;display:block;">Patent Prior Art &amp; FTO Screening Engine</strong>
+              <span style="font-size:12px;color:#94a3b8;">${activeCase ? 'Active Case Selected: ' + escapeHtml(activeCase.name) : 'No active product case selected.'}</span>
+            </div>
+            <button class="btn btn-primary" onclick="${btnOnClick}">
+              Open Patent Intelligence →
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -6387,6 +6753,10 @@
       return renderKnowledgeLibraryView(state.khActiveSource);
     } else if (subView === 'READER' && state.khActiveDocId) {
       return renderKnowledgeReaderView(state.khActiveDocId);
+    } else if (subView === 'INFO' && state.khActiveSource) {
+      return renderExpandingCoverageInfoView(state.khActiveSource);
+    } else if (subView === 'PATENT_INFO') {
+      return renderPatentSourceInfoView();
     }
 
     const html = `
@@ -6416,11 +6786,11 @@
                 ${knowledgeSources.map(source => {
                     let onclickAction = '';
                     if (source.id === 'patent') {
-                        onclickAction = "navigate('patent-intelligence')";
+                        onclickAction = "openPatentSourceInfo()";
                     } else if (source.isLive) {
                         onclickAction = `openKnowledgeLibrary('${source.id}')`;
                     } else {
-                        onclickAction = `showToast('🔍 ${escapeHtml(source.title)} - Expanding coverage (Official digital sources only)', 'info')`;
+                        onclickAction = `openExpandingCoverageInfo('${source.id}')`;
                     }
                     return `
                     <div class="kh-card" data-category="${source.category}" data-title="${source.title.toLowerCase()}" data-desc="${source.description.toLowerCase()}">

@@ -238,3 +238,38 @@ def regenerate_knowledge_synthesis(
         document_identifier=document_identifier,
         force_regenerate=True,
     )
+
+
+@router.get(
+    "/source-analysis/{source_name}/{case_id}",
+    summary="Get Product-Specific Source Analysis (0 Gemini Calls)",
+)
+def get_product_source_analysis(
+    source_name: str,
+    case_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """GET-first Product-Specific Source Analysis endpoint. 0 Gemini calls on GET."""
+    from api.services.knowledge_synthesis_service import KnowledgeSynthesisService
+    return KnowledgeSynthesisService.get_product_source_analysis(
+        db=db, source_name=source_name, case_id=case_id
+    )
+
+
+@router.post(
+    "/source-analysis/generate",
+    summary="Generate Product-Specific Source Analysis (Calls Gemini on explicit request)",
+)
+def generate_product_source_analysis(
+    source_name: str = Query(..., description="Source name (e.g. CHARAKA, PMC, FSSAI)"),
+    case_id: str = Query(..., description="Product case ID"),
+    force_regenerate: bool = Query(False, description="Force re-analysis"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Explicit POST endpoint to analyze a Knowledge Hub source for a specific Product Case."""
+    from api.services.knowledge_synthesis_service import KnowledgeSynthesisService
+    return KnowledgeSynthesisService.generate_product_source_analysis(
+        db=db, source_name=source_name, case_id=case_id, force_regenerate=force_regenerate
+    )
