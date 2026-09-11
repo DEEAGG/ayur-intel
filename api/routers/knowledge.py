@@ -179,3 +179,62 @@ def get_source_by_id(
     if result is None:
         raise HTTPException(status_code=404, detail="Source not found")
     return result
+
+
+# ---------------------------------------------------------------------------
+# Grounded Knowledge Synthesis Endpoints (Phase 3A)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/synthesis/{document_identifier}",
+    summary="Get persisted Knowledge Synthesis (0 Gemini Calls)",
+)
+def get_knowledge_synthesis(
+    document_identifier: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """GET-First Persistence Lifecycle. NEVER invokes Gemini implicitly.
+
+    Returns persisted synthesis if valid & matching current evidence fingerprint,
+    otherwise returns structured evidence fallback.
+    """
+    from api.services.knowledge_synthesis_service import KnowledgeSynthesisService
+    return KnowledgeSynthesisService.get_synthesis(db=db, document_identifier=document_identifier)
+
+
+@router.post(
+    "/synthesis/generate",
+    summary="Generate Knowledge Synthesis (Calls Gemini on explicit request)",
+)
+def generate_knowledge_synthesis(
+    document_identifier: str = Query(..., description="Document identifier to synthesize"),
+    force_regenerate: bool = Query(False, description="Force Gemini re-synthesis"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Explicit POST endpoint to generate grounded AI synthesis for a document."""
+    from api.services.knowledge_synthesis_service import KnowledgeSynthesisService
+    return KnowledgeSynthesisService.generate_synthesis(
+        db=db,
+        document_identifier=document_identifier,
+        force_regenerate=force_regenerate,
+    )
+
+
+@router.post(
+    "/synthesis/regenerate",
+    summary="Regenerate Knowledge Synthesis (Force re-synthesis)",
+)
+def regenerate_knowledge_synthesis(
+    document_identifier: str = Query(..., description="Document identifier to re-synthesize"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Explicit POST endpoint to force regenerate grounded AI synthesis for a document."""
+    from api.services.knowledge_synthesis_service import KnowledgeSynthesisService
+    return KnowledgeSynthesisService.generate_synthesis(
+        db=db,
+        document_identifier=document_identifier,
+        force_regenerate=True,
+    )

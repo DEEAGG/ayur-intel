@@ -364,6 +364,45 @@ class KnowledgeEvidence(Base):
 
 
 # ---------------------------------------------------------------------------
+# Knowledge Synthesis — Phase 3A Grounded AI Explanation
+# ---------------------------------------------------------------------------
+
+class KnowledgeSynthesis(Base):
+    """Grounded AI explanation and synthesis for Knowledge Hub evidence.
+
+    Synthesizes retrieved evidence into structured, source-specific intelligence
+    (Classical, Scientific, Regulatory) backed strictly by evidence provenance.
+    """
+
+    __tablename__ = "knowledge_syntheses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    public_id = Column(String(32), unique=True, nullable=False, default=_uuid)
+
+    source_id = Column(Integer, ForeignKey("sources.id"), nullable=True)
+    source_type = Column(String(50), nullable=False)  # TRADITIONAL_KNOWLEDGE, SCIENTIFIC, REGULATORY
+    document_identifier = Column(String(200), nullable=False, index=True)
+
+    evidence_fingerprint = Column(String(64), nullable=False, index=True)
+    evidence_ids_json = Column(Text, nullable=False, default="[]")
+
+    title = Column(String(500), nullable=False)
+    summary_60s = Column(Text, nullable=True)
+    structured_sections_json = Column(Text, nullable=False, default="{}")
+
+    grounding_status = Column(String(50), nullable=False, default="GROUNDED", index=True)
+    validation_notes = Column(Text, nullable=True)
+    is_stale = Column(Boolean, nullable=False, default=False)
+    model_used = Column(String(100), nullable=True)
+
+    generated_at = Column(DateTime, nullable=False, default=_now_utc)
+    created_at = Column(DateTime, nullable=False, default=_now_utc)
+    updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)
+
+    source = relationship("Source", lazy="selectin")
+
+
+# ---------------------------------------------------------------------------
 # Innovation Analysis — Phase 5
 # ---------------------------------------------------------------------------
 
