@@ -179,30 +179,28 @@ def _seed_initial_knowledge_hub_if_empty() -> None:
 
         user = get_or_create_demo_user(db)
 
-        # Ingest evidence from all 5 official production adapters if evidence count is low (< 20)
-        total_ev = db.query(KnowledgeEvidence).count()
-        if total_ev < 20:
-            # 1. Classical Samhita (Charaka & Sushruta)
+        # Ensure evidence for each official source adapter exists
+        if db.query(KnowledgeEvidence).filter(KnowledgeEvidence.source_identifier.ilike("%NIIMH%")).count() == 0:
             c_adapter = ClassicalSamhitaAdapter()
             c_res = c_adapter.search(query="", limit=20)
             KnowledgeIngestionService.ingest_results(db, user.id, c_res.results)
 
-            # 2. PubMed Central
+        if db.query(KnowledgeEvidence).filter(KnowledgeEvidence.source_identifier.ilike("%PMC%")).count() < 20:
             p_adapter = PubMedCentralAdapter()
-            p_res = p_adapter.search(query="", limit=10)
+            p_res = p_adapter.search(query="", limit=20)
             KnowledgeIngestionService.ingest_results(db, user.id, p_res.results)
 
-            # 3. FSSAI Regulations
+        if db.query(KnowledgeEvidence).filter(KnowledgeEvidence.source_identifier.ilike("%FSSAI%")).count() == 0:
             f_adapter = FssaiRegulationsAdapter()
             f_res = f_adapter.search(query="", limit=10)
             KnowledgeIngestionService.ingest_results(db, user.id, f_res.results)
 
-            # 4. AYUSH Guidelines
+        if db.query(KnowledgeEvidence).filter(KnowledgeEvidence.source_identifier.ilike("%AYUSH%")).count() == 0:
             g_adapter = AyushGuidelinesAdapter()
             g_res = g_adapter.search(query="", limit=10)
             KnowledgeIngestionService.ingest_results(db, user.id, g_res.results)
 
-            # 5. Drugs & Cosmetics Act
+        if db.query(KnowledgeEvidence).filter(KnowledgeEvidence.source_identifier.ilike("%DRUGS%")).count() == 0:
             d_adapter = DrugsActAdapter()
             d_res = d_adapter.search(query="", limit=10)
             KnowledgeIngestionService.ingest_results(db, user.id, d_res.results)

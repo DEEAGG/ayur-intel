@@ -6321,6 +6321,138 @@
     return matches.length > 0 ? matches[0].plant : null;
   }
 
+  function getDravyaSuggestionsLocal(query, maxResults) {
+    maxResults = maxResults || 8;
+    if (!query || !state.khDravyaIndex) return [];
+    var q = query.toLowerCase().trim();
+    if (!q) return [];
+
+    var matches = [];
+
+    state.khDravyaIndex.forEach(function (plant) {
+      var pName = (plant.primary_name || '').toLowerCase();
+      var sName = (plant.scientific_name || '').toLowerCase();
+      var aliases = (plant.aliases || []).map(function (a) { return String(a).toLowerCase(); });
+      var verns = [];
+      if (plant.vernacular_names && typeof plant.vernacular_names === 'object') {
+        Object.keys(plant.vernacular_names).forEach(function (lang) {
+          var arr = plant.vernacular_names[lang];
+          if (Array.isArray(arr)) {
+            arr.forEach(function (v) { verns.push(String(v).toLowerCase()); });
+          }
+        });
+      }
+
+      var score = 0;
+      var matchField = '';
+
+      if (pName === q || sName === q) {
+        score = 100;
+        matchField = 'Exact Name';
+      } else if (aliases.indexOf(q) !== -1) {
+        score = 95;
+        matchField = 'Exact Alias';
+      } else if (verns.indexOf(q) !== -1) {
+        score = 90;
+        matchField = 'Exact Vernacular Name';
+      } else if (pName.indexOf(q) === 0 || sName.indexOf(q) === 0) {
+        score = 85;
+        matchField = 'Name Prefix';
+      } else {
+        var aliasPrefix = false;
+        aliases.forEach(function (a) {
+          if (a.indexOf(q) === 0) aliasPrefix = true;
+        });
+        if (aliasPrefix) {
+          score = 80;
+          matchField = 'Alias Prefix';
+        } else {
+          var vernPrefix = false;
+          verns.forEach(function (v) {
+            if (v.indexOf(q) === 0) vernPrefix = true;
+          });
+          if (vernPrefix) {
+            score = 75;
+            matchField = 'Vernacular Prefix';
+          } else {
+            var words = (pName + ' ' + sName + ' ' + aliases.join(' ')).split(/\s+/);
+            var wordMatch = false;
+            words.forEach(function (w) {
+              if (w.indexOf(q) === 0 && q.length >= 3) wordMatch = true;
+            });
+            if (wordMatch) {
+              score = 65;
+              matchField = 'Word Boundary Prefix';
+            } else if (q.length >= 4 && (pName.indexOf(q) !== -1 || aliases.some(function (a) { return a.indexOf(q) !== -1; }))) {
+              score = 40;
+              matchField = 'Substring Match';
+            }
+          }
+        }
+      }
+
+      if (score > 0) {
+        matches.push({ plant: plant, score: score, matchField: matchField });
+      }
+    });
+
+    matches.sort(function (a, b) { return b.score - a.score; });
+    return matches.slice(0, maxResults);
+  }
+
+  async function selectDravyaSuggestion(plantId) {
+    var plant = (state.khDravyaIndex || []).find(function (p) { return String(p.plant_id) === String(plantId); });
+    if (!plant) return;
+
+    var inputEl = document.getElementById('kh-library-search-input');
+    if (inputEl) inputEl.value = plant.primary_name;
+
+    var dropdownEl = document.getElementById('kh-search-suggestions-dropdown');
+    if (dropdownEl) dropdownEl.style.display = 'none';
+
+    state.khSearchQuery = plant.primary_name;
+    var sourceId = state.khActiveSource || 'charaka';
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || { title: 'Source Library', id: 'charaka' };
+
+    var allItems = state.khLibraryItems || [];
+    var q = plant.primary_name.toLowerCase().trim();
+
+    state.khFilteredItems = allItems.filter(function (item) {
+      var title = (item.title || '').toLowerCase();
+      var excerpt = (item.excerpt || item.summary || '').toLowerCase();
+      var locator = (item.evidence_locator || '').toLowerCase();
+      return title.indexOf(q) !== -1 || excerpt.indexOf(q) !== -1 || locator.indexOf(q) !== -1;
+    });
+
+    state.khIntegratedResult = {
+      query: plant.primary_name,
+      has_plant_match: true,
+      has_classical_match: state.khFilteredItems.length > 0,
+      plant_match: plant,
+      classical_evidence: state.khFilteredItems
+    };
+
+    try {
+      var exp = await api('/api/knowledge/plant-explanation/' + sourceId + '/' + plant.plant_id);
+      if (exp && exp.ai_available) {
+        state.khPlantExplanation = exp;
+      }
+    } catch (e) {
+      // Silently skip
+    }
+
+    var contentEl = document.getElementById('kh-library-items-list');
+    var countEl = document.getElementById('kh-search-count-pill');
+
+    if (contentEl) {
+      contentEl.innerHTML = renderIntegratedSearchResult(state.khIntegratedResult, sourceMeta);
+    }
+    if (countEl) {
+      countEl.textContent = 'Integrated match: ' + plant.primary_name + ' (DRAVYA + ' + sourceMeta.title + ')';
+    }
+  }
+  window.selectDravyaSuggestion = selectDravyaSuggestion;
+
   async function openKnowledgeLibrary(sourceId) {
     state.khPrevScroll = window.scrollY || 0;
     state.khSubView = 'LIBRARY';
@@ -6360,8 +6492,8 @@
       sushruta: 'Sushruta',
       pmc: 'PMC',
       fssai: 'FSSAI',
-      ayush_guidelines: 'AYUSH Guidelines',
-      drugs_act: 'Drugs and Cosmetics Act'
+      ayush_guidelines: '',
+      drugs_act: ''
     };
     var q = queryMap[sourceId] || '';
     try {
@@ -6449,10 +6581,16 @@
 
     if (token !== state.khSearchToken) return;
 
+    var dropdownEl = document.getElementById('kh-search-suggestions-dropdown');
+
     if (!q) {
       state.khIntegratedResult = null;
       state.khPlantExplanation = null;
       state.khFilteredItems = allItems;
+      if (dropdownEl) {
+        dropdownEl.style.display = 'none';
+        dropdownEl.innerHTML = '';
+      }
     } else {
       state.khFilteredItems = allItems.filter(function (item) {
         var title = (item.title || '').toLowerCase();
@@ -6462,38 +6600,35 @@
         return title.indexOf(q) !== -1 || excerpt.indexOf(q) !== -1 || locator.indexOf(q) !== -1 || authority.indexOf(q) !== -1;
       });
 
-      if (sourceId === 'charaka' || sourceId === 'sushruta') {
-        var plantMatch = searchDravyaIndexLocal(q);
-        if (plantMatch) {
-          state.khIntegratedResult = {
-            query: query,
-            has_plant_match: true,
-            has_classical_match: state.khFilteredItems.length > 0,
-            plant_match: plantMatch,
-            classical_evidence: state.khFilteredItems
-          };
+      // Reset integrated result while typing unless explicitly selected via dropdown
+      state.khIntegratedResult = null;
+      state.khPlantExplanation = null;
 
-          try {
-            var exp = await api('/api/knowledge/plant-explanation/' + sourceId + '/' + plantMatch.plant_id);
-            if (token === state.khSearchToken && exp && exp.ai_available) {
-              state.khPlantExplanation = exp;
-            }
-          } catch (e) {
-            // Silently skip if no plant explanation exists yet
-          }
+      if (dropdownEl && (sourceId === 'charaka' || sourceId === 'sushruta')) {
+        var matches = getDravyaSuggestionsLocal(q, 8);
+        if (matches.length > 0) {
+          dropdownEl.innerHTML = matches.map(function (m) {
+            var plant = m.plant;
+            var secName = plant.scientific_name ? ` <em style="color:#94a3b8;font-size:12px;">(${escapeHtml(plant.scientific_name)})</em>` : '';
+            return `
+              <div class="kh-suggestion-item" style="padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="selectDravyaSuggestion(${plant.plant_id})">
+                <div>
+                  <strong style="color:#f8fafc;font-size:13.5px;">${escapeHtml(plant.primary_name)}</strong>${secName}
+                </div>
+                <span class="chip" style="background:rgba(52,211,153,0.15);color:#34d399;font-size:10px;padding:2px 8px;">
+                  ${escapeHtml(m.matchField)}
+                </span>
+              </div>
+            `;
+          }).join('');
+          dropdownEl.style.display = 'block';
         } else {
-          state.khIntegratedResult = {
-            query: query,
-            has_plant_match: false,
-            has_classical_match: state.khFilteredItems.length > 0,
-            plant_match: null,
-            classical_evidence: state.khFilteredItems
-          };
-          state.khPlantExplanation = null;
+          dropdownEl.style.display = 'none';
+          dropdownEl.innerHTML = '';
         }
-      } else {
-        state.khIntegratedResult = null;
-        state.khPlantExplanation = null;
+      } else if (dropdownEl) {
+        dropdownEl.style.display = 'none';
+        dropdownEl.innerHTML = '';
       }
     }
 
@@ -7052,12 +7187,13 @@
         </div>
 
         <!-- Prominent In-Library Search Bar -->
-        <div class="kh-source-search-wrap">
+        <div class="kh-source-search-wrap" style="position:relative;">
           <span class="kh-source-search-icon">🔍</span>
           <input type="text" class="kh-source-search-input" id="kh-library-search-input" placeholder="${escapeHtml(sourceMeta.searchPlaceholder)}" value="${escapeHtml(state.khSearchQuery || '')}" onkeyup="filterSourceLibrarySearch(this.value)">
           <span class="chip" id="kh-search-count-pill" style="background:rgba(52,211,153,0.15);color:#34d399;font-weight:600;font-size:12px;white-space:nowrap;padding:6px 12px;">
             ${escapeHtml(countPillText)}
           </span>
+          <div id="kh-search-suggestions-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:#0f172a;border:1px solid rgba(52,211,153,0.3);border-radius:0 0 10px 10px;box-shadow:0 10px 25px rgba(0,0,0,0.5);max-height:300px;overflow-y:auto;"></div>
         </div>
 
         <!-- Library Evidence Records List -->
