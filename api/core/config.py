@@ -37,7 +37,13 @@ class Settings(BaseSettings):
     # Plant Identification (PlantNet)
     AYURINTEL_PLANT_ID_PROVIDER: str = "unconfigured"  # 'plantnet' or 'unconfigured'
     AYURINTEL_PLANTNET_API_KEY: str = ""  # Get free key at https://my.plantnet.org/
+    PLANTNET_API_KEY: Optional[str] = None
     AYURINTEL_PLANTNET_PROJECT: str = "all"  # 'all', 'weurope', 'canada', etc.
+
+    @property
+    def effective_plantnet_api_key(self) -> str:
+        key = self.PLANTNET_API_KEY or self.AYURINTEL_PLANTNET_API_KEY or os.getenv("PLANTNET_API_KEY", "") or os.getenv("AYURINTEL_PLANTNET_API_KEY", "") or ""
+        return key.strip()
 
     # AI Settings
     GEMINI_API_KEY: Optional[str] = None

@@ -20,6 +20,47 @@ class CandidateResponse(BaseModel):
     notes: Optional[str] = None
 
 
+class BestMatchResponse(BaseModel):
+    """Normalized best match response from PlantNet."""
+    scientific_name: str
+    scientific_name_full: str
+    common_names: List[str] = []
+    family: str = ""
+    genus: str = ""
+    score: float
+    confidence_percent: float
+    confidence_label: str
+    gbif_id: Optional[str] = None
+    powo_id: Optional[str] = None
+    iucn_id: Optional[str] = None
+    iucn_category: Optional[str] = None
+
+
+class PredictedOrganResponse(BaseModel):
+    """Predicted organ info from PlantNet identification."""
+    organ: str
+    score: float
+
+
+class AlternativeMatchResponse(BaseModel):
+    """Alternative candidate match from PlantNet."""
+    scientific_name: str
+    common_names: List[str] = []
+    family: str = ""
+    score: float
+    confidence_percent: float
+
+
+class PlantNetIdentifyResponse(BaseModel):
+    """Schema for POST /api/plant-discovery/identify response."""
+    success: bool
+    best_match: Optional[BestMatchResponse] = None
+    predicted_organ: Optional[PredictedOrganResponse] = None
+    alternatives: List[AlternativeMatchResponse] = []
+    provider: str = "PlantNet"
+    message: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------

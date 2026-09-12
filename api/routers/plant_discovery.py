@@ -8,7 +8,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from typing import Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -20,6 +22,11 @@ from api.schemas.plant_discovery import (
     PlantDiscoveryLinkCase,
     PlantDiscoveryListResponse,
     PlantDiscoveryResponse,
+    PlantNetIdentifyResponse,
+)
+from api.services.plantnet_service import (
+    PlantNetError,
+    identify_plant_with_plantnet,
 )
 from api.services.plant_discovery_service import (
     analyze_discovery as svc_analyze,
@@ -37,6 +44,126 @@ from api.services.product_case_service import get_or_create_demo_user
 logger = logging.getLogger("ayur_intel.routers.plant_discovery")
 
 router = APIRouter(prefix="/api/plant-discoveries", tags=["Plant Discovery"])
+standalone_router = APIRouter(prefix="/api/plant-discovery", tags=["Plant Discovery"])
+
+
+# ---------------------------------------------------------------------------
+# Direct Identification Route (Phase 1 Pipeline)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/identify",
+    response_model=PlantNetIdentifyResponse,
+    summary="Identify a plant image using Pl@ntNet API",
+)
+@standalone_router.post(
+    "/identify",
+    response_model=PlantNetIdentifyResponse,
+    include_in_schema=False,
+)
+async def identify_plant(
+    image: UploadFile = File(..., description="Plant image (JPEG or PNG)"),
+    organ: Optional[str] = Form("leaf", description="Plant organ (leaf, flower, fruit, bark, habit)"),
+):
+    """Secure server-side PlantNet identification endpoint.
+
+    Accepts multipart image upload (JPEG/PNG only), calls Pl@ntNet API server-side,
+    and returns normalized AYUR-INTEL identification response with confidence metrics.
+    """
+    filename = image.filename or "upload.jpg"
+    content_type = image.content_type or "image/jpeg"
+    file_bytes = await image.read()
+
+    try:
+        result = identify_plant_with_plantnet(
+            file_bytes=file_bytes,
+            content_type=content_type,
+            filename=filename,
+            organ=organ or "leaf",
+        )
+        return result
+    except PlantNetError as e:
+        logger.warning("PlantNet identification error [%d]: %s", e.status_code, e.message)
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+    except Exception as e:
+        logger.error("Unexpected error in plant identification endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Plant identification service is temporarily unavailable.")
+
+
+# ---------------------------------------------------------------------------
+# Plant Profile Enrichment Endpoint (Phase 2 Pipeline)
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel
+from api.services.plant_enrichment_service import enrich_plant_profile
+
+class PlantEnrichPayload(BaseModel):
+    scientific_name: str
+    common_name: Optional[str] = None
+    family: Optional[str] = None
+    genus: Optional[str] = None
+    detected_organ: Optional[str] = "leaf"
+    confidence_label: Optional[str] = None
+
+@router.post(
+    "/enrich",
+    summary="Enrich plant profile with DRAVYA, Knowledge Hub, and product concept ideas",
+)
+@standalone_router.post(
+    "/enrich",
+    include_in_schema=False,
+)
+def enrich_plant(
+    payload: PlantEnrichPayload,
+    db: Session = Depends(get_db),
+):
+    """Enrich identified plant with botanical data, traditional Ayurvedic context, and product ideas."""
+    try:
+        return enrich_plant_profile(
+            db=db,
+            scientific_name=payload.scientific_name,
+            common_name=payload.common_name,
+            family=payload.family,
+            genus=payload.genus,
+            detected_organ=payload.detected_organ,
+            confidence_label=payload.confidence_label,
+        )
+    except Exception as e:
+        logger.error("Error enriching plant profile: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Plant profile enrichment unavailable.")
+
+@router.get(
+    "/enrich",
+    summary="Enrich plant profile (GET variant)",
+    include_in_schema=False,
+)
+@standalone_router.get(
+    "/enrich",
+    include_in_schema=False,
+)
+def enrich_plant_get(
+    scientific_name: str,
+    common_name: Optional[str] = None,
+    family: Optional[str] = None,
+    genus: Optional[str] = None,
+    detected_organ: Optional[str] = "leaf",
+    confidence_label: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """GET variant for plant profile enrichment."""
+    try:
+        return enrich_plant_profile(
+            db=db,
+            scientific_name=scientific_name,
+            common_name=common_name,
+            family=family,
+            genus=genus,
+            detected_organ=detected_organ,
+            confidence_label=confidence_label,
+        )
+    except Exception as e:
+        logger.error("Error enriching plant profile GET: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Plant profile enrichment unavailable.")
 
 
 # ---------------------------------------------------------------------------

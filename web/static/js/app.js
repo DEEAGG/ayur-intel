@@ -9351,182 +9351,425 @@
     });
 
     // Plant discovery upload
-    var uploadZone = document.getElementById("upload-zone");
-    var fileInput = document.getElementById("plant-file-input");
+    var uploadZone = document.getElementById("pd-dropzone");
+    var fileInput = document.getElementById("pd-file-input");
     if (uploadZone && fileInput) {
       uploadZone.addEventListener("click", function () { fileInput.click(); });
       uploadZone.addEventListener("dragover", function (e) { e.preventDefault(); uploadZone.classList.add("drag-over"); });
       uploadZone.addEventListener("dragleave", function () { uploadZone.classList.remove("drag-over"); });
-      uploadZone.addEventListener("drop", function (e) { e.preventDefault(); uploadZone.classList.remove("drag-over"); if (e.dataTransfer.files.length > 0) handlePlantUpload(e.dataTransfer.files[0]); });
-      fileInput.addEventListener("change", function () { if (fileInput.files.length > 0) handlePlantUpload(fileInput.files[0]); });
+      uploadZone.addEventListener("drop", function (e) { e.preventDefault(); uploadZone.classList.remove("drag-over"); if (e.dataTransfer.files.length > 0) window.handlePlantDiscoveryFileSelected({ target: { files: e.dataTransfer.files } }); });
     }
   }
 
   // ----------------------------------------------------------------
-  // Plant Upload Handler
+  // Plant Discovery Phase 2/3 Implementation
   // ----------------------------------------------------------------
-  async function handlePlantUpload(file) {
-    var resultDiv = document.getElementById("plant-result");
-    if (!resultDiv) return;
-    resultDiv.innerHTML = '<div class="analyzing-overlay"><div class="skeleton" style="height:200px"></div><p style="text-align:center;margin-top:12px;color:var(--color-on-surface-variant)">Uploading image...</p></div>';
+
+  var _plantDiscoveryState = {
+    previewUrl: null,
+    file: null,
+    inFlightController: null,
+    identificationResult: null,
+    enrichmentResult: null,
+    telemetry: {},
+    isAnalyzing: false,
+    isEnriching: false,
+    error: null
+  };
+
+  async function resizePlantImageClientSide(file, maxDimension) {
+    maxDimension = maxDimension || 1600;
+    return new Promise(function (resolve) {
+      if (!file || !file.type || (!file.type.includes('jpeg') && !file.type.includes('jpg') && !file.type.includes('png'))) {
+        resolve(file);
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        var img = new Image();
+        img.onload = function () {
+          var width = img.width;
+          var height = img.height;
+          if (width <= maxDimension && height <= maxDimension) {
+            resolve(file);
+            return;
+          }
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+          var canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          var mime = file.type.includes('png') ? 'image/png' : 'image/jpeg';
+          canvas.toBlob(function (blob) {
+            if (!blob) { resolve(file); return; }
+            var resizedFile = new File([blob], file.name, { type: mime, lastModified: Date.now() });
+            resolve(resizedFile);
+          }, mime, 0.85);
+        };
+        img.onerror = function () { resolve(file); };
+        img.src = e.target.result;
+      };
+      reader.onerror = function () { resolve(file); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function renderPlantDiscovery() {
+    var pd = _plantDiscoveryState;
+    var html = '<div class="pd-wrapper">'
+      + '<div class="pd-header">'
+      + '<h1 class="pd-title">' + icon('local_florist', 28) + ' <span>Plant Discovery</span></h1>'
+      + '<p class="pd-subtitle">Identify an unknown plant from a photo and explore its botanical and Ayurvedic context.</p>'
+      + '</div>'
+      + '<div class="pd-grid">'
+
+      // LEFT COLUMN: Image Input & Preview Card
+      + '<div class="pd-card">'
+      + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;margin-bottom:14px;display:flex;align-items:center;gap:8px;">'
+      + icon('add_a_photo', 20) + ' <span>Identify a Plant</span>'
+      + '</h3>';
+
+    if (pd.previewUrl) {
+      html += '<div class="pd-preview-wrap">'
+        + '<img src="' + pd.previewUrl + '" class="pd-preview-img" alt="Plant Preview">'
+        + '</div>'
+        + '<div style="display:flex;gap:8px;margin-bottom:14px;">'
+        + '<button class="btn btn-secondary btn-sm" style="flex:1;" onclick="document.getElementById(\'pd-file-input\').click()">' + icon('image', 16) + ' Change Image</button>'
+        + '</div>';
+    } else {
+      html += '<div class="pd-dropzone" id="pd-dropzone">'
+        + '<div style="font-size:36px;margin-bottom:8px;">🌿</div>'
+        + '<h4 style="margin:0 0 4px;font-size:15px;color:#f8fafc;">Drag & Drop Photo Here</h4>'
+        + '<p style="font-size:12.5px;color:#94a3b8;margin:0 0 12px;">Supports JPEG or PNG formats</p>'
+        + '<div class="pd-btn-group">'
+        + '<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); document.getElementById(\'pd-camera-input\').click()">' + icon('photo_camera', 16) + ' Take Photo</button>'
+        + '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); document.getElementById(\'pd-file-input\').click()">' + icon('upload_file', 16) + ' Upload Image</button>'
+        + '</div>'
+        + '</div>';
+    }
+
+    // Hidden inputs
+    html += '<input type="file" id="pd-file-input" accept="image/jpeg,image/jpg,image/png" style="display:none;" onchange="window.handlePlantDiscoveryFileSelected(event)">'
+      + '<input type="file" id="pd-camera-input" accept="image/*" capture="environment" style="display:none;" onchange="window.handlePlantDiscoveryFileSelected(event)">';
+
+    // Staged Loader
+    if (pd.isAnalyzing) {
+      html += '<div class="pd-staged-loader">'
+        + '<div class="pd-stage-step active">' + icon('sync', 16) + ' <span>Analyzing plant image…</span></div>'
+        + '<div class="pd-stage-step">' + icon('hourglass_top', 16) + ' <span>Matching botanical database…</span></div>'
+        + '<div class="pd-stage-step">' + icon('psychology', 16) + ' <span>Identifying probable species…</span></div>'
+        + '</div>';
+    }
+
+    // Tips Box
+    html += '<div class="pd-tips-box">'
+      + '<div class="pd-tips-title">💡 Photography Tips for High Accuracy</div>'
+      + '<ul class="pd-tips-list">'
+      + '<li>📸 Capture one plant clearly</li>'
+      + '<li>☀️ Good natural lighting</li>'
+      + '<li>🍃 Focus on leaf, flower, or fruit</li>'
+      + '<li>🎯 Avoid cluttered backgrounds</li>'
+      + '</ul>'
+      + '</div>';
+
+    // Telemetry Box
+    if (pd.telemetry && pd.telemetry.identity_ms) {
+      html += '<div style="margin-top:14px;padding:10px;border-radius:8px;background:rgba(15,23,42,0.4);border:1px solid rgba(255,255,255,0.06);font-size:11px;color:#64748b;font-family:\'JetBrains Mono\',monospace;">'
+        + '⏱️ Preview: ' + (pd.telemetry.preview_ms || 0) + 'ms | PlantNet API: ' + (pd.telemetry.api_ms || 0) + 'ms | Identity: ' + (pd.telemetry.identity_ms || 0) + 'ms'
+        + (pd.telemetry.enrichment_ms ? (' | Enrichment: ' + pd.telemetry.enrichment_ms + 'ms') : '')
+        + '</div>';
+    }
+
+    html += '</div>'; // End left column pd-card
+
+    // RIGHT COLUMN: Results & Profile Enrichment
+    html += '<div class="pd-card" id="pd-results-card">';
+
+    if (pd.error) {
+      html += '<div class="error-panel">' + icon('error', 20) + '<div><h4>Identification Error</h4><p>' + escapeHtml(pd.error) + '</p></div></div>';
+    } else if (pd.identificationResult) {
+      var res = pd.identificationResult;
+      if (res.success && res.best_match) {
+        var bm = res.best_match;
+        var confPct = bm.confidence_percent || (bm.score * 100).toFixed(2);
+        var badgeClass = confPct >= 80 ? 'pd-badge-high' : (confPct >= 55 ? 'pd-badge-likely' : 'pd-badge-low');
+        var confLabel = bm.confidence_label || (confPct >= 80 ? 'High confidence' : (confPct >= 55 ? 'Likely match' : 'Low confidence'));
+        var organ = (res.predicted_organ && res.predicted_organ.organ) ? res.predicted_organ.organ : 'leaf';
+
+        html += '<div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);">'
+          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">'
+          + '<div>'
+          + '<span style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#34d399;text-transform:uppercase;">IDENTIFIED BOTANICAL SPECIES</span>'
+          + '<h2 style="font-size:24px;font-weight:700;color:#f8fafc;margin:2px 0;">' + escapeHtml(bm.common_names[0] || bm.scientific_name) + '</h2>'
+          + '<div style="font-size:15px;font-style:italic;color:#cbd5e1;">' + escapeHtml(bm.scientific_name_full || bm.scientific_name) + '</div>'
+          + '<div style="font-size:13px;color:#94a3b8;margin-top:4px;">Family · ' + escapeHtml(bm.family || 'Meliaceae') + ' | Genus · ' + escapeHtml(bm.genus || '') + '</div>'
+          + '</div>'
+          + '<div style="text-align:right;">'
+          + '<span class="chip ' + badgeClass + '" style="font-size:13px;font-weight:700;padding:6px 14px;">' + confPct + '% · ' + escapeHtml(confLabel) + '</span>'
+          + '<div style="font-size:12px;color:#94a3b8;margin-top:6px;">Detected Organ · <strong style="color:#e2e8f0;">' + escapeHtml(organ.toUpperCase()) + '</strong></div>'
+          + '</div>'
+          + '</div>';
+
+        if (confPct < 55) {
+          html += '<div style="margin-top:12px;padding:10px 14px;border-radius:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);font-size:12.5px;color:#fca5a5;">'
+            + '⚠️ ' + escapeHtml(bm.common_names[0] || 'This match') + ' has low confidence. Try another photo focusing directly on the leaf, flower, fruit, or bark.'
+            + '</div>';
+        }
+
+        html += '</div>';
+
+        // Alternatives Accordion
+        if (res.alternatives && res.alternatives.length > 0) {
+          html += '<details style="margin-bottom:20px;padding:10px 14px;background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">'
+            + '<summary style="cursor:pointer;font-size:13px;font-weight:600;color:#94a3b8;">Other Possible Matches (' + res.alternatives.length + ')</summary>'
+            + '<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">';
+          res.alternatives.forEach(function (alt) {
+            html += '<div style="display:flex;justify-content:space-between;font-size:12.5px;color:#e2e8f0;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);">'
+              + '<div><strong>' + escapeHtml(alt.scientific_name) + '</strong> (' + escapeHtml((alt.common_names && alt.common_names[0]) || 'Candidate') + ')</div>'
+              + '<span style="color:#94a3b8;">' + (alt.confidence_percent || (alt.score * 100).toFixed(1)) + '%</span>'
+              + '</div>';
+          });
+          html += '</div></details>';
+        }
+
+        // Profile Enrichment Section
+        if (pd.isEnriching) {
+          html += '<div style="padding:20px 0;"><div class="skeleton skeleton-card" style="height:120px;margin-bottom:12px;"></div><div class="skeleton skeleton-card" style="height:180px;"></div></div>';
+        } else if (pd.enrichmentResult) {
+          var en = pd.enrichmentResult;
+
+          // Overview
+          if (en.overview) {
+            html += '<div style="margin-bottom:20px;">'
+              + '<h3 style="font-size:14px;font-weight:700;letter-spacing:0.05em;color:#34d399;text-transform:uppercase;margin-bottom:8px;">OVERVIEW</h3>'
+              + '<p style="font-size:13.5px;color:#cbd5e1;line-height:1.6;margin:0;">' + escapeHtml(en.overview.summary) + '</p>'
+              + '</div>';
+          }
+
+          // Traditional / Ayurvedic Context
+          if (en.traditional_context) {
+            var tc = en.traditional_context;
+            html += '<div style="margin-bottom:20px;padding:16px;background:rgba(52,211,153,0.04);border:1px solid rgba(52,211,153,0.2);border-radius:10px;">'
+              + '<div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#34d399;text-transform:uppercase;margin-bottom:8px;">TRADITIONAL / AYURVEDIC CONTEXT</div>'
+              + (tc.sanskrit_names && tc.sanskrit_names.length > 0 ? ('<div style="font-size:12.5px;color:#e2e8f0;margin-bottom:8px;"><strong>Ayurvedic / Sanskrit Names:</strong> ' + tc.sanskrit_names.map(escapeHtml).join(', ') + '</div>') : '')
+              + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px;margin-bottom:10px;">'
+              + (tc.rasa && tc.rasa.length ? ('<div style="font-size:12px;color:#cbd5e1;"><strong>Rasa:</strong> ' + tc.rasa.map(escapeHtml).join(', ') + '</div>') : '')
+              + (tc.virya && tc.virya.length ? ('<div style="font-size:12px;color:#cbd5e1;"><strong>Virya:</strong> ' + tc.virya.map(escapeHtml).join(', ') + '</div>') : '')
+              + (tc.vipaka && tc.vipaka.length ? ('<div style="font-size:12px;color:#cbd5e1;"><strong>Vipaka:</strong> ' + tc.vipaka.map(escapeHtml).join(', ') + '</div>') : '')
+              + (tc.doshakarma && tc.doshakarma.length ? ('<div style="font-size:12px;color:#cbd5e1;"><strong>Doshakarma:</strong> ' + tc.doshakarma.map(escapeHtml).join(', ') + '</div>') : '')
+              + '</div>'
+              + '<div style="font-size:11px;color:#94a3b8;font-style:italic;">📜 ' + escapeHtml(tc.note || 'Traditional knowledge documented in CCRAS DRAVYA & classical Ayurvedic compendia.') + '</div>'
+              + '</div>';
+          }
+
+          // Where it is found & Used parts
+          html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">'
+            + '<div style="padding:14px;background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">'
+            + '<div style="font-size:11px;font-weight:700;color:#34d399;margin-bottom:4px;">WHERE IT IS FOUND</div>'
+            + '<div style="font-size:12.5px;color:#cbd5e1;">' + escapeHtml(en.where_found ? en.where_found.native_region : 'Distribution details verified via CCRAS flora records.') + '</div>'
+            + '</div>'
+            + '<div style="padding:14px;background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">'
+            + '<div style="font-size:11px;font-weight:700;color:#34d399;margin-bottom:4px;">USED PARTS</div>'
+            + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+            + (en.used_parts || ['Leaf']).map(function (p) { return '<span class="chip" style="font-size:11px;">' + escapeHtml(p) + '</span>'; }).join('')
+            + '</div></div></div>';
+
+          // Safety & Caution
+          if (en.safety_caution) {
+            html += '<div style="margin-bottom:20px;padding:12px 14px;border-radius:8px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.25);font-size:12px;color:#fcd34d;line-height:1.5;">'
+              + '🛡️ <strong>Safety Caution:</strong> ' + escapeHtml(en.safety_caution.warning) + ' ' + escapeHtml(en.safety_caution.guidance)
+              + '</div>';
+          }
+
+          // Source Traceability Toolbar
+          if (en.sources && en.sources.length > 0) {
+            html += '<div class="pd-source-toolbar"><span style="font-size:11px;color:#94a3b8;font-weight:700;align-self:center;">SOURCES:</span>';
+            en.sources.forEach(function (s) {
+              html += '<span class="pd-source-chip"><strong>' + escapeHtml(s.name) + '</strong> · ' + escapeHtml(s.type) + '</span>';
+            });
+            html += '</div>';
+          }
+
+          // WHAT YOU CAN MAKE FROM IT
+          if (en.product_concepts && en.product_concepts.length > 0) {
+            html += '<div style="margin-top:24px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.1);">'
+              + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:4px;">'
+              + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;margin:0;">WHAT YOU CAN MAKE FROM IT</h3>'
+              + '<span style="font-size:11px;font-weight:600;color:#a5b4fc;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);padding:2px 8px;border-radius:6px;">✨ AI-assisted product concepts</span>'
+              + '</div>'
+              + '<p style="font-size:12.5px;color:#94a3b8;margin-bottom:14px;">Generated from the identified plant and available AYUR-INTEL evidence.</p>'
+              + '<div class="pd-concepts-grid">';
+
+            en.product_concepts.forEach(function (pc) {
+              html += '<div class="pd-concept-card">'
+                + '<div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span class="chip" style="font-size:10px;background:rgba(52,211,153,0.12);color:#34d399;">' + escapeHtml(pc.format || 'Formulation') + '</span><span style="font-size:11px;color:#94a3b8;">' + escapeHtml(pc.plant_part || '') + '</span></div>'
+                + '<div class="pd-concept-title">' + escapeHtml(pc.title) + '</div>'
+                + '<div style="font-size:12.5px;color:#cbd5e1;line-height:1.5;margin-bottom:10px;">' + escapeHtml(pc.why_fit) + '</div>'
+                + '<div style="font-size:11.5px;color:#94a3b8;font-style:italic;">⚠️ ' + escapeHtml(pc.consideration) + '</div>'
+                + '</div>';
+            });
+
+            html += '</div></div>';
+          }
+
+          // Actions Toolbar
+          html += '<div style="margin-top:24px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.1);display:flex;gap:12px;flex-wrap:wrap;">'
+            + '<button class="btn btn-primary" onclick="window.usePlantInNewProduct(\'' + escapeHtml(bm.common_names[0] || bm.scientific_name).replace(/'/g, "\\'") + '\', \'' + escapeHtml(bm.scientific_name).replace(/'/g, "\\'") + '\')">' + icon('add_circle', 18) + ' Use in New Product</button>'
+            + '<button class="btn btn-secondary" onclick="window.resetPlantDiscovery()">' + icon('refresh', 18) + ' Identify Another Plant</button>'
+            + '</div>';
+        }
+      } else {
+        html += '<div class="error-panel">' + icon('info', 20) + '<div><h4>No Plant Identified</h4><p>' + escapeHtml(res.message || "We couldn't identify this plant confidently. Please try another photo.") + '</p></div></div>';
+      }
+    } else {
+      // Default Empty State for Right Column
+      html += '<div style="text-align:center;padding:60px 20px;color:#94a3b8;">'
+        + '<div style="font-size:48px;margin-bottom:12px;">🌿</div>'
+        + '<h3 style="font-size:18px;color:#f8fafc;margin-bottom:6px;">Upload a Plant Photo</h3>'
+        + '<p style="font-size:13.5px;max-width:400px;margin:0 auto;line-height:1.5;">Select or capture an image to identify the botanical species and explore traditional Ayurvedic context.</p>'
+        + '</div>';
+    }
+
+    html += '</div></div></div>'; // End right column and pd-grid and pd-wrapper
+    return html;
+  }
+
+  // Bind file selection handler globally
+  window.handlePlantDiscoveryFileSelected = async function (event) {
+    var files = event.target ? event.target.files : (event.files || null);
+    if (!files || files.length === 0) return;
+    var file = files[0];
+
+    // Abort previous in-flight request if present
+    if (_plantDiscoveryState.inFlightController) {
+      _plantDiscoveryState.inFlightController.abort();
+    }
+    _plantDiscoveryState.inFlightController = new AbortController();
+
+    var t0 = performance.now();
+
+    // Step A: Local Preview
+    _plantDiscoveryState.file = file;
+    _plantDiscoveryState.previewUrl = URL.createObjectURL(file);
+    _plantDiscoveryState.isAnalyzing = true;
+    _plantDiscoveryState.identificationResult = null;
+    _plantDiscoveryState.enrichmentResult = null;
+    _plantDiscoveryState.error = null;
+
+    var t1 = performance.now();
+    _plantDiscoveryState.telemetry = { preview_ms: Math.round(t1 - t0) };
+    render();
 
     try {
-      // Step 1: Upload the image
+      // Step B: Client-side Image Preprocessing (Resize if > 1600px)
+      var uploadFile = await resizePlantImageClientSide(file, 1600);
+
+      // Step C: Execute Identification Request
+      var tApiStart = performance.now();
       var formData = new FormData();
-      formData.append("file", file);
-      var discovery = await api("/api/plant-discoveries", { method: "POST", body: formData });
+      formData.append("image", uploadFile);
+      formData.append("organ", "leaf");
 
-      // Show uploaded image + analyzing state
-      var imgUrl = discovery.image_url || ("/api/plant-discoveries/" + discovery.id + "/image");
-      resultDiv.innerHTML = '<div class="card" style="margin-top:16px"><div class="card-body">'
-        + '<div style="display:flex;gap:16px;align-items:flex-start">'
-        + '<img src="' + imgUrl + '" style="width:160px;height:120px;object-fit:cover;border-radius:var(--radius-md);border:1px solid var(--color-outline-variant)">'
-        + '<div style="flex:1">'
-        + '<h3 style="margin-bottom:4px">Image Uploaded</h3>'
-        + '<p style="font-size:13px;color:var(--color-on-surface-variant)">' + escapeHtml(file.name) + ' (' + (file.size / 1024).toFixed(0) + ' KB)</p>'
-        + '<div id="analyze-status" style="margin-top:8px;color:var(--color-on-surface-variant)">' + icon("hourglass_empty", 14) + ' Running botanical identification...</div>'
-        + '</div></div></div>';
+      var response = await fetch("/api/plant-discovery/identify", {
+        method: "POST",
+        body: formData,
+        signal: _plantDiscoveryState.inFlightController.signal,
+      });
 
-      // Step 2: Auto-analyze
-      var analyzed = await api("/api/plant-discoveries/" + discovery.id + "/analyze", { method: "POST" });
+      var tApiEnd = performance.now();
+      var apiMs = Math.round(tApiEnd - tApiStart);
 
-      // Step 3: Show results
-      var conf = analyzed.confidence || 0;
-      var provider = analyzed.provider_used || 'unknown';
-      var isReal = provider === 'plantnet';
-      var isDemo = provider === 'demo';
-      var hasCandidates = analyzed.candidate_name && conf > 0;
-      var noPlantDetected = !hasCandidates && isReal;
-
-      // Provider badge
-      var isFallback = (analyzed.identification_notes || '').toLowerCase().includes('unreachable') || (analyzed.identification_notes || '').toLowerCase().includes('fallback');
-      var providerBadge = '';
-      if (isReal && !isFallback) {
-        providerBadge = '<span class="chip" style="background:rgba(46,125,50,0.1);color:#2e7d32;font-size:10px">' + icon('verified', 12) + ' PlantNet AI — Real Identification</span>';
-      } else if (isDemo && isFallback) {
-        providerBadge = '<span class="chip" style="background:rgba(255,152,0,0.15);color:#e65100;font-size:10px">' + icon('warning', 12) + ' PlantNet Unavailable — Demo Fallback</span>'
-          + '<span class="chip" style="background:rgba(255,87,34,0.08);color:#bf360c;font-size:10px;margin-left:4px">' + icon('science', 10) + ' Simulated Results</span>';
-      } else if (isDemo) {
-        providerBadge = '<span class="chip" style="background:rgba(255,152,0,0.1);color:#e65100;font-size:10px">' + icon('science', 12) + ' Demo Mode — Simulated Results</span>';
+      if (!response.ok) {
+        var errJson = await response.json().catch(function () { return {}; });
+        throw new Error(errJson.detail || "Plant identification request failed.");
       }
 
-      var confColor = conf >= 70 ? "var(--color-secondary)" : conf >= 40 ? "#d97706" : "var(--color-error)";
-      var html = '<div class="card" style="margin-top:16px"><div class="card-body">'
-        + '<div style="display:flex;gap:16px;align-items:flex-start">'
-        + '<img src="' + imgUrl + '" style="width:160px;height:120px;object-fit:cover;border-radius:var(--radius-md);border:1px solid var(--color-outline-variant)">'
-        + '<div style="flex:1">'
+      var res = await response.json();
 
-      // Provider badge
-        + '<div style="margin-bottom:8px">' + providerBadge + '</div>'
+      _plantDiscoveryState.isAnalyzing = false;
+      _plantDiscoveryState.identificationResult = res;
+      _plantDiscoveryState.telemetry.api_ms = apiMs;
+      _plantDiscoveryState.telemetry.identity_ms = Math.round(performance.now() - t0);
 
-      // No plant detected (real API)
-      + (noPlantDetected ? '<div style="padding:16px;background:var(--color-surface-variant);border-radius:var(--radius-md);text-align:center">'
-        + '<div style="font-size:48px;margin-bottom:8px">🌿</div>'
-        + '<h3 style="margin:0 0 4px">No Plant Detected</h3>'
-        + '<p style="font-size:13px;color:var(--color-on-surface-variant);margin:0">The PlantNet AI could not identify a plant in this image. This may not be a botanical photograph.</p>'
-        + '<p style="font-size:11px;color:var(--color-on-surface-variant);margin:8px 0 0">Try uploading a clear photo of a leaf, flower, fruit, or bark.</p>'
-        + '</div>'
+      // Render Identity IMMEDIATELY
+      render();
 
-      // Identification result
-      : '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-        + '<h3 style="margin:0">' + escapeHtml(analyzed.candidate_name || "Identification Pending") + '</h3>'
-        + '<span class="chip" style="background:' + confColor + '15;color:' + confColor + '">' + conf + '% confidence</span>'
-        + '</div>'
-        + (analyzed.botanical_name ? '<p style="font-style:italic;color:var(--color-on-surface-variant);margin-bottom:8px">' + escapeHtml(analyzed.botanical_name) + '</p>' : '')
+      // Step D: Asynchronous Profile Enrichment
+      if (res.success && res.best_match) {
+        _plantDiscoveryState.isEnriching = true;
+        render();
 
-      // Confidence bar
-        + '<div style="margin:12px 0;padding:8px 12px;background:var(--color-surface-variant);border-radius:var(--radius-md);font-size:12px">'
-        + '<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Confidence</span><span style="font-weight:600">' + conf + '%</span></div>'
-        + '<div style="height:6px;background:var(--color-outline-variant);border-radius:3px;overflow:hidden">'
-        + '<div style="height:100%;width:' + conf + '%;background:' + confColor + ';border-radius:3px"></div></div></div>'
-
-      // Safety warning
-        + '<div style="padding:10px 12px;background:rgba(255,87,34,0.05);border:1px solid rgba(255,87,34,0.2);border-radius:var(--radius-md);font-size:12px;color:#d97706;line-height:1.5">'
-        + icon('warning', 14) + ' <strong>Safety Warning:</strong> This is a preliminary AI identification. Expert botanical verification is recommended before any use. Never consume an unidentified plant.'
-        + '</div>'
-
-      // Verification status
-        + (analyzed.verification_required ? '<div style="margin-top:8px;font-size:12px;color:var(--color-on-surface-variant)">' + icon('info', 12) + ' Expert verification required</div>' : '')
-
-      // Alternative candidates
-        + (analyzed.alternative_candidates && analyzed.alternative_candidates.length > 0
-          ? '<div style="margin-top:12px"><span class="label-caps" style="color:var(--color-on-surface-variant);font-size:10px">ALTERNATIVE CANDIDATES</span>'
-          + '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">'
-          + analyzed.alternative_candidates.map(function (c) {
-              return '<span class="chip" style="font-size:11px">' + escapeHtml(c.name || c.candidate_name || '') + ' (' + (c.confidence || 0) + '%)</span>';
-            }).join('')
-          + '</div></div>'
-          : '')
-
-      // Identification notes
-        + (analyzed.identification_notes ? '<div style="margin-top:8px;font-size:12px;color:var(--color-on-surface-variant);line-height:1.5">' + escapeHtml(analyzed.identification_notes) + '</div>' : '')
-
-        + '</div></div>'
-        )
-
-      // Actions
-        + '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--color-outline-variant);display:flex;gap:8px">'
-        + '<button class="btn btn-primary btn-sm" id="plant-create-case-btn" data-discovery-id="' + escapeHtml(analyzed.id) + '">' + icon('add', 14) + ' Create Product Case from This</button>'
-        + '<button class="btn btn-secondary btn-sm" id="plant-upload-another">' + icon('upload', 14) + ' Upload Another</button>'
-        + '</div>'
-
-        + '</div></div>';
-      resultDiv.innerHTML = html;
-
-      // Bind action buttons
-      var createBtn = document.getElementById("plant-create-case-btn");
-      if (createBtn) {
-        createBtn.addEventListener("click", async function () {
-          var discoveryId = this.getAttribute("data-discovery-id");
-          try {
-            var newCase = await api("/api/cases", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                name: (analyzed.candidate_name || "New Plant") + " — Product Case",
-                ingredients: [{ name: analyzed.candidate_name || "Unknown", botanical: analyzed.botanical_name || "" }]
-              })
-            });
-            toast("Product Case created from plant identification", "success");
-            await loadCases();
-            await loadCase(newCase.id);
-          } catch (err) { toast("Failed to create case", "error"); }
-        });
+        var tEnrichStart = performance.now();
+        try {
+          var enrichResp = await fetch("/api/plant-discovery/enrich", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              scientific_name: res.best_match.scientific_name,
+              common_name: (res.best_match.common_names && res.best_match.common_names[0]) || "",
+              family: res.best_match.family || "",
+              genus: res.best_match.genus || "",
+              detected_organ: (res.predicted_organ && res.predicted_organ.organ) || "leaf",
+            }),
+          });
+          if (enrichResp.ok) {
+            var enrichData = await enrichResp.json();
+            _plantDiscoveryState.enrichmentResult = enrichData;
+          }
+        } catch (e) {
+          console.warn("Plant profile enrichment failed:", e);
+        } finally {
+          _plantDiscoveryState.isEnriching = false;
+          _plantDiscoveryState.telemetry.enrichment_ms = Math.round(performance.now() - tEnrichStart);
+          render();
+        }
       }
-      var uploadAnother = document.getElementById("plant-upload-another");
-      if (uploadAnother) {
-        uploadAnother.addEventListener("click", function () {
-          resultDiv.innerHTML = '';
-          document.getElementById("plant-file-input").value = '';
-        });
-      }
-
-    } catch (e) {
-      var errMsg = e.message || 'Unknown error';
-      var isNetworkError = errMsg.includes('timeout') || errMsg.includes('fetch') || errMsg.includes('network');
-      var isPlantNetError = errMsg.includes('PlantNet') || errMsg.includes('plantnet');
-      
-      var helpfulMsg = '';
-      if (isPlantNetError && isNetworkError) {
-        helpfulMsg = '<div style="margin-top:12px;padding:12px;background:rgba(255,152,0,0.1);border:1px solid rgba(255,152,0,0.3);border-radius:var(--radius-md);font-size:12px">'
-          + '<strong>PlantNet API Unreachable</strong><br>'
-          + 'The PlantNet identification service could not be reached from your network. '
-          + 'This may be due to firewall settings or network restrictions.<br><br>'
-          + '<strong>Options:</strong><br>'
-          + '• Try from a different network<br>'
-          + '• Check if <code>my-api.plantnet.org</code> is accessible<br>'
-          + '• Use demo mode for testing (results are simulated)'
-          + '</div>';
-      } else if (isPlantNetError) {
-        helpfulMsg = '<div style="margin-top:12px;padding:12px;background:rgba(255,152,0,0.1);border:1px solid rgba(255,152,0,0.3);border-radius:var(--radius-md);font-size:12px">'
-          + '<strong>PlantNet API Error</strong><br>'
-          + 'The PlantNet service returned an error. Your API key may be invalid or the service may be temporarily unavailable.'
-          + '</div>';
-      }
-      
-      resultDiv.innerHTML = '<div class="error-panel" style="margin-top:16px">' + icon("error", 20) + '<div><h4>Analysis Failed</h4><p>' + escapeHtml(errMsg) + '</p>' + helpfulMsg + '</div></div>';
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      _plantDiscoveryState.isAnalyzing = false;
+      _plantDiscoveryState.error = err.message || "Identification service unavailable.";
+      render();
     }
-  }
+  };
+
+  window.resetPlantDiscovery = function () {
+    if (_plantDiscoveryState.inFlightController) {
+      _plantDiscoveryState.inFlightController.abort();
+    }
+    _plantDiscoveryState = {
+      previewUrl: null,
+      file: null,
+      inFlightController: null,
+      identificationResult: null,
+      enrichmentResult: null,
+      telemetry: {},
+      isAnalyzing: false,
+      isEnriching: false,
+      error: null
+    };
+    render();
+  };
+
+  window.usePlantInNewProduct = function (commonName, botanicalName) {
+    if (window.AYUR && window.AYUR.initPassportData) {
+      window.AYUR.initPassportData({
+        name: commonName + " Botanical Complex",
+        ingredients: [{ name: commonName, botanical_name: botanicalName }]
+      });
+    }
+    state.currentCase = null;
+    state.view = "passport-wizard";
+    state.passportStep = 0;
+    render({ scroll: "top" });
+    showToast("🌿 Started New Product Passport with " + commonName, "success");
+  };
 
   // ----------------------------------------------------------------
   // Profile Page Renderer & Handlers
