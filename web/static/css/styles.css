@@ -174,7 +174,7 @@ a:hover { text-decoration: underline; }
 }
 
 .sidebar-head {
-  padding: var(--container-padding) var(--container-padding) 20px;
+  padding: 16px 20px 12px;
   border-bottom: 1px solid var(--outline-variant);
 }
 
@@ -3760,7 +3760,7 @@ a:hover { text-decoration: underline; }
 
 /* Sidebar Refinements */
 .sidebar-cta-wrap {
-  padding: 12px 16px 8px;
+  padding: 8px 16px 4px;
 }
 
 .sidebar-new-btn {
@@ -3769,7 +3769,7 @@ a:hover { text-decoration: underline; }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 11px 16px;
+  padding: 10px 16px;
   background: #2D4A3E;
   color: #ffffff;
   border: none;
@@ -8763,12 +8763,47 @@ input:checked + .ios-slider:before {
   box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 280px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.topbar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--on-surface, #1c1b1b);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.topbar-breadcrumb-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-breadcrumb-icon {
+  font-size: 20px;
+  color: var(--botanical-green, #2D4A3E);
+  flex-shrink: 0;
+}
+
 .topbar-center {
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 1;
   min-width: 0;
+  padding: 0 8px;
 }
 
 /* Active Case Context Pill */
@@ -8783,7 +8818,7 @@ input:checked + .ios-slider:before {
   cursor: pointer;
   transition: all 0.2s ease;
   user-select: none;
-  max-width: 320px;
+  max-width: 280px;
   min-width: 0;
   overflow: hidden;
 }
@@ -8817,6 +8852,17 @@ input:checked + .ios-slider:before {
   text-overflow: ellipsis;
   display: block;
   max-width: 100%;
+}
+
+.topbar-case-meta small {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.topbar-case-arrow {
+  font-size: 18px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .patent-filing-step-content h4 {

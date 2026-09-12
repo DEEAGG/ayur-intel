@@ -136,6 +136,7 @@ def enrich_plant_profile(
     ayurvedic_props: Dict[str, Any] = {}
     classical_refs: List[Any] = []
     sanskrit_names: List[str] = []
+    b_info: Dict[str, Any] = {}
 
     if dravya_data:
         if not display_common and dravya_data.get("primary_name"):
@@ -148,9 +149,6 @@ def enrich_plant_profile(
         ayurvedic_props = dravya_data.get("ayurvedic_properties") or {}
         classical_refs = dravya_data.get("classical_references") or []
         sanskrit_names = dravya_data.get("sanskrit_synonyms") or []
-
-    if not parts_used:
-        parts_used = [detected_organ.capitalize() if detected_organ else "Leaf", "Root", "Seed"]
 
     # Overview Section
     overview = {
@@ -180,8 +178,29 @@ def enrich_plant_profile(
         "evidence_status": "Evidence-backed distribution record from CCRAS botanical flora surveys.",
     }
 
-    # Used Parts
-    used_parts_list = [p.strip() for p in parts_used if isinstance(p, str) and p.strip()]
+    # Extract Used Parts from DRAVYA botanical_info
+    raw_parts = b_info.get("parts_used") if dravya_data else []
+    extracted_parts: List[str] = []
+
+    if isinstance(raw_parts, list):
+        for item in raw_parts:
+            if isinstance(item, str) and item.strip():
+                extracted_parts.append(item.strip())
+            elif isinstance(item, dict):
+                p_name = (
+                    item.get("name")
+                    or item.get("part")
+                    or item.get("part_used")
+                    or item.get("part_useddiacritical")
+                    or ""
+                )
+                if isinstance(p_name, str) and p_name.strip():
+                    extracted_parts.append(p_name.strip())
+
+    if not extracted_parts and detected_organ:
+        extracted_parts.append(detected_organ.capitalize())
+
+    used_parts_list = extracted_parts
 
     # Research / Evidence Context
     evidence_context = {

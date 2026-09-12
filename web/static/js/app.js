@@ -607,7 +607,10 @@
     var cases = state.cases || [];
     var html = ''
       + '<div class="section-header"><div><h2 style="font-family:\'Geist\',sans-serif;">Products</h2><p style="font-size:13px;color:var(--text-secondary);margin-top:2px;">Review and manage all active product cases and research profiles.</p></div>'
-      + '<button class="btn btn-primary btn-sm" id="create-case-btn-3">' + icon("add", 14) + ' New Case</button></div>';
+      + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
+      + '<button class="btn btn-secondary btn-sm" id="explore-demo-btn-products" onclick="if(window.exploreDemoCase)window.exploreDemoCase();else if(window.AYUR && window.AYUR.exploreDemoCase)window.AYUR.exploreDemoCase();">' + icon("explore", 14) + ' Explore Demo Case</button>'
+      + '<button class="btn btn-primary btn-sm" id="create-case-btn-3">' + icon("add", 14) + ' New Case</button>'
+      + '</div></div>';
     if (cases.length === 0) {
       html += '<div class="empty-state"><div class="empty-icon">' + icon("inventory_2", 28) + '</div>'
         + '<h3>No Products Found</h3><p>Create your first product case to initiate intelligence analysis.</p></div>';
@@ -657,11 +660,11 @@
     console.log('🔍 CASE DATA INGREDIENTS:', caseData ? caseData.ingredients : undefined);
     
     if (!caseData) {
-        return '<div class="empty-state">'
-            + '<span class="empty-icon">🔍</span>'
-            + '<h3>No Active Case</h3>'
-            + '<p>Create a new product or select an existing one.</p>'
-            + '<button onclick="window.AYUR.state.view=\'dashboard\';window.AYUR.render();">Go to Dashboard</button>'
+        return '<div class="empty-state" style="text-align:center;padding:60px 20px;">'
+            + '<span class="empty-icon" style="font-size:48px;display:block;margin-bottom:12px;">🔍</span>'
+            + '<h3 style="font-size:20px;font-weight:700;color:#f8fafc;margin-bottom:8px;">Select a Product</h3>'
+            + '<p style="font-size:14px;color:#94a3b8;margin-bottom:20px;">Choose a product to open its Case Intelligence workspace.</p>'
+            + '<button class="btn btn-primary" onclick="if(window.AYUR && window.AYUR.state){window.AYUR.state.view=\'product-cases\';window.AYUR.render();}else{state.view=\'product-cases\';render();}">Go to Products</button>'
             + '</div>';
     }
     
@@ -9449,7 +9452,7 @@
         + '<h4 style="margin:0 0 4px;font-size:15px;color:#f8fafc;">Drag & Drop Photo Here</h4>'
         + '<p style="font-size:12.5px;color:#94a3b8;margin:0 0 12px;">Supports JPEG or PNG formats</p>'
         + '<div class="pd-btn-group">'
-        + '<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); document.getElementById(\'pd-camera-input\').click()">' + icon('photo_camera', 16) + ' Take Photo</button>'
+        + '<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); window.openPlantDiscoveryCamera();">' + icon('photo_camera', 16) + ' Take Photo</button>'
         + '<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); document.getElementById(\'pd-file-input\').click()">' + icon('upload_file', 16) + ' Upload Image</button>'
         + '</div>'
         + '</div>';
@@ -9569,6 +9572,19 @@
               + '</div>';
           }
 
+          // Used parts rendering with fallback
+          var usedPartsHtml = '';
+          if (en.used_parts && Array.isArray(en.used_parts) && en.used_parts.length > 0) {
+            usedPartsHtml = '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+              + en.used_parts.map(function (p) {
+                var pStr = typeof p === 'string' ? p : (p && (p.name || p.part || p.part_used) ? (p.name || p.part || p.part_used) : String(p));
+                return '<span class="chip" style="font-size:11px;">' + escapeHtml(pStr) + '</span>';
+              }).join('')
+              + '</div>';
+          } else {
+            usedPartsHtml = '<div style="font-size:12px;color:#94a3b8;font-style:italic;">Used-part information is not available in the current AYUR-INTEL evidence.</div>';
+          }
+
           // Where it is found & Used parts
           html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">'
             + '<div style="padding:14px;background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">'
@@ -9577,9 +9593,8 @@
             + '</div>'
             + '<div style="padding:14px;background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">'
             + '<div style="font-size:11px;font-weight:700;color:#34d399;margin-bottom:4px;">USED PARTS</div>'
-            + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
-            + (en.used_parts || ['Leaf']).map(function (p) { return '<span class="chip" style="font-size:11px;">' + escapeHtml(p) + '</span>'; }).join('')
-            + '</div></div></div>';
+            + usedPartsHtml
+            + '</div></div>';
 
           // Safety & Caution
           if (en.safety_caution) {
@@ -9769,6 +9784,109 @@
     state.passportStep = 0;
     render({ scroll: "top" });
     showToast("🌿 Started New Product Passport with " + commonName, "success");
+  };
+
+  // ----------------------------------------------------------------
+  // In-App Camera UI & MediaStream Track Lifecycle Management
+  // ----------------------------------------------------------------
+  var _pdCameraStream = null;
+
+  window.openPlantDiscoveryCamera = async function () {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      var camInput = document.getElementById("pd-camera-input");
+      if (camInput) camInput.click();
+      else showToast("Camera API not supported in this browser.", "warning");
+      return;
+    }
+
+    window.closePlantDiscoveryCamera();
+
+    var modal = document.getElementById("pd-camera-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "pd-camera-modal";
+      modal.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(15,23,42,0.92);backdrop-filter:blur(8px);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;";
+      modal.innerHTML = ''
+        + '<div style="background:#1e293b;border:1px solid rgba(255,255,255,0.1);border-radius:16px;max-width:540px;width:100%;overflow:hidden;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);display:flex;flex-direction:column;">'
+        + '<div style="padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">'
+        + '<h3 style="margin:0;font-size:16px;color:#f8fafc;display:flex;align-items:center;gap:8px;">' + icon('photo_camera', 20) + ' Capture Plant Photo</h3>'
+        + '<button onclick="window.closePlantDiscoveryCamera()" style="background:none;border:none;color:#94a3b8;cursor:pointer;padding:4px;" aria-label="Close">' + icon('close', 20) + '</button>'
+        + '</div>'
+        + '<div style="position:relative;background:#0f172a;min-height:300px;display:flex;align-items:center;justify-content:center;overflow:hidden;">'
+        + '<video id="pd-camera-video" autoplay playsinline style="width:100%;max-height:400px;object-fit:cover;"></video>'
+        + '<div id="pd-camera-error" style="display:none;padding:20px;text-align:center;color:#fca5a5;font-size:13px;"></div>'
+        + '</div>'
+        + '<div style="padding:16px 20px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:flex-end;gap:12px;background:#1e293b;">'
+        + '<button class="btn btn-secondary" onclick="window.closePlantDiscoveryCamera()">Cancel</button>'
+        + '<button class="btn btn-primary" id="pd-camera-capture-btn" onclick="window.capturePlantDiscoveryPhoto()">' + icon('photo_camera', 18) + ' Capture Photo</button>'
+        + '</div>'
+        + '</div>';
+      document.body.appendChild(modal);
+    } else {
+      modal.style.display = "flex";
+    }
+
+    var videoEl = document.getElementById("pd-camera-video");
+    var errEl = document.getElementById("pd-camera-error");
+    if (errEl) errEl.style.display = "none";
+    if (videoEl) videoEl.style.display = "block";
+
+    try {
+      var constraints = { video: { facingMode: { ideal: "environment" } } };
+      _pdCameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (videoEl) {
+        videoEl.srcObject = _pdCameraStream;
+        await videoEl.play().catch(function () {});
+      }
+    } catch (err) {
+      console.warn("Camera access failed:", err);
+      if (videoEl) videoEl.style.display = "none";
+      if (errEl) {
+        errEl.textContent = "Camera access denied or unavailable (" + (err.message || "Permission error") + "). You can upload an image file instead.";
+        errEl.style.display = "block";
+      }
+    }
+  };
+
+  window.capturePlantDiscoveryPhoto = function () {
+    var videoEl = document.getElementById("pd-camera-video");
+    if (!videoEl || !videoEl.videoWidth) {
+      showToast("Camera frame not ready.", "warning");
+      return;
+    }
+
+    var canvas = document.createElement("canvas");
+    canvas.width = videoEl.videoWidth;
+    canvas.height = videoEl.videoHeight;
+    var ctx = canvas.getContext("2d");
+    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(function (blob) {
+      if (!blob) {
+        showToast("Failed to capture photo frame.", "error");
+        return;
+      }
+      var file = new File([blob], "camera-capture-" + Date.now() + ".jpg", { type: "image/jpeg", lastModified: Date.now() });
+      window.closePlantDiscoveryCamera();
+      window.handlePlantDiscoveryFileSelected({ files: [file] });
+    }, "image/jpeg", 0.9);
+  };
+
+  window.closePlantDiscoveryCamera = function () {
+    if (_pdCameraStream) {
+      try {
+        _pdCameraStream.getTracks().forEach(function (track) {
+          track.stop();
+        });
+      } catch (e) {
+        console.warn("Error stopping camera tracks:", e);
+      }
+      _pdCameraStream = null;
+    }
+    var modal = document.getElementById("pd-camera-modal");
+    if (modal) {
+      modal.style.display = "none";
+    }
   };
 
   // ----------------------------------------------------------------
