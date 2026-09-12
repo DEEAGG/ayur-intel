@@ -1496,18 +1496,42 @@
   // ----------------------------------------------------------------
   // Patent Intelligence View (Master Implementation)
   // ----------------------------------------------------------------
-  async function openPatentIntelligence(caseId) {
+  function openCaseIntelligence(caseId) {
     var s = (window.AYUR && window.AYUR.state) || state;
-    var c = s.currentCase || (s.cases && s.cases.find(function(item) { return item.id === caseId; }));
-    if (!c && s.cases && s.cases.length > 0) {
-      c = s.cases[0];
-      s.currentCase = c;
+    var targetId = caseId || (s.currentCase ? s.currentCase.id : null);
+    if (targetId) {
+      openCase(targetId);
+    } else {
+      s.view = "case-detail";
+      render({ scroll: "top" });
     }
-    if (!c) {
-      showToast('⚠️ Please select a product case first', 'error');
+  }
+  window.openCaseIntelligence = openCaseIntelligence;
+
+  function openPatentIntelligence(caseId) {
+    var s = (window.AYUR && window.AYUR.state) || state;
+    var targetCase = null;
+
+    if (caseId) {
+      targetCase = (s.cases || []).find(function(item) { return String(item.id) === String(caseId); });
+      if (!targetCase && s.currentCase && String(s.currentCase.id) === String(caseId)) {
+        targetCase = s.currentCase;
+      }
+    } else if (s.currentCase) {
+      targetCase = s.currentCase;
+    } else if (s.cases && s.cases.length > 0) {
+      var demoCase = s.cases.find(function(item) { return item.id === "demo-001" || item.is_demo; });
+      if (demoCase) {
+        targetCase = demoCase;
+      }
+    }
+
+    if (!targetCase) {
+      if (typeof showToast === 'function') showToast('⚠️ Please select a product case first', 'warning');
       return;
     }
-    openCaseModule("patentSearchResults", "/api/cases/" + c.id + "/patents", "patent-intelligence");
+    s.currentCase = targetCase;
+    openCaseModule("patentSearchResults", "/api/cases/" + targetCase.id + "/patents", "patent-intelligence");
   }
   window.openPatentIntelligence = openPatentIntelligence;
 

@@ -1061,7 +1061,7 @@ def get_or_run_patent_intelligence(
         db.query(ProductCase)
         .filter(
             ProductCase.public_id == case_public_id,
-            ProductCase.owner_id == owner.id,
+            (ProductCase.owner_id == owner.id) | ((ProductCase.public_id == "demo-001") & (ProductCase.is_demo == True)),
         )
         .first()
     )
