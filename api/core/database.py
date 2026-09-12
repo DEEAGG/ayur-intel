@@ -134,6 +134,8 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_risk_assessments_product_case_id ON risk_assessments (product_case_id)",
             "CREATE INDEX IF NOT EXISTS ix_risk_assessments_public_id ON risk_assessments (public_id)",
             "CREATE INDEX IF NOT EXISTS ix_risk_assessments_owner_id ON risk_assessments (owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_dravya_plants_plant_id ON dravya_plants (plant_id)",
+            "CREATE INDEX IF NOT EXISTS ix_dravya_plants_scientific_name ON dravya_plants (scientific_name)",
         ]
 
 
@@ -166,9 +168,16 @@ def _seed_initial_knowledge_hub_if_empty() -> None:
 
     db = SessionLocal()
     try:
+        from api.models.models import DravyaPlant
+        from api.services.dravya_service import DravyaService
+
+        # Always ensure DRAVYA plants are ingested if missing
+        if db.query(DravyaPlant).count() == 0:
+            DravyaService.ingest_dravya_dataset(db)
+
         total_ev = db.query(KnowledgeEvidence).count()
         if total_ev > 0:
-            return  # Already seeded
+            return  # Evidence already seeded
 
         user = get_or_create_demo_user(db)
 
@@ -182,12 +191,11 @@ def _seed_initial_knowledge_hub_if_empty() -> None:
         p_res = p_adapter.search(query="ayurveda OR medicinal plants", limit=5)
         KnowledgeIngestionService.ingest_results(db, user.id, p_res.results)
 
-        # 3. FSSAI Regulations
-        f_adapter = FssaiRegulationsAdapter()
-        f_res = f_adapter.search(query="", limit=10)
-        KnowledgeIngestionService.ingest_results(db, user.id, f_res.results)
+        # 4. CCRAS DRAVYA Plants (~400 dataset)
+        from api.services.dravya_service import DravyaService
+        DravyaService.ingest_dravya_dataset(db)
 
-        logger.info("Successfully seeded initial Knowledge Hub evidence records.")
+        logger.info("Successfully seeded initial Knowledge Hub evidence records and DRAVYA plants.")
     except Exception as e:
         logger.warning("Initial Knowledge Hub seeding skipped: %s", e)
     finally:

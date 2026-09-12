@@ -686,7 +686,7 @@ def synthesize_risk_with_gemini(
         fallback = generate_fallback_risk_assessment(context, valid_evidence_keys, coverage)
         return fallback, "RULE_ENGINE", None
 
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
     try:
         import google.generativeai as genai

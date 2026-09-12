@@ -6136,6 +6136,36 @@
     }
   ];
 
+  function formatSectionValue(val) {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val;
+    if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+    if (Array.isArray(val)) {
+      return val.map(function (item) {
+        if (typeof item === 'object' && item !== null) {
+          return item.name || item.title || item.text || item.summary || JSON.stringify(item);
+        }
+        return String(item);
+      }).join(', ');
+    }
+    if (typeof val === 'object') {
+      return Object.entries(val).map(function (pair) {
+        var k = pair[0].replace(/_/g, ' ').toUpperCase();
+        var v = pair[1];
+        var vStr = Array.isArray(v) ? v.join(', ') : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+        return k + ': ' + vStr;
+      }).join('\n');
+    }
+    return String(val);
+  }
+
+  function updateKnowledgeSectionVisibility() {
+    document.querySelectorAll('.kh-category-section').forEach(function (sec) {
+      var visibleCards = sec.querySelectorAll('.kh-card:not([style*="display: none"])');
+      sec.style.display = visibleCards.length > 0 ? 'block' : 'none';
+    });
+  }
+
   function filterKnowledgeSources(query) {
     const cards = document.querySelectorAll('.kh-card');
     const q = (query || '').toLowerCase().trim();
@@ -6145,6 +6175,7 @@
       const match = !q || title.includes(q) || desc.includes(q);
       card.style.display = match ? 'block' : 'none';
     });
+    updateKnowledgeSectionVisibility();
   }
 
   function filterKnowledge(category) {
@@ -6157,6 +6188,7 @@
       const show = category === 'all' || card.dataset.category === category;
       card.style.display = show ? 'block' : 'none';
     });
+    updateKnowledgeSectionVisibility();
   }
 
   window.filterKnowledgeSources = filterKnowledgeSources;
@@ -6244,30 +6276,366 @@
     render({ scroll: 'top' });
   }
 
-  function filterSourceLibrarySearch(query) {
+  async function fetchIntegratedKnowledgeSearch(sourceId, query) {
+    if (!query) {
+      state.khIntegratedResult = null;
+      state.khPlantExplanation = null;
+      return;
+    }
+    try {
+      var data = await api('/api/knowledge/integrated-search?source_name=' + encodeURIComponent(sourceId) + '&query=' + encodeURIComponent(query), {
+        method: 'POST'
+      });
+      state.khIntegratedResult = data;
+      state.khPlantExplanation = null;
+
+      // If top plant match exists, pre-fetch any existing persisted plant explanation (0 Gemini calls)
+      if (data && data.plant_match) {
+        try {
+          var exp = await api('/api/knowledge/plant-explanation/' + sourceId + '/' + data.plant_match.plant_id);
+          if (exp && exp.ai_available) {
+            state.khPlantExplanation = exp;
+          }
+        } catch (e) {
+          // Silently skip if no plant explanation exists yet
+        }
+      }
+    } catch (e) {
+      console.warn('Integrated search failed:', e);
+      state.khIntegratedResult = null;
+    }
+  }
+
+  async function filterSourceLibrarySearch(query) {
     state.khSearchQuery = query;
     var q = (query || '').toLowerCase().trim();
     var allItems = state.khLibraryItems || [];
-    if (!q) {
-      state.khFilteredItems = allItems;
+    var sourceId = state.khActiveSource || 'charaka';
+
+    if (sourceId === 'charaka' || sourceId === 'sushruta') {
+      if (q) {
+        await fetchIntegratedKnowledgeSearch(sourceId, query);
+      } else {
+        state.khIntegratedResult = null;
+        state.khPlantExplanation = null;
+        state.khFilteredItems = allItems;
+      }
     } else {
-      state.khFilteredItems = allItems.filter(function (item) {
-        var title = (item.title || '').toLowerCase();
-        var excerpt = (item.excerpt || item.summary || '').toLowerCase();
-        var locator = (item.evidence_locator || '').toLowerCase();
-        var authority = (item.source_authority || item.source_name || '').toLowerCase();
-        return title.indexOf(q) !== -1 || excerpt.indexOf(q) !== -1 || locator.indexOf(q) !== -1 || authority.indexOf(q) !== -1;
-      });
+      state.khIntegratedResult = null;
+      if (!q) {
+        state.khFilteredItems = allItems;
+      } else {
+        state.khFilteredItems = allItems.filter(function (item) {
+          var title = (item.title || '').toLowerCase();
+          var excerpt = (item.excerpt || item.summary || '').toLowerCase();
+          var locator = (item.evidence_locator || '').toLowerCase();
+          var authority = (item.source_authority || item.source_name || '').toLowerCase();
+          return title.indexOf(q) !== -1 || excerpt.indexOf(q) !== -1 || locator.indexOf(q) !== -1 || authority.indexOf(q) !== -1;
+        });
+      }
     }
 
     var contentEl = document.getElementById('kh-library-items-list');
     var countEl = document.getElementById('kh-search-count-pill');
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || { title: 'Source Library', id: 'charaka' };
+
     if (contentEl) {
-      contentEl.innerHTML = renderLibraryItemsContent(state.khFilteredItems);
+      if (state.khIntegratedResult && q) {
+        contentEl.innerHTML = renderIntegratedSearchResult(state.khIntegratedResult, sourceMeta);
+      } else {
+        contentEl.innerHTML = renderLibraryItemsContent(state.khFilteredItems);
+      }
     }
+
     if (countEl) {
-      countEl.textContent = 'Showing ' + (state.khFilteredItems ? state.khFilteredItems.length : 0) + ' of ' + allItems.length + ' evidence records';
+      if (state.khIntegratedResult && state.khIntegratedResult.plant_match) {
+        countEl.textContent = 'Integrated match: ' + state.khIntegratedResult.plant_match.primary_name + ' (DRAVYA + ' + sourceMeta.title + ')';
+      } else {
+        countEl.textContent = 'Showing ' + (state.khFilteredItems ? state.khFilteredItems.length : 0) + ' of ' + allItems.length + ' evidence records';
+      }
     }
+  }
+
+  async function generatePlantExplanationForSource(sourceId, plantId, forceRegenerate) {
+    var btn = document.getElementById('kh-explain-plant-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = icon('sync', 16) + ' Generating Grounded AI Research Explanation...';
+    }
+    try {
+      var data = await api('/api/knowledge/plant-explanation/generate?source_name=' + encodeURIComponent(sourceId) + '&plant_id=' + plantId + '&force_regenerate=' + (forceRegenerate ? 'true' : 'false'), {
+        method: 'POST'
+      });
+      state.khPlantExplanation = data;
+      toast('Grounded AI research explanation updated.', 'success');
+    } catch (e) {
+      toast('Failed to generate plant explanation: ' + e.message, 'error');
+    }
+
+    var contentEl = document.getElementById('kh-library-items-list');
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || { title: 'Source Library', id: 'charaka' };
+    if (contentEl && state.khIntegratedResult) {
+      contentEl.innerHTML = renderIntegratedSearchResult(state.khIntegratedResult, sourceMeta);
+    }
+  }
+
+  function renderIntegratedSearchResult(data, sourceMeta) {
+    if (!data) return '';
+    var plant = data.plant_match;
+    var classicalEvidence = data.classical_evidence || [];
+    var hasClassicalMatch = data.has_classical_match;
+    var query = data.query || state.khSearchQuery || '';
+
+    if (!plant && classicalEvidence.length === 0) {
+      return `
+        <div class="kh-notice-box" style="margin-top:20px;padding:24px;text-align:center;">
+          <span class="material-symbols-outlined" style="font-size:32px;color:#94a3b8;margin-bottom:8px;">search_off</span>
+          <h4 style="margin:0 0 6px 0;color:#f8fafc;font-size:16px;">No matching plant or evidence found</h4>
+          <p style="margin:0;font-size:13px;color:#94a3b8;">
+            No record matching "<strong>${escapeHtml(query)}</strong>" was found in AYUR-INTEL's current curated 400-plant DRAVYA dataset or ${escapeHtml(sourceMeta.title)} evidence set.
+          </p>
+        </div>
+      `;
+    }
+
+    var plantHeaderHtml = '';
+    var plantProfileHtml = '';
+    if (plant) {
+      var displayHeading = query || plant.primary_name;
+      plantHeaderHtml = `
+        <div class="kh-plant-header">
+          <div>
+            <div style="font-size:11px;font-weight:800;letter-spacing:0.6px;color:#34d399;text-transform:uppercase;margin-bottom:4px;">
+              MATCHED PLANT KNOWLEDGE PROFILE
+            </div>
+            <h2 style="font-size:24px;font-weight:800;color:#f8fafc;margin:0 0 2px 0;">
+              🌱 ${escapeHtml(displayHeading)}
+            </h2>
+            ${(plant.primary_name && plant.primary_name.toLowerCase() !== displayHeading.toLowerCase()) ? `
+              <div style="font-size:13px;color:#94a3b8;margin-bottom:2px;">CCRAS recorded name: <strong style="color:#cbd5e1;">${escapeHtml(plant.primary_name)}</strong></div>
+            ` : ''}
+            <div style="font-size:14px;font-style:italic;color:#34d399;font-weight:600;">
+              ${escapeHtml(plant.scientific_name)} ${plant.family ? '· Family: ' + escapeHtml(plant.family) : ''}
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+            <span class="kh-card-badge kh-card-badge-live">DRAVYA / CCRAS ENRICHED</span>
+            ${plant.url ? `<a class="btn btn-secondary btn-xs" href="${escapeHtml(plant.url)}" target="_blank" rel="noopener">View DRAVYA Source ↗</a>` : ''}
+          </div>
+        </div>
+      `;
+
+      var props = plant.ayurvedic_properties || {};
+      var dgItemsHtml = '';
+      ['rasa', 'guna', 'virya', 'vipaka', 'karma', 'doshakarma', 'mahakashaya', 'varga'].forEach(function (propKey) {
+        var items = props[propKey];
+        if (!items || items.length === 0) return;
+        var label = propKey.toUpperCase();
+        var tagList = Array.isArray(items) ? items.map(function (it) {
+          return typeof it === 'object' ? (it.name || it.val || JSON.stringify(it)) : String(it);
+        }).join(', ') : String(items);
+
+        dgItemsHtml += `
+          <div class="kh-dg-box">
+            <div class="kh-dg-title">${escapeHtml(label)}</div>
+            <div class="kh-dg-tags">${escapeHtml(tagList)}</div>
+          </div>
+        `;
+      });
+
+      var aliasesList = plant.aliases || [];
+
+      plantProfileHtml = `
+        <div class="kh-section-card">
+          <div class="kh-section-header">
+            <div>
+              <div class="kh-source-label">SOURCE: DRAVYA / CCRAS PLANT KNOWLEDGE</div>
+              <h3 class="kh-section-title">🌿 Structured Plant Profile</h3>
+            </div>
+          </div>
+
+          <div class="kh-profile-grid">
+            <div class="kh-prop-box">
+              <div class="kh-prop-label">CCRAS RECORDED NAME</div>
+              <div class="kh-prop-val">${escapeHtml(plant.primary_name)}</div>
+            </div>
+            <div class="kh-prop-box">
+              <div class="kh-prop-label">BOTANICAL NAME</div>
+              <div class="kh-prop-val"><em>${escapeHtml(plant.scientific_name)}</em></div>
+            </div>
+            ${plant.family ? `
+              <div class="kh-prop-box">
+                <div class="kh-prop-label">FAMILY</div>
+                <div class="kh-prop-val">${escapeHtml(plant.family)}</div>
+              </div>
+            ` : ''}
+            ${(plant.sanskrit_synonyms && plant.sanskrit_synonyms.length > 0) ? `
+              <div class="kh-prop-box">
+                <div class="kh-prop-label">SANSKRIT SYNONYMS</div>
+                <div class="kh-prop-val">${plant.sanskrit_synonyms.slice(0, 6).map(function(s){ return escapeHtml(s); }).join(' · ')}</div>
+              </div>
+            ` : ''}
+            ${aliasesList.length > 0 ? `
+              <div class="kh-prop-box" style="grid-column: 1 / -1;">
+                <div class="kh-prop-label">SYNONYMS &amp; VERNACULAR NAMES</div>
+                <div class="kh-alias-chips">
+                  ${aliasesList.slice(0, 14).map(function (a) { return '<span class="chip" style="font-size:11px;background:rgba(255,255,255,0.06);color:#cbd5e1;">' + escapeHtml(a) + '</span>'; }).join('')}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+
+          ${dgItemsHtml ? `
+            <div class="kh-dravyaguna-card">
+              <div style="font-size:11.5px;font-weight:800;color:#34d399;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">
+                ⚖️ AYURVEDIC DRAVYAGUNA PROPERTIES
+              </div>
+              <div class="kh-dravyaguna-grid">
+                ${dgItemsHtml}
+              </div>
+            </div>
+          ` : ''}
+
+          ${(plant.therapeutic_usage && plant.therapeutic_usage.length > 0) ? `
+            <div style="margin-top:14px;padding:12px;background:rgba(15,23,42,0.5);border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:11px;font-weight:700;color:#94a3b8;margin-bottom:6px;">THERAPEUTIC INDICATIONS (DRAVYA):</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                ${plant.therapeutic_usage.slice(0, 10).map(function (tu) {
+                  var name = typeof tu === 'object' ? (tu.name || JSON.stringify(tu)) : String(tu);
+                  return '<span class="chip" style="background:rgba(52,211,153,0.12);color:#34d399;font-size:11.5px;">' + escapeHtml(name) + '</span>';
+                }).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    var classicalEvidenceHtml = '';
+    if (hasClassicalMatch && classicalEvidence.length > 0) {
+      var evItemsHtml = classicalEvidence.map(function (ev, idx) {
+        return `
+          <div class="kh-card" style="margin-bottom:12px;background:rgba(15,23,42,0.6);border-color:rgba(52,211,153,0.2);">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+              <span style="font-size:12px;font-weight:700;color:#34d399;">
+                Passage #${idx + 1}: ${escapeHtml(ev.evidence_locator || ev.source_identifier || 'Classical Passage')}
+              </span>
+              ${ev.official_url ? `<a href="${escapeHtml(ev.official_url)}" target="_blank" rel="noopener" style="font-size:11px;color:#38bdf8;">Read Original Source ↗</a>` : ''}
+            </div>
+            <div style="font-size:13.5px;color:#f8fafc;line-height:1.5;margin-bottom:8px;">
+              ${escapeHtml(ev.title || 'Classical Passage')}
+            </div>
+            <div class="kh-evidence-text" style="font-size:12.5px;">
+              ${escapeHtml(ev.excerpt || 'Raw passage excerpt preserved in database.')}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      classicalEvidenceHtml = `
+        <div class="kh-section-card">
+          <div class="kh-section-header">
+            <div>
+              <div class="kh-source-label">SOURCE: ${escapeHtml(sourceMeta.title.toUpperCase())}</div>
+              <h3 class="kh-section-title">📜 Matching Classical Passages</h3>
+            </div>
+            <span class="chip" style="background:rgba(52,211,153,0.15);color:#34d399;font-size:11.5px;font-weight:600;">
+              ${classicalEvidence.length} matching passages found
+            </span>
+          </div>
+          <div>${evItemsHtml}</div>
+        </div>
+      `;
+    } else {
+      var plantNameStr = plant ? plant.primary_name : query;
+      classicalEvidenceHtml = `
+        <div class="kh-section-card">
+          <div class="kh-section-header">
+            <div>
+              <div class="kh-source-label">SOURCE: ${escapeHtml(sourceMeta.title.toUpperCase())}</div>
+              <h3 class="kh-section-title">📜 Classical Text Evidence</h3>
+            </div>
+          </div>
+          <div class="kh-notice-box" style="background:rgba(30,41,59,0.6);border-color:rgba(255,255,255,0.12);">
+            <span class="material-symbols-outlined" style="font-size:20px;color:#94a3b8;">info</span>
+            <div style="font-size:13.5px;color:#cbd5e1;">
+              No matching <strong>${escapeHtml(plantNameStr)}</strong> passage was found in AYUR-INTEL's current curated ${escapeHtml(sourceMeta.title)} evidence set.
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    var aiExplanationHtml = '';
+    if (plant) {
+      var expData = state.khPlantExplanation;
+      var hasExp = expData && expData.ai_available;
+
+      var groundingLabel = hasClassicalMatch
+        ? `${sourceMeta.title} + DRAVYA / CCRAS`
+        : 'DRAVYA / CCRAS';
+
+      if (hasExp) {
+        var expSections = expData.structured_sections || {};
+        aiExplanationHtml = `
+          <div class="kh-section-card" style="border-color:rgba(52,211,153,0.35);background:linear-gradient(135deg, rgba(15,23,42,0.85) 0%, rgba(30,41,59,0.9) 100%);">
+            <div class="kh-section-header">
+              <div>
+                <div class="kh-ai-badge" style="margin-bottom:6px;">✨ AI EXPLANATION · GROUNDED IN SOURCE EVIDENCE</div>
+                <h3 class="kh-section-title">AI Research Explanation for ${escapeHtml(plant.primary_name)}</h3>
+                <div style="font-size:11.5px;color:#34d399;margin-top:2px;">GROUNDED IN: ${escapeHtml(groundingLabel)}</div>
+              </div>
+              <button class="btn btn-secondary btn-xs" onclick="generatePlantExplanationForSource('${escapeHtml(sourceMeta.id)}', ${plant.plant_id}, true)">
+                Regenerate Explanation
+              </button>
+            </div>
+
+            <p style="font-size:14px;color:#f8fafc;line-height:1.6;margin:0 0 16px 0;">${escapeHtml(expData.summary_60s)}</p>
+
+            ${Object.keys(expSections).map(function (key) {
+              if (key === 'summary_60s' || key === 'evidence_references') return '';
+              var val = expSections[key];
+              if (!val) return '';
+              var label = key.replace(/_/g, ' ').toUpperCase();
+              var valContent = formatSectionValue(val);
+              return `
+                <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:14px;margin-bottom:10px;">
+                  <div style="font-size:11px;font-weight:700;color:#34d399;letter-spacing:0.5px;margin-bottom:4px;">${escapeHtml(label)}</div>
+                  <div style="font-size:13px;color:#cbd5e1;line-height:1.5;white-space:pre-wrap;">${escapeHtml(valContent)}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      } else {
+        aiExplanationHtml = `
+          <div class="kh-section-card" style="border-color:rgba(255,255,255,0.15);background:rgba(30,41,59,0.5);">
+            <div class="kh-section-header">
+              <div>
+                <div class="kh-source-label">GROUNDED AI ANALYSIS</div>
+                <h3 class="kh-section-title">Explain ${escapeHtml(plant.primary_name)} in Context</h3>
+                <div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">GROUNDING SOURCES: ${escapeHtml(groundingLabel)}</div>
+              </div>
+            </div>
+            <p style="font-size:13.5px;color:#cbd5e1;line-height:1.5;margin:0 0 14px 0;">
+              Click below to synthesize a grounded AI research explanation connecting the DRAVYA plant profile and available ${escapeHtml(sourceMeta.title)} evidence.
+            </p>
+            <button class="btn btn-primary btn-sm" id="kh-explain-plant-btn" onclick="generatePlantExplanationForSource('${escapeHtml(sourceMeta.id)}', ${plant.plant_id}, false)">
+              ✨ Explain This Plant in Context
+            </button>
+          </div>
+        `;
+      }
+    }
+
+    return `
+      <div class="kh-integrated-result">
+        ${plantHeaderHtml}
+        ${plantProfileHtml}
+        ${classicalEvidenceHtml}
+        ${aiExplanationHtml}
+      </div>
+    `;
   }
 
   async function openKnowledgeReader(docId) {
@@ -6577,7 +6945,7 @@
       var val = sections[key];
       if (!val) return;
       var label = key.replace(/_/g, ' ').toUpperCase();
-      var valContent = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
+      var valContent = formatSectionValue(val);
       sectionsHtml += `
         <div style="background:rgba(15,23,42,0.5);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px;margin-bottom:12px;">
           <div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:#34d399;margin-bottom:6px;">${escapeHtml(label)}</div>
@@ -6759,11 +7127,22 @@
       return renderPatentSourceInfoView();
     }
 
+    var categories = [
+      { id: 'classical', title: '📜 CLASSICAL WISDOM', sources: knowledgeSources.filter(s => s.category === 'classical') },
+      { id: 'research', title: '🔬 RESEARCH EVIDENCE', sources: knowledgeSources.filter(s => s.category === 'research') },
+      { id: 'regulatory', title: '📋 REGULATORY INTELLIGENCE', sources: knowledgeSources.filter(s => s.category === 'regulatory') },
+      { id: 'patent', title: '📜 PATENT LITERATURE', sources: knowledgeSources.filter(s => s.category === 'patent') }
+    ];
+
     const html = `
         <div class="knowledge-hub">
             <div class="kh-header">
-                <h2>📚 Knowledge Hub</h2>
-                <p class="kh-subtitle">Ayurvedic classical texts, research papers, and regulatory sources</p>
+                <h2>📚 KNOWLEDGE HUB</h2>
+                <p class="kh-subtitle">Evidence-backed Ayurvedic research across classical texts, scientific literature, regulatory sources and patent intelligence.</p>
+                <div class="kh-trust-line">
+                    <span class="material-symbols-outlined" style="font-size:16px;">verified</span>
+                    <span>Official/credible sources provide the evidence. AI helps explain and connect it.</span>
+                </div>
             </div>
             
             <!-- Search Bar -->
@@ -6775,35 +7154,42 @@
             <!-- Filter Chips -->
             <div class="kh-filters">
                 <button class="kh-filter-chip active" data-filter="all" onclick="filterKnowledge('all')">All</button>
-                <button class="kh-filter-chip" data-filter="classical" onclick="filterKnowledge('classical')">📜 Classical Texts</button>
-                <button class="kh-filter-chip" data-filter="research" onclick="filterKnowledge('research')">🔬 Research</button>
-                <button class="kh-filter-chip" data-filter="regulatory" onclick="filterKnowledge('regulatory')">📋 Regulatory</button>
-                <button class="kh-filter-chip" data-filter="patent" onclick="filterKnowledge('patent')">📜 Patents</button>
+                <button class="kh-filter-chip" data-filter="classical" onclick="filterKnowledge('classical')">📜 Classical Wisdom</button>
+                <button class="kh-filter-chip" data-filter="research" onclick="filterKnowledge('research')">🔬 Research Evidence</button>
+                <button class="kh-filter-chip" data-filter="regulatory" onclick="filterKnowledge('regulatory')">📋 Regulatory Intelligence</button>
+                <button class="kh-filter-chip" data-filter="patent" onclick="filterKnowledge('patent')">📜 Patent Literature</button>
             </div>
             
-            <!-- Sources Grid -->
-            <div class="kh-grid" id="kh-grid">
-                ${knowledgeSources.map(source => {
-                    let onclickAction = '';
-                    if (source.id === 'patent') {
-                        onclickAction = "openPatentSourceInfo()";
-                    } else if (source.isLive) {
-                        onclickAction = `openKnowledgeLibrary('${source.id}')`;
-                    } else {
-                        onclickAction = `openExpandingCoverageInfo('${source.id}')`;
-                    }
-                    return `
-                    <div class="kh-card" data-category="${source.category}" data-title="${source.title.toLowerCase()}" data-desc="${source.description.toLowerCase()}">
-                        <div class="kh-card-icon">${source.icon}</div>
-                        <div class="kh-card-content">
-                            <h4>${source.title}</h4>
-                            <span class="kh-card-badge ${source.badgeClass}">${source.badgeText}</span>
-                            <p>${source.description}</p>
-                            <button class="kh-card-btn" onclick="${onclickAction}">Explore →</button>
+            <!-- Grouped Sources Sections -->
+            <div id="kh-sections">
+                ${categories.map(cat => `
+                    <div class="kh-category-section" data-category="${cat.id}">
+                        <div class="kh-category-title">${cat.title}</div>
+                        <div class="kh-grid">
+                            ${cat.sources.map(source => {
+                                let onclickAction = '';
+                                if (source.id === 'patent') {
+                                    onclickAction = "openPatentSourceInfo()";
+                                } else if (source.isLive) {
+                                    onclickAction = `openKnowledgeLibrary('${source.id}')`;
+                                } else {
+                                    onclickAction = `openExpandingCoverageInfo('${source.id}')`;
+                                }
+                                return `
+                                <div class="kh-card" data-category="${source.category}" data-title="${source.title.toLowerCase()}" data-desc="${source.description.toLowerCase()}">
+                                    <div class="kh-card-icon">${source.icon}</div>
+                                    <div class="kh-card-content">
+                                        <h4>${source.title}</h4>
+                                        <span class="kh-card-badge ${source.badgeClass}">${source.badgeText}</span>
+                                        <p>${source.description}</p>
+                                        <button class="kh-card-btn" onclick="${onclickAction}">Explore →</button>
+                                    </div>
+                                </div>
+                                `;
+                            }).join('')}
                         </div>
                     </div>
-                    `;
-                }).join('')}
+                `).join('')}
             </div>
         </div>
     `;

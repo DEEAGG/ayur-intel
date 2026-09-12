@@ -273,3 +273,73 @@ def generate_product_source_analysis(
     return KnowledgeSynthesisService.generate_product_source_analysis(
         db=db, source_name=source_name, case_id=case_id, force_regenerate=force_regenerate
     )
+
+
+@router.post(
+    "/integrated-search",
+    summary="Integrated Search across DRAVYA ~400 plants and Classical Evidence",
+)
+def integrated_knowledge_search(
+    source_name: str = Query("CHARAKA", description="Source name (e.g. CHARAKA, SUSHRUTA)"),
+    query: str = Query("", description="Search term (e.g. Ashwagandha, Brahmi)"),
+    limit: int = Query(10, description="Max results limit"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Integrated Search returning matched DRAVYA plant profile and matching classical evidence. 0 Gemini calls."""
+    from api.services.knowledge_synthesis_service import KnowledgeSynthesisService
+    return KnowledgeSynthesisService.search_integrated_knowledge(
+        db=db, source_name=source_name, query=query, limit=limit
+    )
+
+
+@router.get(
+    "/plant/{plant_id}",
+    summary="Get DRAVYA Plant Profile Details",
+)
+def get_dravya_plant(
+    plant_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Fetch structured DRAVYA plant profile by plant_id."""
+    from api.services.dravya_service import DravyaService
+    plant = DravyaService.get_plant_by_id(db, plant_id)
+    if not plant:
+        raise HTTPException(status_code=404, detail="Plant record not found in DRAVYA dataset.")
+    return plant
+
+
+@router.get(
+    "/plant-explanation/{source_name}/{plant_id}",
+    summary="GET Grounded Plant Research Explanation (GET-First, 0 Gemini Calls)",
+)
+def get_plant_explanation(
+    source_name: str,
+    plant_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """GET-first Plant Research Explanation endpoint. 0 Gemini calls on GET."""
+    from api.services.knowledge_synthesis_service import KnowledgeSynthesisService
+    return KnowledgeSynthesisService.get_plant_explanation(
+        db=db, source_name=source_name, plant_id=plant_id
+    )
+
+
+@router.post(
+    "/plant-explanation/generate",
+    summary="Generate Grounded Plant Research Explanation (Calls Gemini on explicit request)",
+)
+def generate_plant_explanation(
+    source_name: str = Query(..., description="Source name (e.g. CHARAKA, SUSHRUTA)"),
+    plant_id: int = Query(..., description="DRAVYA Plant ID"),
+    force_regenerate: bool = Query(False, description="Force re-generation"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Explicit POST endpoint to generate AI plant research explanation grounded in evidence."""
+    from api.services.knowledge_synthesis_service import KnowledgeSynthesisService
+    return KnowledgeSynthesisService.generate_plant_explanation(
+        db=db, source_name=source_name, plant_id=plant_id, force_regenerate=force_regenerate
+    )

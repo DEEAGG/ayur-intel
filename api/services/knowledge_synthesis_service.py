@@ -327,7 +327,7 @@ class KnowledgeSynthesisService:
             logger.info("Gemini API key not configured — returning raw evidence fallback.")
             return cls._build_evidence_fallback(document_identifier, category, evidence_list, source_obj)
 
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
         try:
             import google.generativeai as genai
@@ -609,7 +609,7 @@ RETRIEVED EVIDENCE BOUNDED CONTEXT:
         if not api_key:
             return cls._build_evidence_fallback(doc_id, "CLASSICAL", evidence_list, src_obj, validation_notes="Gemini API key not configured")
 
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
@@ -675,3 +675,319 @@ RETRIEVED EVIDENCE BOUNDED CONTEXT FOR SOURCE '{source_name}':
         except Exception as e:
             logger.warning("Product-Source analysis failed: %s", e)
             return cls._build_evidence_fallback(doc_id, "CLASSICAL", evidence_list, src_obj, validation_notes=f"Analysis failed: {str(e)}")
+
+    @classmethod
+    def search_integrated_knowledge(
+        cls, db: Session, source_name: str, query: str, limit: int = 10
+    ) -> Dict[str, Any]:
+        """Integrated Search across DRAVYA plant dataset (~400 plants) and Classical Samhita evidence.
+
+        Returns a single unified payload containing matched DRAVYA plant profile and matching classical evidence.
+        0 Gemini calls. 0 External HTTP calls during search.
+        """
+        from api.services.dravya_service import DravyaService
+
+        q_clean = (query or "").strip()
+        total_plants = DravyaService.get_plant_count(db)
+
+        if not q_clean:
+            return {
+                "query": "",
+                "source_name": source_name,
+                "total_dravya_plants": total_plants,
+                "plant_match": None,
+                "plant_matches": [],
+                "classical_evidence": [],
+                "has_classical_match": False,
+                "source_provenance_dravya": "DRAVYA / CCRAS Plant Knowledge",
+                "source_provenance_classical": f"{source_name.title()} Samhita Evidence",
+            }
+
+        # 1. Search DRAVYA plants
+        dravya_matches = DravyaService.search_plants(db, q_clean, limit=5)
+        top_plant = dravya_matches[0] if dravya_matches else None
+
+        # 2. Search Classical Evidence for query in KnowledgeEvidence
+        src_name_upper = source_name.upper().strip()
+        source_filter_terms = ["CHARAKA", "SUSHRUTA"] if src_name_upper not in ("CHARAKA", "SUSHRUTA") else [src_name_upper]
+
+        evidence_rows = (
+            db.query(KnowledgeEvidence)
+            .filter(
+                (KnowledgeEvidence.source_identifier.ilike(f"%{q_clean}%"))
+                | (KnowledgeEvidence.title.ilike(f"%{q_clean}%"))
+                | (KnowledgeEvidence.evidence_locator.ilike(f"%{q_clean}%"))
+                | (KnowledgeEvidence.excerpt.ilike(f"%{q_clean}%"))
+            )
+            .all()
+        )
+
+        # Filter by source if needed
+        filtered_ev = []
+        for ev in evidence_rows:
+            ev_src_name = (ev.source.name if ev.source else "").upper()
+            ev_ident = (ev.source_identifier or "").upper()
+            ev_title = (ev.title or "").upper()
+
+            if any(term in ev_src_name or term in ev_ident or term in ev_title for term in source_filter_terms):
+                filtered_ev.append(ev)
+
+        # If top_plant matched, also search classical evidence by top plant aliases
+        if top_plant:
+            plant_alias_terms = [top_plant["primary_name"], top_plant["scientific_name"]] + top_plant.get("aliases", [])[:3]
+            for term in plant_alias_terms:
+                if not term or len(term) < 3:
+                    continue
+                term_rows = (
+                    db.query(KnowledgeEvidence)
+                    .filter(
+                        (KnowledgeEvidence.source_identifier.ilike(f"%{term}%"))
+                        | (KnowledgeEvidence.title.ilike(f"%{term}%"))
+                        | (KnowledgeEvidence.excerpt.ilike(f"%{term}%"))
+                    )
+                    .all()
+                )
+                for ev in term_rows:
+                    if ev not in filtered_ev:
+                        ev_src_name = (ev.source.name if ev.source else "").upper()
+                        ev_ident = (ev.source_identifier or "").upper()
+                        ev_title = (ev.title or "").upper()
+                        if any(sterm in ev_src_name or sterm in ev_ident or sterm in ev_title for sterm in source_filter_terms):
+                            filtered_ev.append(ev)
+
+        classical_evidence_items = []
+        for ev in filtered_ev[:limit]:
+            classical_evidence_items.append({
+                "id": ev.public_id,
+                "title": ev.title or "Classical Passage",
+                "source_identifier": ev.source_identifier or ev.public_id,
+                "evidence_locator": ev.evidence_locator or "",
+                "excerpt": ev.excerpt or "",
+                "confidence": ev.confidence or "HIGH",
+                "publication_date": ev.publication_date or "",
+                "source_version": ev.source_version or "",
+                "official_url": ev.source.url if ev.source else "",
+            })
+
+        return {
+            "query": q_clean,
+            "source_name": source_name,
+            "total_dravya_plants": total_plants,
+            "plant_match": top_plant,
+            "plant_matches": dravya_matches,
+            "classical_evidence": classical_evidence_items,
+            "has_classical_match": len(classical_evidence_items) > 0,
+            "source_provenance_dravya": "DRAVYA / CCRAS Plant Knowledge",
+            "source_provenance_classical": f"{source_name.title()} Samhita Evidence",
+        }
+
+    @classmethod
+    def get_plant_explanation(
+        cls, db: Session, source_name: str, plant_id: int
+    ) -> Dict[str, Any]:
+        """GET-First Persistence Lifecycle for Plant Grounded Research Explanation.
+
+        0 Gemini calls on GET.
+        Returns persisted synthesis if current; otherwise returns structured raw fallback.
+        """
+        from api.services.dravya_service import DravyaService
+
+        doc_id = f"PLANT_EXPLANATION_{source_name.upper()}_{plant_id}"
+        plant = DravyaService.get_plant_by_id(db, plant_id)
+        if not plant:
+            return cls._build_evidence_fallback(doc_id, "TRADITIONAL_KNOWLEDGE", [], None, validation_notes="Plant record not found.")
+
+        # Match classical evidence
+        integrated = cls.search_integrated_knowledge(db, source_name, plant["primary_name"])
+        class_ev = integrated.get("classical_evidence", [])
+
+        plant_hash = plant.get("content_hash", "")
+        ev_ids = [e["id"] for e in class_ev]
+        current_fp = hashlib.sha256(f"{plant_hash}_{','.join(sorted(ev_ids))}".encode("utf-8")).hexdigest()
+
+        syn_record = (
+            db.query(KnowledgeSynthesis)
+            .filter(KnowledgeSynthesis.document_identifier == doc_id)
+            .order_by(KnowledgeSynthesis.updated_at.desc())
+            .first()
+        )
+
+        if syn_record:
+            is_stale = syn_record.evidence_fingerprint != current_fp
+            if is_stale and not syn_record.is_stale:
+                syn_record.is_stale = True
+                db.add(syn_record)
+                db.commit()
+
+            sections = {}
+            if syn_record.structured_sections_json:
+                try:
+                    sections = json.loads(syn_record.structured_sections_json)
+                except Exception:
+                    sections = {}
+
+            return {
+                "id": syn_record.public_id,
+                "document_identifier": doc_id,
+                "source_type": "TRADITIONAL_KNOWLEDGE",
+                "plant": plant,
+                "classical_evidence": class_ev,
+                "title": syn_record.title,
+                "summary_60s": syn_record.summary_60s,
+                "structured_sections": sections,
+                "evidence_fingerprint": syn_record.evidence_fingerprint,
+                "grounding_status": syn_record.grounding_status,
+                "validation_notes": syn_record.validation_notes,
+                "is_stale": is_stale,
+                "model_used": syn_record.model_used,
+                "generated_at": syn_record.generated_at.isoformat() if syn_record.generated_at else "",
+                "ai_available": True,
+                "grounded_sources": f"{source_name.title()} Samhita + DRAVYA / CCRAS" if class_ev else "DRAVYA / CCRAS",
+            }
+
+        # No persisted synthesis -> return raw fallback
+        fallback_sections = {
+            "summary_60s": f"Grounded research explanation for {plant['primary_name']} ({plant['scientific_name']}) in context of {source_name.title()} Samhita.",
+            "plant_at_a_glance": f"{plant['primary_name']} ({plant['scientific_name']}) belongs to family {plant['family']}.",
+            "what_dravya_records": f"DRAVYA documents Rasa: {plant['ayurvedic_properties'].get('rasa')}, Virya: {plant['ayurvedic_properties'].get('virya')}, Karma: {len(plant['ayurvedic_properties'].get('karma', []))} classical actions.",
+            "classical_context": f"{len(class_ev)} matching passages in current curated {source_name.title()} evidence set." if class_ev else f"No matching {plant['primary_name']} passage found in current curated {source_name.title()} evidence set.",
+        }
+
+        return {
+            "id": None,
+            "document_identifier": doc_id,
+            "source_type": "TRADITIONAL_KNOWLEDGE",
+            "plant": plant,
+            "classical_evidence": class_ev,
+            "title": f"Plant Research Explanation: {plant['primary_name']}",
+            "summary_60s": fallback_sections["summary_60s"],
+            "structured_sections": fallback_sections,
+            "evidence_fingerprint": current_fp,
+            "grounding_status": "UNAVAILABLE",
+            "validation_notes": "AI explanation not generated yet. Preserved DRAVYA plant record and classical evidence.",
+            "is_stale": False,
+            "model_used": None,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "ai_available": False,
+            "grounded_sources": f"{source_name.title()} Samhita + DRAVYA / CCRAS" if class_ev else "DRAVYA / CCRAS",
+        }
+
+    @classmethod
+    def generate_plant_explanation(
+        cls, db: Session, source_name: str, plant_id: int, force_regenerate: bool = False
+    ) -> Dict[str, Any]:
+        """Explicit POST generation endpoint for Plant Grounded Research Explanation.
+
+        Calls Gemini ONLY when explicitly triggered.
+        Gemini receives strictly bounded DRAVYA plant profile + matched classical evidence.
+        """
+        from api.services.dravya_service import DravyaService
+
+        doc_id = f"PLANT_EXPLANATION_{source_name.upper()}_{plant_id}"
+        plant = DravyaService.get_plant_by_id(db, plant_id)
+        if not plant:
+            return cls.get_plant_explanation(db, source_name, plant_id)
+
+        integrated = cls.search_integrated_knowledge(db, source_name, plant["primary_name"])
+        class_ev = integrated.get("classical_evidence", [])
+
+        plant_hash = plant.get("content_hash", "")
+        ev_ids = [e["id"] for e in class_ev]
+        combined_fp = hashlib.sha256(f"{plant_hash}_{','.join(sorted(ev_ids))}".encode("utf-8")).hexdigest()
+
+        if not force_regenerate:
+            existing = (
+                db.query(KnowledgeSynthesis)
+                .filter(
+                    KnowledgeSynthesis.document_identifier == doc_id,
+                    KnowledgeSynthesis.evidence_fingerprint == combined_fp,
+                    KnowledgeSynthesis.is_stale == False,
+                )
+                .first()
+            )
+            if existing and existing.grounding_status in ("GROUNDED", "PARTIALLY_GROUNDED"):
+                return cls.get_plant_explanation(db, source_name, plant_id)
+
+        api_key = (
+            os.getenv("GEMINI_API_KEY")
+            or settings.GEMINI_API_KEY
+            or settings.AYURINTEL_GEMINI_API_KEY
+        )
+
+        if not api_key:
+            logger.info("Gemini API key not configured — returning raw plant fallback.")
+            return cls.get_plant_explanation(db, source_name, plant_id)
+
+        model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config={"response_mime_type": "application/json"}
+            )
+
+            grounding_sources_str = f"{source_name.title()} Samhita + DRAVYA / CCRAS" if class_ev else "DRAVYA / CCRAS"
+
+            prompt = f"""You are AYUR-INTEL's Grounded Traditional Knowledge Research Engine.
+Analyze the provided DRAVYA Plant Profile and matching Classical Samhita Evidence for '{plant['primary_name']}' ({plant['scientific_name']}).
+
+CRITICAL GUARDRAILS:
+1. Ground your response STRICTLY in the provided DRAVYA record and classical evidence below.
+2. DO NOT browse externally or introduce unsupported modern efficacy claims.
+3. DO NOT claim that classical passages or DRAVYA records equal modern clinical proof. Use language such as "The DRAVYA record documents...", "The classical evidence indicates...", "This traditional context suggests...".
+4. If NO classical evidence matches, explicitly note that no matching passage was present in the current curated classical evidence set.
+
+Return a valid JSON object matching this EXACT schema:
+{{
+  "summary_60s": "Concise 2-3 sentence research overview connecting plant profile and classical evidence.",
+  "plant_at_a_glance": "Summary of botanical identity, family, and primary Ayurvedic attributes.",
+  "what_dravya_records": "Detailed synthesis of Rasa, Guna, Virya, Vipaka, Karma, and Doshakarma documented in DRAVYA.",
+  "classical_context": "Analysis of matching classical passages (or explicit zero-match note if none present).",
+  "how_sources_relate": "Synthesis of how DRAVYA properties align with traditional usage.",
+  "product_research_relevance": "Practical takeaways for formulation research and product development.",
+  "limitations": "Explicit note on traditional textual context vs modern clinical proof.",
+  "evidence_references": ["Array of referenced evidence IDs or plant ID"]
+}}
+
+BOUNDED DRAVYA PLANT PROFILE:
+{json.dumps(plant, indent=2)}
+
+MATCHED CLASSICAL EVIDENCE FROM '{source_name.title()} SAMHITA':
+{json.dumps(class_ev, indent=2)}
+"""
+            logger.info("Calling Gemini API (%s) for Plant Explanation (%s)...", model_name, doc_id)
+            response = model.generate_content(prompt)
+            raw_text = response.text.strip() if response and response.text else ""
+            if raw_text.startswith("```json"): raw_text = raw_text[7:]
+            if raw_text.startswith("```"): raw_text = raw_text[3:]
+            if raw_text.endswith("```"): raw_text = raw_text[:-3]
+            parsed_json = json.loads(raw_text.strip())
+
+            grounding_status = "GROUNDED" if class_ev else "PARTIALLY_GROUNDED"
+            val_notes = f"Grounded in {grounding_sources_str}."
+            now_utc = datetime.now(timezone.utc)
+
+            syn_rec = db.query(KnowledgeSynthesis).filter(KnowledgeSynthesis.document_identifier == doc_id).first()
+            if not syn_rec:
+                syn_rec = KnowledgeSynthesis(source_type=source_name, document_identifier=doc_id)
+
+            syn_rec.evidence_fingerprint = combined_fp
+            syn_rec.evidence_ids_json = json.dumps(ev_ids)
+            syn_rec.title = f"Grounded Plant Research Explanation: {plant['primary_name']}"
+            syn_rec.summary_60s = parsed_json.get("summary_60s", "")
+            syn_rec.structured_sections_json = json.dumps(parsed_json)
+            syn_rec.grounding_status = grounding_status
+            syn_rec.validation_notes = val_notes
+            syn_rec.is_stale = False
+            syn_rec.model_used = model_name
+            syn_rec.generated_at = now_utc
+
+            db.add(syn_rec)
+            db.commit()
+            return cls.get_plant_explanation(db, source_name, plant_id)
+        except Exception as e:
+            logger.warning("Plant explanation generation failed: %s", e)
+            return cls.get_plant_explanation(db, source_name, plant_id)

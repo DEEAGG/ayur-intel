@@ -258,6 +258,40 @@ class Source(Base):
 
 
 # ---------------------------------------------------------------------------
+# DRAVYA Plant Knowledge Model — CCRAS Dataset (~400 plants)
+# ---------------------------------------------------------------------------
+
+class DravyaPlant(Base):
+    """Structured CCRAS DRAVYA Plant Knowledge Record (~400 plants).
+
+    Preserves exact CCRAS DRAVYA plant profile fields, Ayurvedic properties
+    (Rasa, Guna, Virya, Vipaka, Karma, Doshakarma), botanical information,
+    vernacular names/aliases, parts used, therapeutic usage, and source URL.
+    """
+
+    __tablename__ = "dravya_plants"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    public_id = Column(String(32), unique=True, nullable=False, default=_uuid)
+    plant_id = Column(Integer, unique=True, nullable=False, index=True)  # e.g. 374
+    scientific_name = Column(String(300), nullable=False, index=True)    # e.g. "Withania somnifera Dunal."
+    family = Column(String(150), nullable=True)                          # e.g. "Solanaceae"
+    primary_name = Column(String(200), nullable=True, index=True)        # e.g. "Ashvagandha"
+    aliases_json = Column(Text, nullable=False, default="[]")           # List of vernacular names & synonyms
+    search_text = Column(Text, nullable=False, default="")              # Normalized search index text
+    ayurvedic_properties_json = Column(Text, nullable=False, default="{}") # Rasa, Guna, Virya, Vipaka, Karma, etc.
+    botanical_info_json = Column(Text, nullable=False, default="{}")     # Parts used, morphology, habitat, etymology
+    therapeutic_usage_json = Column(Text, nullable=False, default="[]")  # List of indications
+    dosage_formulations_json = Column(Text, nullable=False, default="{}")# Dosage & dosage formulations
+    classical_references_json = Column(Text, nullable=False, default="[]")# API/Pharm references
+    url = Column(String(500), nullable=True)                             # e.g. "https://dravya.ccras.org.in/plant/374/withania-somnifera"
+    content_hash = Column(String(64), nullable=False)                    # SHA256 of raw JSON record
+    raw_json = Column(Text, nullable=False)                              # Complete raw JSON string
+    created_at = Column(DateTime, nullable=False, default=_now_utc)
+    updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)
+
+
+# ---------------------------------------------------------------------------
 # Knowledge Finding — a research finding saved to a Product Case
 # ---------------------------------------------------------------------------
 

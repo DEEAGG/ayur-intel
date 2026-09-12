@@ -1,6 +1,6 @@
 from api.models.models import (
     User, ProductCase, CaseVersion, PlantDiscovery,
-    Source, KnowledgeFinding, KnowledgeEvidence,
+    Source, KnowledgeFinding, KnowledgeEvidence, DravyaPlant,
     InnovationAnalysis, InnovationComponent,
     PatentRecord, PatentSearch, PatentRelevance,
     PatentAnalysis, PatentComparison, ClaimElement,
@@ -25,7 +25,7 @@ from api.models.review import ReviewRequest, ReviewItem, ReviewDecision, ReviewH
 
 __all__ = [
     "User", "ProductCase", "CaseVersion", "PlantDiscovery",
-    "Source", "KnowledgeFinding", "KnowledgeEvidence",
+    "Source", "KnowledgeFinding", "KnowledgeEvidence", "DravyaPlant",
     "InnovationAnalysis", "InnovationComponent",
     "PatentRecord", "PatentSearch", "PatentRelevance",
     "PatentAnalysis", "PatentComparison", "ClaimElement",
