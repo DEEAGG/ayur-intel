@@ -480,79 +480,70 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
             "status": "VERIFIED",
             "source": "Charaka Samhita Chikitsa Sthana Rasayana",
             "verification_status": "VERIFIED",
-            "therapeutic_indication": "Adaptogenic stress & neuro-wellness support",
+            "therapeutic_indication": "Adaptogenic stress & neuro-calming support",
+        },
+        {
+            "name": "Jatamansi",
+            "botanical": "Nardostachys jatamansi",
+            "quantity": "125 mg",
+            "standardization": "10% Valeranone / Jatamansone",
+            "status": "VERIFIED",
+            "source": "Charaka Samhita Sutra Sthana & Chikitsa Sthana",
+            "verification_status": "VERIFIED",
+            "therapeutic_indication": "Restorative sleep, anxiety relief & mental calm",
         },
         {
             "name": "Brahmi",
             "botanical": "Bacopa monnieri",
-            "quantity": "125 mg",
+            "quantity": "100 mg",
             "standardization": "20% Bacosides (HPLC)",
             "status": "VERIFIED",
             "source": "Charaka Samhita Sutra Sthana Medhya",
             "verification_status": "VERIFIED",
-            "therapeutic_indication": "Cognitive wellness & memory support",
+            "therapeutic_indication": "Cognitive wellness & nocturnal stress resilience",
         },
         {
             "name": "Mandukaparni",
             "botanical": "Centella asiatica",
-            "quantity": "100 mg",
+            "quantity": "55 mg",
             "standardization": "10% Asiaticosides",
             "status": "VERIFIED",
             "source": "Sushruta Samhita Sutra Sthana",
             "verification_status": "VERIFIED",
-            "therapeutic_indication": "Nootropic & focus support",
+            "therapeutic_indication": "Nootropic calm & cellular resilience support",
         },
         {
-            "name": "Tulsi",
-            "botanical": "Ocimum sanctum",
-            "quantity": "50 mg",
-            "standardization": "2.5% Ursolic Acid",
-            "status": "VERIFIED",
-            "source": "Sushruta Samhita Sutra Sthana",
-            "verification_status": "VERIFIED",
-            "therapeutic_indication": "Stress resilience & bio-wellness support",
-        },
-        {
-            "name": "Haridra",
-            "botanical": "Curcuma longa",
+            "name": "Shankhpushpi",
+            "botanical": "Convolvulus pluricaulis",
             "quantity": "45 mg",
-            "standardization": "95% Curcuminoids",
+            "standardization": "5% Flavonoids",
             "status": "VERIFIED",
-            "source": "Astanga Hridaya",
+            "source": "Charaka Samhita & Astanga Hridaya",
             "verification_status": "VERIFIED",
-            "therapeutic_indication": "Cellular wellness & balance support",
-        },
-        {
-            "name": "Maricha",
-            "botanical": "Piper nigrum",
-            "quantity": "5 mg",
-            "standardization": "95% Piperine",
-            "status": "VERIFIED",
-            "source": "Charaka Samhita",
-            "verification_status": "VERIFIED",
-            "therapeutic_indication": "Bio-enhancer strategy under evaluation",
+            "therapeutic_indication": "Sleep-inducing neuro-relaxation support",
         },
     ]
 
     demo_claims = [
-        "Cognitive wellness & focus support",
-        "Adaptogenic stress & vitality support",
-        "Memory & mental clarity support",
+        "Sleep wellness & relaxation support",
+        "Adaptogenic night-time stress support",
+        "Restorative sleep & mental calm support",
     ]
 
     demo_process = (
         "Standardized botanical extract fractions prepared using controlled extraction "
-        "and phytochemical standardization parameters, followed by staged blending and dry granulation "
-        "into a defined oral capsule formulation. The formulation includes hydro-ethanolic extraction, "
-        "HPLC phytochemical fingerprinting, staged blending, and dry granulation, incorporating a "
-        "defined piperine-containing bio-enhancement strategy for intelligence evaluation."
+        "and phytochemical standardization parameters, followed by staged dry blending and encapsulation "
+        "into a defined 500 mg oral hard gelatin capsule. The formulation process combines hydro-ethanolic "
+        "extraction, HPLC phytochemical fingerprinting, dry granulation, and uniform capsule shell filling "
+        "of standardized Withania somnifera, Nardostachys jatamansi, Bacopa monnieri, Centella asiatica, "
+        "and Convolvulus pluricaulis extracts."
     )
 
     demo_notes = (
-        "A quantitative multi-botanical formulation combining standardized extract fractions of "
-        "adaptogenic and cognitive-support botanicals with a defined piperine-containing bio-enhancement "
-        "strategy and controlled extraction / standardization characteristics for improved formulation "
-        "consistency and delivery characteristics."
+        "A quantitative multi-botanical oral capsule formulation combining standardized extract fractions "
+        "of adaptogenic, calming, and cognitive-support botanicals (Ashwagandha, Jatamansi, Brahmi, "
+        "Mandukaparni, Shankhpushpi), differentiated by oral solid-dose capsule architecture, marker "
+        "standardization, and formulation ratios."
     )
 
     demo_case = (
@@ -571,12 +562,8 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
         except Exception:
             curr_ings = []
 
-        # Check if already updated to 6-ingredient showcase concept
-        if len(curr_ings) == 6 and demo_case.name.startswith("AYUR-INTEL NeuroAdapt"):
-            if demo_case.name != "AYUR-INTEL NeuroAdapt Botanical Complex":
-                demo_case.name = "AYUR-INTEL NeuroAdapt Botanical Complex"
-                db.commit()
-                db.refresh(demo_case)
+        # Check if already updated to 5-ingredient sleep showcase concept
+        if len(curr_ings) == 5 and demo_case.name == "AYUR-INTEL NidraAdapt Botanical Complex":
             return _case_to_dict(demo_case)
 
         # Stale demo case found — Perform IN-PLACE MIGRATION of canonical demo-001
@@ -621,7 +608,7 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
         # Update canonical demo-001 IN-PLACE
         demo_case.public_id = "demo-001"
         demo_case.owner_id = owner.id
-        demo_case.name = "AYUR-INTEL NeuroAdapt Botanical Complex"
+        demo_case.name = "AYUR-INTEL NidraAdapt Botanical Complex"
         demo_case.stage = "IDEA"
         demo_case.jurisdictions = json.dumps(["IN"])
         demo_case.status = "DRAFT"
@@ -629,7 +616,7 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
         demo_case.ingredients = json.dumps(demo_ingredients)
         demo_case.form = "Hard Gelatin Capsule"
         demo_case.formulation = "Ayurvedic Proprietary Medicine"
-        demo_case.intended_use = "Cognitive wellness & focus support\nAdaptogenic stress & vitality support\nMemory & mental clarity support"
+        demo_case.intended_use = "Sleep wellness & relaxation support\nAdaptogenic night-time stress support\nRestorative sleep & mental calm support"
         demo_case.claims = json.dumps(demo_claims)
         demo_case.process = demo_process
         demo_case.brand = "AYUR-INTEL Showcase"
@@ -666,7 +653,7 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
     demo_case = ProductCase(
         public_id="demo-001",
         owner_id=owner.id,
-        name="AYUR-INTEL NeuroAdapt Botanical Complex",
+        name="AYUR-INTEL NidraAdapt Botanical Complex",
         stage="IDEA",
         jurisdictions=json.dumps(["IN"]),
         status="DRAFT",
@@ -674,7 +661,7 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
         ingredients=json.dumps(demo_ingredients),
         form="Hard Gelatin Capsule",
         formulation="Ayurvedic Proprietary Medicine",
-        intended_use="Cognitive wellness & focus support\nAdaptogenic stress & vitality support\nMemory & mental clarity support",
+        intended_use="Sleep wellness & relaxation support\nAdaptogenic night-time stress support\nRestorative sleep & mental calm support",
         claims=json.dumps(demo_claims),
         process=demo_process,
         brand="AYUR-INTEL Showcase",

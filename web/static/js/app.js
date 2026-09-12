@@ -1847,10 +1847,46 @@
         + '<div style="font-size:11px;color:#64748b;margin-top:10px;">* Zero search matches indicates no records were returned for these specific query terms in public index literature. It does NOT imply that no patents exist worldwide.</div>'
         + '</div></div></div>';
     } else {
+      function getPatentJurisdictionCode(rec) {
+        if (!rec) return "UNKNOWN";
+        var j = rec.jurisdiction_code || rec.jurisdiction;
+        if (j && typeof j === 'string') {
+          var jUp = j.trim().toUpperCase ? j.trim().toUpperCase() : j.trim();
+          if (jUp.length === 2 && jUp !== "GL" && jUp !== "UN") return jUp;
+        }
+        var pub = (rec.publication_number || "").toUpperCase();
+        var m = pub.match(/^([A-Z]{2})\d/);
+        if (m) return m[1];
+        var pid = (rec.provider_record_id || "").toUpperCase();
+        var m2 = pid.match(/^([A-Z]{2})\d/);
+        if (m2) return m2[1];
+        return "UNKNOWN";
+      }
+
+      function hasIndiaConnection(rec) {
+        if (!rec) return false;
+        var jCode = getPatentJurisdictionCode(rec);
+        if (jCode === "IN") return true;
+        if (rec.has_india_connection === true) return true;
+        var pub = (rec.publication_number || "").toUpperCase();
+        if (pub.indexOf("IN") === 0) return true;
+        var app = (rec.application_number || "").toUpperCase();
+        if (app.indexOf("IN") >= 0) return true;
+        var fam = rec.family_members || [];
+        if (Array.isArray(fam)) {
+          for (var i = 0; i < fam.length; i++) {
+            if (typeof fam[i] === "string" && fam[i].toUpperCase().indexOf("IN") >= 0) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+
       // Tab Navigation (TOP MATCHES, INDIAN MATCHES, ALL SHORTLISTED)
       var activeTab = window._patentActiveTab || "top";
       var indianItems = items.filter(function(item) {
-        return getPatentJurisdictionCode(item.patent) === "IN";
+        return hasIndiaConnection(item.patent);
       });
 
       html += '<div style="display:flex;gap:8px;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:16px;padding-bottom:8px;">'
@@ -1883,8 +1919,11 @@
           + '</div>'
           + '</div>';
       } else {
-        html += '<div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
-          + '<h3 style="font-size:15px;font-weight:700;color:#f8fafc;">📑 ' + (activeTab === "top" ? 'Top Matches' : (activeTab === "india" ? 'Indian Matches' : 'All Shortlisted Patents')) + ' (' + displayItems.length + ')</h3>'
+        html += '<div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'
+          + '<div>'
+          + '<h3 style="font-size:15px;font-weight:700;color:#f8fafc;margin-bottom:2px;">📑 ' + (activeTab === "top" ? 'Top Matches' : (activeTab === "india" ? 'Indian Matches' : 'All Shortlisted Patents')) + ' (' + displayItems.length + ')</h3>'
+          + (activeTab === "india" ? '<div style="font-size:12px;color:#cbd5e1;">India-identified patent records in the current screening</div>' : '')
+          + '</div>'
           + '</div>';
 
         displayItems.forEach(function(item) {
@@ -1939,12 +1978,25 @@
             familyHtml = '<span class="patent-pub-badge" style="background:rgba(168,85,247,0.12);color:#c084fc;border-color:rgba(168,85,247,0.3);">Family: ' + escapeHtml(rec.family_id) + ' (' + rec.family_members.length + ')</span>';
           }
 
+          var indiaBadgeHtml = "";
+          if (hasIndiaConnection(rec) && jCode !== "IN") {
+            var inAppNum = rec.application_number && rec.application_number.indexOf("IN") >= 0 ? rec.application_number : "";
+            if (!inAppNum && Array.isArray(rec.family_members)) {
+              rec.family_members.forEach(function(m) {
+                if (typeof m === "string" && m.toUpperCase().indexOf("IN") >= 0) inAppNum = m;
+              });
+            }
+            var inPrefix = inAppNum.indexOf("PCT/IN") >= 0 ? "PCT: " : "Priority: ";
+            indiaBadgeHtml = '<span class="patent-pub-badge" style="background:rgba(245,158,11,0.15);color:#fbbf24;border-color:rgba(245,158,11,0.35);">🇮🇳 ' + escapeHtml(inPrefix + (inAppNum || "IN Priority")) + '</span>';
+          }
+
           html += '<div class="patent-card">'
             + '<div class="patent-card-header">'
             + '<div>'
             + '<div class="patent-card-title-row">'
             + '<span class="patent-pub-badge">' + escapeHtml(idBadgeText) + '</span>'
             + familyHtml
+            + indiaBadgeHtml
             + '<span class="patent-evidence-basis-badge">' + escapeHtml(evBadgeLabel) + '</span>'
             + '<span class="patent-relevance-badge ' + badgeCls + '">' + escapeHtml(scoreLabel) + '</span>'
             + '</div>'

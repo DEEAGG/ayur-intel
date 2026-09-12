@@ -111,6 +111,54 @@ def get_patent_jurisdiction(record: dict | PatentRecord | PatentResult | None) -
     return "UNKNOWN"
 
 
+def has_india_connection(record: dict | PatentRecord | PatentResult | None) -> bool:
+    """Return True ONLY if record has explicit Indian patent filing metadata.
+
+    Requires: IN publication number, IN application number, IN priority application, PCT/IN number,
+    or explicit IN family member in official family metadata.
+    NEVER classifies a patent as India-connected based on inventor/applicant location or name alone.
+    """
+    if not record:
+        return False
+
+    j_code = get_patent_jurisdiction(record)
+    if j_code == "IN":
+        return True
+
+    pub_num = ""
+    app_num = ""
+    family_members = []
+
+    if isinstance(record, dict):
+        pub_num = record.get("publication_number") or ""
+        app_num = record.get("application_number") or ""
+        family_members = record.get("family_members") or []
+    else:
+        pub_num = getattr(record, "publication_number", None) or ""
+        app_num = getattr(record, "application_number", None) or ""
+        fm_json = getattr(record, "family_members_json", None)
+        if fm_json:
+            try:
+                family_members = json.loads(fm_json)
+            except Exception:
+                family_members = []
+        else:
+            family_members = getattr(record, "family_members", None) or []
+
+    if isinstance(pub_num, str) and pub_num.strip().upper().startswith("IN"):
+        return True
+
+    if isinstance(app_num, str) and "IN" in app_num.strip().upper():
+        return True
+
+    if isinstance(family_members, list):
+        for member in family_members:
+            if isinstance(member, str) and "IN" in member.strip().upper():
+                return True
+
+    return False
+
+
 def _record_to_dict(rec: PatentRecord) -> dict:
     inventors = None
     if rec.inventors:
@@ -144,6 +192,7 @@ def _record_to_dict(rec: PatentRecord) -> dict:
         "authority": rec.authority,
         "jurisdiction": j_code,
         "jurisdiction_code": j_code,
+        "has_india_connection": has_india_connection(rec),
         "publication_number": rec.publication_number,
         "application_number": rec.application_number,
         "patent_type": rec.patent_type,
@@ -223,8 +272,14 @@ def _relevance_to_dict(rel: PatentRelevance) -> dict:
 BOTANICAL_MARKERS = {
     "withania": "withanolides",
     "ashwagandha": "withanolides",
+    "nardostachys": "jatamansone",
+    "jatamansi": "jatamansone",
     "bacopa": "bacosides",
     "brahmi": "bacosides",
+    "centella": "asiaticosides",
+    "mandukaparni": "asiaticosides",
+    "convolvulus": "flavonoids",
+    "shankhpushpi": "flavonoids",
     "ocimum": "eugenol",
     "tulsi": "eugenol",
     "azadirachta": "azadirachtin",
@@ -360,7 +415,9 @@ def generate_query_plan(case: ProductCase, components: List[InnovationComponent]
     clean_use = ""
     if case.intended_use:
         u = case.intended_use.lower()
-        if "cognitive" in u or "memory" in u:
+        if "sleep" in u or "relaxation" in u or "insomnia" in u or "sedative" in u:
+            clean_use = "sleep induction relaxation"
+        elif "cognitive" in u or "memory" in u:
             clean_use = "cognitive memory focus"
         elif "stress" in u or "calm" in u:
             clean_use = "stress relief anxiety"
@@ -759,6 +816,10 @@ def run_patent_intelligence(
         if clean_key not in unique_candidates:
             unique_candidates[clean_key] = res
             family_members_map[clean_key] = [rec_key]
+            if res.family_members:
+                for fm in res.family_members:
+                    if fm not in family_members_map[clean_key]:
+                        family_members_map[clean_key].append(fm)
         else:
             existing = unique_candidates[clean_key]
             for q in (res.matched_queries or []):
@@ -766,6 +827,16 @@ def run_patent_intelligence(
                     existing.matched_queries.append(q)
             if rec_key not in family_members_map[clean_key]:
                 family_members_map[clean_key].append(rec_key)
+            if not existing.application_number and res.application_number:
+                existing.application_number = res.application_number
+            if res.family_members:
+                existing_fm = existing.family_members or []
+                for fm in res.family_members:
+                    if fm not in existing_fm:
+                        existing_fm.append(fm)
+                    if fm not in family_members_map[clean_key]:
+                        family_members_map[clean_key].append(fm)
+                existing.family_members = existing_fm
 
     deduped_results = list(unique_candidates.values())
 
@@ -818,12 +889,11 @@ def run_patent_intelligence(
                 provider_record_id=res.provider_record_id,
                 source_name=res.source_name,
                 authority=res.authority,
-                jurisdiction=res.jurisdiction,
-                source_url=res.source_url,
+                jurisdiction=res.jurisdiction or "GLOBAL",
                 publication_number=res.publication_number,
                 application_number=res.application_number,
-                patent_type=res.patent_type,
-                title=res.title,
+                patent_type=res.patent_type or "PUBLICATION",
+                title=res.title or "Untitled Patent Document",
                 abstract=res.abstract,
                 applicant=res.applicant,
                 inventors=json.dumps(res.inventors) if res.inventors else None,
