@@ -39,7 +39,7 @@ RELEVANCE_LEVELS = ("HIGH", "MODERATE", "LOW")
 class KnowledgeSearchRequest(BaseModel):
     """Schema for knowledge search requests."""
 
-    query: str = Field(..., min_length=1, max_length=500, description="Search query")
+    query: Optional[str] = Field(default="", max_length=500, description="Search query")
     plant_name: Optional[str] = Field(None, max_length=300, description="Common plant name")
     botanical_name: Optional[str] = Field(None, max_length=300, description="Scientific name")
     category: Optional[str] = Field(None, description="Knowledge category filter")

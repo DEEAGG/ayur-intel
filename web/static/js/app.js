@@ -6134,7 +6134,7 @@
         'Inspect Schedule T Good Manufacturing Practice (GMP) requirements',
         'Track Rule 161 mandatory labelling rules and Ayurvedic Medicine container declarations'
       ],
-      disclaimer: 'Statutory Drugs & Cosmetics Act 1940 and Rules 1945 digest preserved for regulatory decision-support.'
+      disclaimer: 'Statutory Drugs & Cosmetics Act 1940 and Rules 1945 digest preserved for regulatory decision-support. Regulatory text may be amended. Verify the current official source before making compliance decisions.'
     }
   ];
 
@@ -6235,6 +6235,23 @@
     return state.khDravyaIndex || [];
   }
 
+  const COMMON_AYURVEDIC_ALIASES = {
+    'ashwagandha': 374,
+    'aswagandha': 374,
+    'asgandh': 374,
+    'amla': 160,
+    'amalaki': 160,
+    'aonla': 160,
+    'neem': 53,
+    'nimba': 53,
+    'brahmi': 54,
+    'haldi': 139,
+    'haridra': 139,
+    'turmeric': 139,
+    'giloy': 351,
+    'guduchi': 351
+  };
+
   function searchDravyaIndexLocal(query) {
     if (!query || !state.khDravyaIndex) return null;
     var q = query.toLowerCase().trim();
@@ -6243,6 +6260,7 @@
     var matches = [];
 
     state.khDravyaIndex.forEach(function (plant) {
+      var pId = plant.plant_id;
       var pName = (plant.primary_name || '').toLowerCase();
       var sName = (plant.scientific_name || '').toLowerCase();
       var family = (plant.family || '').toLowerCase();
@@ -6260,8 +6278,13 @@
       var score = 0;
       var matchField = '';
 
+      // 0. Curated Common Ayurvedic Alias Map
+      if (COMMON_AYURVEDIC_ALIASES[q] && String(pId) === String(COMMON_AYURVEDIC_ALIASES[q])) {
+        score = 1000;
+        matchField = 'Common Ayurvedic Alias';
+      }
       // 1. Exact match
-      if (pName === q || sName === q) {
+      else if (pName === q || sName === q) {
         score = 100;
         matchField = 'Exact Name';
       } else if (aliases.indexOf(q) !== -1) {
@@ -6303,10 +6326,10 @@
               score = 65;
               matchField = 'Word Boundary Prefix';
             }
-            // 4. Substring match (lowest priority, min 4 chars)
-            else if (q.length >= 4 && (pName.indexOf(q) !== -1 || aliases.some(function (a) { return a.indexOf(q) !== -1; }))) {
+            // 4. Substring match (min 4 chars AND must start at word boundary, no false betula matches for 'tul')
+            else if (q.length >= 4 && (pName.indexOf(q) === 0 || sName.indexOf(q) === 0 || aliases.some(function (a) { return a.indexOf(q) === 0; }))) {
               score = 40;
-              matchField = 'Substring Match';
+              matchField = 'Prefix Match';
             }
           }
         }
@@ -6330,6 +6353,7 @@
     var matches = [];
 
     state.khDravyaIndex.forEach(function (plant) {
+      var pId = plant.plant_id;
       var pName = (plant.primary_name || '').toLowerCase();
       var sName = (plant.scientific_name || '').toLowerCase();
       var aliases = (plant.aliases || []).map(function (a) { return String(a).toLowerCase(); });
@@ -6346,7 +6370,10 @@
       var score = 0;
       var matchField = '';
 
-      if (pName === q || sName === q) {
+      if (COMMON_AYURVEDIC_ALIASES[q] && String(pId) === String(COMMON_AYURVEDIC_ALIASES[q])) {
+        score = 1000;
+        matchField = 'Common Ayurvedic Alias';
+      } else if (pName === q || sName === q) {
         score = 100;
         matchField = 'Exact Name';
       } else if (aliases.indexOf(q) !== -1) {
@@ -6383,9 +6410,9 @@
             if (wordMatch) {
               score = 65;
               matchField = 'Word Boundary Prefix';
-            } else if (q.length >= 4 && (pName.indexOf(q) !== -1 || aliases.some(function (a) { return a.indexOf(q) !== -1; }))) {
+            } else if (q.length >= 4 && (pName.indexOf(q) === 0 || sName.indexOf(q) === 0 || aliases.some(function (a) { return a.indexOf(q) === 0; }))) {
               score = 40;
-              matchField = 'Substring Match';
+              matchField = 'Prefix Match';
             }
           }
         }
@@ -6622,6 +6649,14 @@
             `;
           }).join('');
           dropdownEl.style.display = 'block';
+        } else if (q.indexOf('tul') === 0 || q.indexOf('ocimum') === 0 || q.indexOf('holy basil') === 0) {
+          dropdownEl.innerHTML = `
+            <div class="kh-suggestion-item" style="padding:10px 14px;color:#94a3b8;font-size:12.5px;display:flex;align-items:center;gap:8px;">
+              <span class="material-symbols-outlined" style="font-size:16px;color:#f59e0b;">info</span>
+              <span>No Tulsi record is present in the current DRAVYA dataset. Searching source evidence...</span>
+            </div>
+          `;
+          dropdownEl.style.display = 'block';
         } else {
           dropdownEl.style.display = 'none';
           dropdownEl.innerHTML = '';
@@ -6659,7 +6694,7 @@
     var btn = document.getElementById('kh-explain-plant-btn');
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = icon('sync', 16) + ' Generating Grounded AI Research Explanation...';
+      btn.innerHTML = '✨ Analyzing plant context...';
     }
     try {
       var data = await api('/api/knowledge/plant-explanation/generate?source_name=' + encodeURIComponent(sourceId) + '&plant_id=' + plantId + '&force_regenerate=' + (forceRegenerate ? 'true' : 'false'), {
@@ -6668,13 +6703,13 @@
       state.khPlantExplanation = data;
       toast('Grounded AI research explanation updated.', 'success');
     } catch (e) {
-      toast('Failed to generate plant explanation: ' + e.message, 'error');
-    }
-
-    var contentEl = document.getElementById('kh-library-items-list');
-    var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || { title: 'Source Library', id: 'charaka' };
-    if (contentEl && state.khIntegratedResult) {
-      contentEl.innerHTML = renderIntegratedSearchResult(state.khIntegratedResult, sourceMeta);
+      toast('Grounded explanation could not be generated. Try again.', 'error');
+    } finally {
+      var contentEl = document.getElementById('kh-library-items-list');
+      var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || { title: 'Source Library', id: 'charaka' };
+      if (contentEl && state.khIntegratedResult) {
+        contentEl.innerHTML = renderIntegratedSearchResult(state.khIntegratedResult, sourceMeta);
+      }
     }
   }
 
@@ -6819,7 +6854,6 @@
               <span style="font-size:12px;font-weight:700;color:#34d399;">
                 Passage #${idx + 1}: ${escapeHtml(ev.evidence_locator || ev.source_identifier || 'Classical Passage')}
               </span>
-              ${ev.official_url ? `<a href="${escapeHtml(ev.official_url)}" target="_blank" rel="noopener" style="font-size:11px;color:#38bdf8;">Read Original Source ↗</a>` : ''}
             </div>
             <div style="font-size:13.5px;color:#f8fafc;line-height:1.5;margin-bottom:8px;">
               ${escapeHtml(ev.title || 'Classical Passage')}
@@ -7144,7 +7178,7 @@
 
     var itemsHtml = '';
     if (state.khLibraryLoading) {
-      itemsHtml = '<div style="padding:40px;text-align:center;"><div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:8px;"></div><div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:8px;"></div><p style="color:var(--text-secondary);margin-top:12px;">Loading official library evidence...</p></div>';
+      itemsHtml = '<div style="padding:40px;text-align:center;"><div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:8px;"></div><div class="skeleton" style="height:80px;margin-bottom:12px;border-radius:8px;"></div><p style="color:var(--text-secondary);margin-top:12px;">Loading evidence records...</p></div>';
     } else {
       itemsHtml = renderLibraryItemsContent(items);
     }
@@ -7153,7 +7187,7 @@
 
     var countPillText = state.khLibraryLoading
       ? 'Loading evidence records...'
-      : `Showing ${items.length} of ${totalItems} evidence records`;
+      : (totalItems > 0 ? `Showing ${items.length} of ${totalItems} evidence records` : 'No evidence records available in the current curated library.');
 
     return `
       <div class="knowledge-library">
@@ -7359,6 +7393,85 @@
   }
 
   function renderExpandingCoverageInfoView(sourceId) {
+    if (sourceId === 'ayush_portal') {
+      return `
+        <div class="kh-reader-container">
+          <button class="kh-back-btn" onclick="goKnowledgeHubHome()">← Back to Knowledge Hub</button>
+
+          <div class="kh-intro-panel" style="border-color:rgba(56,189,248,0.3);background:linear-gradient(135deg, rgba(15,23,42,0.9) 0%, rgba(30,41,59,0.95) 100%);">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+              <div>
+                <div style="font-size:11px;font-weight:800;letter-spacing:0.6px;color:#38bdf8;text-transform:uppercase;margin-bottom:4px;">
+                  OFFICIAL GOVERNMENT RESEARCH DATABASE
+                </div>
+                <h2 class="kh-intro-title" style="margin:0;">
+                  <span>🔬</span> AYUSH Research Portal
+                </h2>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <span class="kh-card-badge kh-card-badge-live">OFFICIAL SOURCE: LIVE</span>
+                <span class="kh-card-badge kh-card-badge-expanding">AYUR-INTEL INTEGRATION: EXPANDING</span>
+              </div>
+            </div>
+            <p class="kh-intro-subtitle" style="font-size:14px;color:#cbd5e1;line-height:1.6;margin-bottom:20px;">
+              The official AYUSH Research Portal (arp.ayush.gov.in) is a Ministry of Ayush initiative bringing together curated research evidence across Ayurveda, Yoga &amp; Naturopathy, Unani, Siddha, and Homoeopathy.
+            </p>
+
+            <div style="font-size:12px;font-weight:800;color:#38bdf8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">1. WHAT YOU CAN RESEARCH</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin-bottom:20px;">
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;">
+                <strong style="color:#f8fafc;font-size:13px;display:block;margin-bottom:4px;">🩺 Clinical Research</strong>
+                <span style="font-size:12px;color:#94a3b8;">Human clinical trials, observational studies, and clinical safety/efficacy evidence.</span>
+              </div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;">
+                <strong style="color:#f8fafc;font-size:13px;display:block;margin-bottom:4px;">🧪 Preclinical Research</strong>
+                <span style="font-size:12px;color:#94a3b8;">In vitro, in vivo, pharmacological mechanisms, and biological activity models.</span>
+              </div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;">
+                <strong style="color:#f8fafc;font-size:13px;display:block;margin-bottom:4px;">🌿 Drug Research</strong>
+                <span style="font-size:12px;color:#94a3b8;">Standardization reports, pharmacognosy, phytochemistry, and safety profiling by CCRAS.</span>
+              </div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;">
+                <strong style="color:#f8fafc;font-size:13px;display:block;margin-bottom:4px;">📖 Fundamental Research</strong>
+                <span style="font-size:12px;color:#94a3b8;">Basic Ayurvedic principles, literary reviews, and historical concept evaluations.</span>
+              </div>
+            </div>
+
+            <div style="font-size:12px;font-weight:800;color:#38bdf8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">2. WHY THIS MATTERS FOR PRODUCT RESEARCH</div>
+            <div class="kh-intro-capabilities" style="margin-bottom:20px;">
+              <div class="kh-capability-item">
+                <span class="material-symbols-outlined" style="color:#38bdf8;">search</span>
+                <span>Discover ingredient and formulation research across official research councils</span>
+              </div>
+              <div class="kh-capability-item">
+                <span class="material-symbols-outlined" style="color:#38bdf8;">verified</span>
+                <span>Locate documented intervention evidence for specific health indications</span>
+              </div>
+              <div class="kh-capability-item">
+                <span class="material-symbols-outlined" style="color:#38bdf8;">menu_book</span>
+                <span>Evaluate modern scientific validation alongside classical textual evidence</span>
+              </div>
+              <div class="kh-capability-item">
+                <span class="material-symbols-outlined" style="color:#38bdf8;">shield</span>
+                <span>Review safety, toxicity, and standardization data published by official institutions</span>
+              </div>
+            </div>
+
+            <div style="font-size:12px;font-weight:800;color:#f59e0b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">3. AYUR-INTEL INTEGRATION STATUS</div>
+            <p style="font-size:13px;color:#cbd5e1;line-height:1.5;margin-bottom:16px;">
+              Official portal is live. Direct automated AYUR-INTEL evidence ingestion is expanding to index additional trial publications.
+            </p>
+
+            <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.1);display:flex;justify-content:flex-end;">
+              <a class="btn btn-primary" href="https://arp.ayush.gov.in/" target="_blank" rel="noopener">
+                Open AYUSH Research Portal ↗
+              </a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || {
       title: 'Expanding Coverage Source',
       icon: '📚',
@@ -7372,7 +7485,6 @@
 
     return `
       <div class="kh-reader-container">
-        <!-- Simple Back Navigation -->
         <button class="kh-back-btn" onclick="goKnowledgeHubHome()">← Back to Knowledge Hub</button>
 
         <div class="kh-intro-panel">
@@ -7384,7 +7496,7 @@
           </div>
           <p class="kh-intro-subtitle">${escapeHtml(sourceMeta.overviewText)}</p>
 
-          <div style="font-size:12px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">WHAT THIS SOURCE WILL PROVIDE WHEN LIVE:</div>
+          <div style="font-size:12px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">CAPABILITIES IN EXPANSION:</div>
           <div class="kh-intro-capabilities">
             ${(sourceMeta.capabilities || []).map(cap => `
               <div class="kh-capability-item">
@@ -7404,21 +7516,6 @@
   }
 
   function renderPatentSourceInfoView() {
-    var sourceMeta = knowledgeSources.find(function (s) { return s.id === 'patent'; }) || {
-      title: 'Indian Patent Office',
-      icon: '📜',
-      description: 'Search Indian patents',
-      badgeClass: 'kh-card-badge-patent',
-      badgeText: 'PATENT INTEL',
-      overviewText: 'Indian Patent Intelligence helps investigate published patent literature for herbal formulations, active fractions, extraction processes, and technical concepts.',
-      capabilities: [
-        'Screen patent prior art to identify potential novelty barriers and freedom-to-operate risks',
-        'Compare formulation claims against published patent claims and specifications',
-        'Evaluate patent family members, filing dates, and legal status'
-      ],
-      disclaimer: 'Patent search and prior art screening are performed via AYUR-INTEL Patent Intelligence module.'
-    };
-
     var activeCase = state.currentCase || (state.cases && state.cases[0]);
     var btnOnClick = activeCase
       ? "navigate('patent-intelligence')"
@@ -7426,32 +7523,104 @@
 
     return `
       <div class="kh-reader-container">
-        <!-- Simple Back Navigation -->
         <button class="kh-back-btn" onclick="goKnowledgeHubHome()">← Back to Knowledge Hub</button>
 
-        <div class="kh-intro-panel">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">
-            <h2 class="kh-intro-title">
-              <span>${sourceMeta.icon}</span> ${escapeHtml(sourceMeta.title)}
-            </h2>
-            <span class="kh-card-badge ${sourceMeta.badgeClass}">${sourceMeta.badgeText}</span>
-          </div>
-          <p class="kh-intro-subtitle">${escapeHtml(sourceMeta.overviewText)}</p>
-
-          <div style="font-size:12px;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">PATENT INTELLIGENCE CAPABILITIES:</div>
-          <div class="kh-intro-capabilities">
-            ${(sourceMeta.capabilities || []).map(cap => `
-              <div class="kh-capability-item">
-                <span class="material-symbols-outlined" style="color:#3b82f6;">verified</span>
-                <span>${escapeHtml(cap)}</span>
-              </div>
-            `).join('')}
-          </div>
-
-          <div style="margin-top:20px;padding:16px;background:rgba(15,23,42,0.8);border:1px solid rgba(59,130,246,0.3);border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div class="kh-intro-panel" style="border-color:rgba(59,130,246,0.3);background:linear-gradient(135deg, rgba(15,23,42,0.9) 0%, rgba(30,41,59,0.95) 100%);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
             <div>
-              <strong style="color:#f8fafc;font-size:14px;display:block;">Patent Prior Art &amp; FTO Screening Engine</strong>
-              <span style="font-size:12px;color:#94a3b8;">${activeCase ? 'Active Case Selected: ' + escapeHtml(activeCase.name) : 'No active product case selected.'}</span>
+              <div style="font-size:11px;font-weight:800;letter-spacing:0.6px;color:#3b82f6;text-transform:uppercase;margin-bottom:4px;">
+                PATENT LITERATURE &amp; PRIOR ART RESEARCH
+              </div>
+              <h2 class="kh-intro-title" style="margin:0;">
+                <span>📜</span> Indian Patent Office &amp; Patent Literature
+              </h2>
+            </div>
+            <span class="kh-card-badge kh-card-badge-patent">PATENT INTEL</span>
+          </div>
+
+          <!-- Section 1: UNDERSTANDING PATENTS -->
+          <div style="margin-bottom:24px;padding:16px;background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">
+            <div style="font-size:12px;font-weight:800;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">1. UNDERSTANDING PATENTS</div>
+            <p style="font-size:13.5px;color:#cbd5e1;line-height:1.6;margin:0;">
+              A patent document describes a claimed technical invention and typically contains bibliographic information, technical descriptions, and legal claims. Patent literature helps researchers and product developers explore previously disclosed technical approaches, extraction methods, and formulation architectures.
+            </p>
+          </div>
+
+          <!-- Section 2: WHAT YOU WILL SEE IN A PATENT DOCUMENT -->
+          <div style="margin-bottom:24px;">
+            <div style="font-size:12px;font-weight:800;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">2. WHAT YOU WILL SEE IN A PATENT DOCUMENT</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:10px;">
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;"><strong style="color:#f8fafc;font-size:12.5px;">Title</strong><br><span style="font-size:11.5px;color:#94a3b8;">Short descriptive title of invention</span></div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;"><strong style="color:#f8fafc;font-size:12.5px;">Abstract</strong><br><span style="font-size:11.5px;color:#94a3b8;">Concise summary of technical content</span></div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;"><strong style="color:#f8fafc;font-size:12.5px;">Applicant / Assignee</strong><br><span style="font-size:11.5px;color:#94a3b8;">Company or institution owning filing</span></div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;"><strong style="color:#f8fafc;font-size:12.5px;">Inventor(s)</strong><br><span style="font-size:11.5px;color:#94a3b8;">Named individuals who created invention</span></div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;"><strong style="color:#f8fafc;font-size:12.5px;">Application / Publication No.</strong><br><span style="font-size:11.5px;color:#94a3b8;">Official office identifiers</span></div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;"><strong style="color:#f8fafc;font-size:12.5px;">Priority / Filing / Pub Dates</strong><br><span style="font-size:11.5px;color:#94a3b8;">Timeline of legal disclosure</span></div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;"><strong style="color:#f8fafc;font-size:12.5px;">Specification &amp; Claims</strong><br><span style="font-size:11.5px;color:#94a3b8;">Full technical details &amp; legal scope</span></div>
+              <div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:10px;"><strong style="color:#f8fafc;font-size:12.5px;">Citations &amp; Prior Art</strong><br><span style="font-size:11.5px;color:#94a3b8;">Related documents cited in examination</span></div>
+            </div>
+          </div>
+
+          <!-- Section 3: WHY PATENT LITERATURE MATTERS FOR AYURVEDIC PRODUCT RESEARCH -->
+          <div style="margin-bottom:24px;padding:16px;background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">
+            <div style="font-size:12px;font-weight:800;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">3. WHY PATENT LITERATURE MATTERS FOR AYURVEDIC PRODUCT RESEARCH</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:10px;font-size:12.5px;color:#cbd5e1;">
+              <div>• Existing botanical combination approaches</div>
+              <div>• Extraction &amp; fraction standardization methods</div>
+              <div>• Modern delivery &amp; dosage form concepts</div>
+              <div>• Process technology &amp; manufacturing approaches</div>
+              <div>• Published formulation architectures</div>
+              <div>• Identifying technical areas for professional review</div>
+            </div>
+          </div>
+
+          <!-- Section 4: INDIA-SPECIFIC PATENT CONTEXT -->
+          <div style="margin-bottom:24px;padding:16px;background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">
+            <div style="font-size:12px;font-weight:800;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">4. INDIA-SPECIFIC PATENT CONTEXT</div>
+            <p style="font-size:13px;color:#cbd5e1;line-height:1.5;margin:0 0 10px 0;">
+              The Controller General of Patents, Designs and Trade Marks (CGPDTM) oversees the Indian Patent Office and the InPASS public patent search system. Inventions involving traditional knowledge or biological materials are evaluated under Indian patent law guidelines, taking into account statutory provisions and Traditional Knowledge Digital Library (TKDL) prior art resources.
+            </p>
+          </div>
+
+          <!-- Section 5: IMPORTANT DISTINCTIONS -->
+          <div style="margin-bottom:24px;">
+            <div style="font-size:12px;font-weight:800;color:#f59e0b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">5. IMPORTANT DISTINCTIONS</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:10px;">
+              <div style="background:rgba(30,41,59,0.7);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+                <strong style="color:#fcd34d;display:block;margin-bottom:2px;">Patent Published ≠ Granted</strong>
+                A published application is not a granted patent.
+              </div>
+              <div style="background:rgba(30,41,59,0.7);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+                <strong style="color:#fcd34d;display:block;margin-bottom:2px;">Patent Found ≠ Infringement</strong>
+                Prior art screening identifies published literature, not legal infringement.
+              </div>
+              <div style="background:rgba(30,41,59,0.7);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+                <strong style="color:#fcd34d;display:block;margin-bottom:2px;">No Patent Found ≠ Patentable</strong>
+                Lack of hits in one search does not guarantee patentability worldwide.
+              </div>
+              <div style="background:rgba(30,41,59,0.7);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:10px;font-size:12px;color:#e2e8f0;">
+                <strong style="color:#fcd34d;display:block;margin-bottom:2px;">AYUR-INTEL Score = Research Relevance</strong>
+                Our relevance score measures technical concept overlap, not legal opinion.
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 6: OFFICIAL INDIA PATENT RESOURCES -->
+          <div style="margin-bottom:24px;padding:16px;background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:10px;">
+            <div style="font-size:12px;font-weight:800;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">6. OFFICIAL INDIA PATENT RESOURCES</div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+              <a class="btn btn-secondary btn-xs" href="https://ipindia.gov.in/" target="_blank" rel="noopener">Indian Patent Office (CGPDTM) ↗</a>
+              <a class="btn btn-secondary btn-xs" href="https://ipindiaservices.gov.in/publicsearch" target="_blank" rel="noopener">InPASS Public Search ↗</a>
+              <a class="btn btn-secondary btn-xs" href="http://www.tkdl.res.in/" target="_blank" rel="noopener">TKDL Portal ↗</a>
+            </div>
+          </div>
+
+          <!-- Section 7: READY TO EXPLORE PRIOR ART? (CTA IS LAST) -->
+          <div style="padding:20px;background:rgba(15,23,42,0.95);border:1px solid rgba(59,130,246,0.4);border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
+            <div>
+              <div style="font-size:12px;font-weight:800;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">7. READY TO EXPLORE PRIOR ART?</div>
+              <strong style="color:#f8fafc;font-size:14.5px;display:block;">AYUR-INTEL Prior Art &amp; FTO Screening Engine</strong>
+              <span style="font-size:12px;color:#94a3b8;">Use AYUR-INTEL's evidence-grounded patent screening to explore potentially relevant patent literature for your product. ${activeCase ? 'Active Case: ' + escapeHtml(activeCase.name) : ''}</span>
             </div>
             <button class="btn btn-primary" onclick="${btnOnClick}">
               Open Patent Intelligence →

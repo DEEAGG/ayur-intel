@@ -72,7 +72,7 @@ def search(
     try:
         result = search_knowledge(
             db=db,
-            query=payload.query,
+            query=payload.query or "",
             plant_name=payload.plant_name,
             botanical_name=payload.botanical_name,
             category=payload.category,
