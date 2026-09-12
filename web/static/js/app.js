@@ -1695,19 +1695,22 @@
     var differentiators = data.potential_differentiators || [];
     var unanalyzedCount = metrics.not_analyzed_count || 0;
 
+    var isDemoCase = (data && data.analysis_mode === "VERIFIED_DEMO_SNAPSHOT") ||
+      (state.currentCase && (state.currentCase.is_demo === true || state.currentCase.id === "demo-001" || state.currentCase.public_id === "demo-001"));
+
     html += '<div class="patent-intel-header">'
       + '<div class="patent-intel-title-row">'
       + '<div class="patent-intel-title-area">'
       + '<h2>AYUR-INTEL — Patent Intelligence & Prior-Art Screening</h2>'
       + '<div class="patent-intel-subtitle">Public Patent Discovery: <strong>Europe PMC Patent Index</strong> for <strong>' + escapeHtml(caseName) + '</strong></div>'
-      + (data.analysis_mode === "VERIFIED_DEMO_SNAPSHOT" || (state.currentCase && (state.currentCase.is_demo || state.currentCase.id === "demo-001")) ? '<div style="font-size:11px;font-weight:600;color:#34d399;margin-top:4px;display:inline-block;padding:3px 8px;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);border-radius:4px;">Verified Showcase Snapshot · Built from real patent evidence retrieved through Europe PMC Patent Index</div>' : '')
+      + (isDemoCase ? '<div style="font-size:11px;font-weight:600;color:#34d399;margin-top:4px;display:inline-block;padding:3px 8px;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);border-radius:4px;">Verified Showcase Snapshot · Built from real patent evidence retrieved through Europe PMC Patent Index</div>' : '')
       + '<div style="font-size:12px;color:#94a3b8;margin-top:6px;background:rgba(15,23,42,0.6);padding:8px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);">'
       + '<strong>Jurisdiction Focus:</strong> India (Discovery includes international literature). Verification portals: <strong>Google Patents</strong> / <strong>IP India (InPASS)</strong> / <strong>WIPO PATENTSCOPE</strong>. <strong>TKDL</strong> is a manual research resource. Discovery is non-exhaustive.'
       + '</div>'
       + '</div>'
       + '<div style="display:flex;gap:8px;align-items:center;">'
-      + (unanalyzedCount > 0 ? ('<button class="btn btn-secondary btn-sm" onclick="retryPatentAiAnalysis()">' + icon("auto_renew", 14) + ' Retry AI Analysis (' + unanalyzedCount + ' Unanalyzed)</button>') : '')
-      + '<button class="btn btn-primary btn-sm" onclick="rerunPatentSearch()">' + icon("refresh", 14) + ' Force Re-Run Search</button>'
+      + (!isDemoCase && unanalyzedCount > 0 ? ('<button class="btn btn-secondary btn-sm" onclick="retryPatentAiAnalysis()">' + icon("auto_renew", 14) + ' Retry AI Analysis (' + unanalyzedCount + ' Unanalyzed)</button>') : '')
+      + (!isDemoCase ? ('<button class="btn btn-primary btn-sm" onclick="rerunPatentSearch()">' + icon("refresh", 14) + ' Force Re-Run Search</button>') : '')
       + '</div>'
       + '</div></div>';
 
@@ -1800,6 +1803,42 @@
       + '</details>';
 
     // Jurisdiction Breakdown & Coverage Summary Box
+    function getPatentJurisdictionCode(rec) {
+      if (!rec) return "UNKNOWN";
+      var j = rec.jurisdiction_code || rec.jurisdiction;
+      if (j && typeof j === 'string') {
+        var jUp = j.trim().toUpperCase ? j.trim().toUpperCase() : j.trim();
+        if (jUp.length === 2 && jUp !== "GL" && jUp !== "UN") return jUp;
+      }
+      var pub = (rec.publication_number || "").toUpperCase();
+      var m = pub.match(/^([A-Z]{2})\d/);
+      if (m) return m[1];
+      var pid = (rec.provider_record_id || "").toUpperCase();
+      var m2 = pid.match(/^([A-Z]{2})\d/);
+      if (m2) return m2[1];
+      return "UNKNOWN";
+    }
+
+    function hasIndiaConnection(rec) {
+      if (!rec) return false;
+      var jCode = getPatentJurisdictionCode(rec);
+      if (jCode === "IN") return true;
+      if (rec.has_india_connection === true) return true;
+      var pub = (rec.publication_number || "").toUpperCase();
+      if (pub.indexOf("IN") === 0) return true;
+      var app = (rec.application_number || "").toUpperCase();
+      if (app.indexOf("IN") >= 0) return true;
+      var fam = rec.family_members || [];
+      if (Array.isArray(fam)) {
+        for (var i = 0; i < fam.length; i++) {
+          if (typeof fam[i] === "string" && fam[i].toUpperCase().indexOf("IN") >= 0) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
     var jurCounts = { IN: 0, US: 0, WO: 0, EP: 0, OTHER: 0, UNKNOWN: 0 };
     var indiaConnectedCount = 0;
     items.forEach(function(item) {
@@ -1876,42 +1915,6 @@
         + '<div style="font-size:11px;color:#64748b;margin-top:10px;">* Zero search matches indicates no records were returned for these specific query terms in public index literature. It does NOT imply that no patents exist worldwide.</div>'
         + '</div></div></div>';
     } else {
-      function getPatentJurisdictionCode(rec) {
-        if (!rec) return "UNKNOWN";
-        var j = rec.jurisdiction_code || rec.jurisdiction;
-        if (j && typeof j === 'string') {
-          var jUp = j.trim().toUpperCase ? j.trim().toUpperCase() : j.trim();
-          if (jUp.length === 2 && jUp !== "GL" && jUp !== "UN") return jUp;
-        }
-        var pub = (rec.publication_number || "").toUpperCase();
-        var m = pub.match(/^([A-Z]{2})\d/);
-        if (m) return m[1];
-        var pid = (rec.provider_record_id || "").toUpperCase();
-        var m2 = pid.match(/^([A-Z]{2})\d/);
-        if (m2) return m2[1];
-        return "UNKNOWN";
-      }
-
-      function hasIndiaConnection(rec) {
-        if (!rec) return false;
-        var jCode = getPatentJurisdictionCode(rec);
-        if (jCode === "IN") return true;
-        if (rec.has_india_connection === true) return true;
-        var pub = (rec.publication_number || "").toUpperCase();
-        if (pub.indexOf("IN") === 0) return true;
-        var app = (rec.application_number || "").toUpperCase();
-        if (app.indexOf("IN") >= 0) return true;
-        var fam = rec.family_members || [];
-        if (Array.isArray(fam)) {
-          for (var i = 0; i < fam.length; i++) {
-            if (typeof fam[i] === "string" && fam[i].toUpperCase().indexOf("IN") >= 0) {
-              return true;
-            }
-          }
-        }
-        return false;
-      }
-
       // Tab Navigation (TOP MATCHES, INDIAN MATCHES, ALL SHORTLISTED)
       var activeTab = window._patentActiveTab || "top";
       var indianItems = items.filter(function(item) {
