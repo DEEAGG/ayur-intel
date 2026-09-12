@@ -343,3 +343,16 @@ def generate_plant_explanation(
     return KnowledgeSynthesisService.generate_plant_explanation(
         db=db, source_name=source_name, plant_id=plant_id, force_regenerate=force_regenerate
     )
+
+
+@router.get(
+    "/dravya-index",
+    summary="Get compact ~400 plant DRAVYA search index for instant client-side typeahead",
+)
+def get_dravya_index(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """GET compact ~400 plant DRAVYA dataset index for 0-latency client typeahead."""
+    from api.services.dravya_service import DravyaService
+    return DravyaService.get_search_index(db)

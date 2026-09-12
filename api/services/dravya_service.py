@@ -381,3 +381,32 @@ class DravyaService:
             "source_authority": "Central Council for Research in Ayurvedic Sciences (CCRAS)",
             "score": score,
         }
+
+    @classmethod
+    def get_search_index(cls, db: Session) -> List[Dict[str, Any]]:
+        """Return compact search index of all ~400 DRAVYA plants for instant client-side typeahead."""
+        plants = db.query(DravyaPlant).order_by(DravyaPlant.plant_id.asc()).all()
+        index = []
+        for plant in plants:
+            def safe_json(val, default):
+                if not val:
+                    return default
+                try:
+                    return json.loads(val)
+                except Exception:
+                    return default
+
+            aliases = safe_json(plant.aliases_json, [])
+            raw_obj = safe_json(plant.raw_json, {})
+            vern = raw_obj.get("vernacular_names", {}) if isinstance(raw_obj, dict) else {}
+
+            index.append({
+                "plant_id": plant.plant_id,
+                "scientific_name": plant.scientific_name,
+                "primary_name": plant.primary_name or plant.scientific_name,
+                "family": plant.family or "",
+                "aliases": aliases,
+                "vernacular_names": vern,
+                "url": plant.url or f"https://dravya.ccras.org.in/plant-details/{plant.plant_id}",
+            })
+        return index

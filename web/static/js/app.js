@@ -6218,18 +6218,143 @@
     render({ scroll: 'top' });
   }
 
+  state.khLibraryCache = state.khLibraryCache || {};
+  state.khDravyaIndex = state.khDravyaIndex || null;
+  state.khSearchToken = 0;
+
+  async function ensureDravyaIndex() {
+    if (state.khDravyaIndex && state.khDravyaIndex.length > 0) return state.khDravyaIndex;
+    try {
+      var index = await api('/api/knowledge/dravya-index');
+      if (Array.isArray(index)) {
+        state.khDravyaIndex = index;
+      }
+    } catch (e) {
+      console.warn('Failed to prefetch DRAVYA search index:', e);
+    }
+    return state.khDravyaIndex || [];
+  }
+
+  function searchDravyaIndexLocal(query) {
+    if (!query || !state.khDravyaIndex) return null;
+    var q = query.toLowerCase().trim();
+    if (!q) return null;
+
+    var matches = [];
+
+    state.khDravyaIndex.forEach(function (plant) {
+      var pName = (plant.primary_name || '').toLowerCase();
+      var sName = (plant.scientific_name || '').toLowerCase();
+      var family = (plant.family || '').toLowerCase();
+      var aliases = (plant.aliases || []).map(function (a) { return String(a).toLowerCase(); });
+      var verns = [];
+      if (plant.vernacular_names && typeof plant.vernacular_names === 'object') {
+        Object.keys(plant.vernacular_names).forEach(function (lang) {
+          var arr = plant.vernacular_names[lang];
+          if (Array.isArray(arr)) {
+            arr.forEach(function (v) { verns.push(String(v).toLowerCase()); });
+          }
+        });
+      }
+
+      var score = 0;
+      var matchField = '';
+
+      // 1. Exact match
+      if (pName === q || sName === q) {
+        score = 100;
+        matchField = 'Exact Name';
+      } else if (aliases.indexOf(q) !== -1) {
+        score = 95;
+        matchField = 'Exact Alias';
+      } else if (verns.indexOf(q) !== -1) {
+        score = 90;
+        matchField = 'Exact Vernacular Name';
+      }
+      // 2. Starts-with / prefix match on word boundaries
+      else if (pName.indexOf(q) === 0 || sName.indexOf(q) === 0) {
+        score = 85;
+        matchField = 'Name Prefix';
+      } else {
+        var aliasPrefix = false;
+        aliases.forEach(function (a) {
+          if (a.indexOf(q) === 0) aliasPrefix = true;
+        });
+        if (aliasPrefix) {
+          score = 80;
+          matchField = 'Alias Prefix';
+        } else {
+          var vernPrefix = false;
+          verns.forEach(function (v) {
+            if (v.indexOf(q) === 0) vernPrefix = true;
+          });
+          if (vernPrefix) {
+            score = 75;
+            matchField = 'Vernacular Prefix';
+          }
+          // 3. Word boundary prefix
+          else {
+            var words = (pName + ' ' + sName + ' ' + aliases.join(' ')).split(/\s+/);
+            var wordMatch = false;
+            words.forEach(function (w) {
+              if (w.indexOf(q) === 0 && q.length >= 3) wordMatch = true;
+            });
+            if (wordMatch) {
+              score = 65;
+              matchField = 'Word Boundary Prefix';
+            }
+            // 4. Substring match (lowest priority, min 4 chars)
+            else if (q.length >= 4 && (pName.indexOf(q) !== -1 || aliases.some(function (a) { return a.indexOf(q) !== -1; }))) {
+              score = 40;
+              matchField = 'Substring Match';
+            }
+          }
+        }
+      }
+
+      if (score > 0) {
+        matches.push({ plant: plant, score: score, matchField: matchField });
+      }
+    });
+
+    matches.sort(function (a, b) { return b.score - a.score; });
+    return matches.length > 0 ? matches[0].plant : null;
+  }
+
   async function openKnowledgeLibrary(sourceId) {
     state.khPrevScroll = window.scrollY || 0;
     state.khSubView = 'LIBRARY';
     state.khActiveSource = sourceId;
     state.khActiveDocId = null;
-    state.khLibraryLoading = true;
-    state.khLibraryItems = [];
-    state.khFilteredItems = null;
     state.khSearchQuery = '';
     state.khProductAnalysis = null;
-    render({ scroll: 'top' });
+    state.khIntegratedResult = null;
+    state.khPlantExplanation = null;
 
+    ensureDravyaIndex();
+
+    var cachedItems = state.khLibraryCache ? state.khLibraryCache[sourceId] : null;
+    if (cachedItems) {
+      state.khLibraryItems = cachedItems;
+      state.khFilteredItems = cachedItems;
+      state.khLibraryLoading = false;
+      render({ scroll: 'top' });
+
+      // Refresh in background non-blocking
+      fetchSourceLibraryEvidence(sourceId, false);
+    } else {
+      state.khLibraryLoading = true;
+      state.khLibraryItems = [];
+      state.khFilteredItems = null;
+      render({ scroll: 'top' });
+      await fetchSourceLibraryEvidence(sourceId, true);
+    }
+
+    // Fetch product analysis separately and update lazily
+    fetchProductSourceAnalysisAsync(sourceId);
+  }
+
+  async function fetchSourceLibraryEvidence(sourceId, renderOnComplete) {
     var queryMap = {
       charaka: 'Charaka',
       sushruta: 'Sushruta',
@@ -6239,106 +6364,140 @@
       drugs_act: 'Drugs and Cosmetics Act'
     };
     var q = queryMap[sourceId] || '';
-    var activeCase = state.currentCase || (state.cases && state.cases[0]);
-
-    var searchPromise = api('/api/knowledge/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, limit: 30 })
-    }).catch(function (e) {
-      toast('Failed to load library items: ' + e.message, 'error');
-      return null;
-    });
-
-    var paPromise = activeCase ? api('/api/knowledge/source-analysis/' + sourceId + '/' + activeCase.id).catch(function () { return null; }) : Promise.resolve(null);
-
-    var res = await Promise.all([searchPromise, paPromise]);
-    var data = res[0];
-    var paData = res[1];
-
-    var items = [];
-    if (data && data.sources) {
-      data.sources.forEach(function (src) {
-        if (src.results && src.results.length > 0) {
-          src.results.forEach(function (r) {
-            if (sourceId === 'charaka' && r.title.indexOf('Charaka') === -1) return;
-            if (sourceId === 'sushruta' && r.title.indexOf('Sushruta') === -1) return;
-            if (sourceId === 'ayush_guidelines' && r.title.indexOf('AYUSH') === -1 && r.source_name !== 'AYUSH_GUIDELINES') return;
-            if (sourceId === 'drugs_act' && r.title.indexOf('Drugs') === -1 && r.source_name !== 'DRUGS_ACT') return;
-            items.push(r);
-          });
-        }
+    try {
+      var data = await api('/api/knowledge/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, limit: 30 })
       });
+      var items = [];
+      if (data && data.sources) {
+        data.sources.forEach(function (src) {
+          if (src.results && src.results.length > 0) {
+            src.results.forEach(function (r) {
+              if (sourceId === 'charaka' && r.title.indexOf('Charaka') === -1) return;
+              if (sourceId === 'sushruta' && r.title.indexOf('Sushruta') === -1) return;
+              if (sourceId === 'ayush_guidelines' && r.title.indexOf('AYUSH') === -1 && r.source_name !== 'AYUSH_GUIDELINES') return;
+              if (sourceId === 'drugs_act' && r.title.indexOf('Drugs') === -1 && r.source_name !== 'DRUGS_ACT') return;
+              items.push(r);
+            });
+          }
+        });
+      }
+      state.khLibraryCache = state.khLibraryCache || {};
+      state.khLibraryCache[sourceId] = items;
+      state.khLibraryItems = items;
+      state.khFilteredItems = items;
+      state.khLibraryLoading = false;
+      if (renderOnComplete) {
+        render({ scroll: 'top' });
+      }
+    } catch (e) {
+      state.khLibraryLoading = false;
+      if (renderOnComplete) {
+        toast('Failed to load library items: ' + e.message, 'error');
+        render({ scroll: 'top' });
+      }
     }
-    state.khLibraryItems = items;
-    state.khFilteredItems = items;
-    state.khLibraryLoading = false;
-
-    if (paData && paData.ai_available) {
-      state.khProductAnalysis = paData;
-    }
-
-    render({ scroll: 'top' });
   }
 
-  async function fetchIntegratedKnowledgeSearch(sourceId, query) {
-    if (!query) {
-      state.khIntegratedResult = null;
-      state.khPlantExplanation = null;
-      return;
-    }
+  async function fetchProductSourceAnalysisAsync(sourceId) {
+    var activeCase = state.currentCase || (state.cases && state.cases[0]);
+    if (!activeCase) return;
+    var caseId = activeCase.public_id || activeCase.id;
     try {
-      var data = await api('/api/knowledge/integrated-search?source_name=' + encodeURIComponent(sourceId) + '&query=' + encodeURIComponent(query), {
-        method: 'POST'
-      });
-      state.khIntegratedResult = data;
-      state.khPlantExplanation = null;
-
-      // If top plant match exists, pre-fetch any existing persisted plant explanation (0 Gemini calls)
-      if (data && data.plant_match) {
-        try {
-          var exp = await api('/api/knowledge/plant-explanation/' + sourceId + '/' + data.plant_match.plant_id);
-          if (exp && exp.ai_available) {
-            state.khPlantExplanation = exp;
-          }
-        } catch (e) {
-          // Silently skip if no plant explanation exists yet
+      var paData = await api('/api/knowledge/source-analysis/' + sourceId + '/' + caseId);
+      if (paData && paData.ai_available && state.khActiveSource === sourceId) {
+        state.khProductAnalysis = paData;
+        var container = document.getElementById('kh-prod-analysis-container');
+        if (container) {
+          container.innerHTML = renderProductAnalysisCardInner(sourceId, activeCase, paData);
         }
       }
     } catch (e) {
-      console.warn('Integrated search failed:', e);
-      state.khIntegratedResult = null;
+      // Silently handle if no persisted analysis exists
     }
   }
 
+  async function switchKnowledgeProductCase(sourceId, caseIdStr) {
+    var cases = state.cases || [];
+    var foundCase = cases.find(function(c) { return String(c.id) === String(caseIdStr) || String(c.public_id) === String(caseIdStr); });
+    if (foundCase) {
+      state.currentCase = foundCase;
+    }
+    state.khProductAnalysis = null;
+    var container = document.getElementById('kh-prod-analysis-container');
+    if (container) {
+      container.innerHTML = '<div style="padding:16px;text-align:center;color:#94a3b8;"><div class="skeleton" style="height:60px;border-radius:8px;"></div><p style="font-size:12px;margin-top:8px;">Fetching product source analysis...</p></div>';
+    }
+    await fetchProductSourceAnalysisAsync(sourceId);
+    if (!state.khProductAnalysis && container) {
+      var activeCase = state.currentCase || (state.cases && state.cases[0]);
+      container.innerHTML = renderProductAnalysisCardInner(sourceId, activeCase, null);
+    }
+  }
+  window.switchKnowledgeProductCase = switchKnowledgeProductCase;
+
   async function filterSourceLibrarySearch(query) {
     state.khSearchQuery = query;
+    var token = (state.khSearchToken = (state.khSearchToken || 0) + 1);
     var q = (query || '').toLowerCase().trim();
     var allItems = state.khLibraryItems || [];
     var sourceId = state.khActiveSource || 'charaka';
 
-    if (sourceId === 'charaka' || sourceId === 'sushruta') {
-      if (q) {
-        await fetchIntegratedKnowledgeSearch(sourceId, query);
+    await ensureDravyaIndex();
+
+    if (token !== state.khSearchToken) return;
+
+    if (!q) {
+      state.khIntegratedResult = null;
+      state.khPlantExplanation = null;
+      state.khFilteredItems = allItems;
+    } else {
+      state.khFilteredItems = allItems.filter(function (item) {
+        var title = (item.title || '').toLowerCase();
+        var excerpt = (item.excerpt || item.summary || '').toLowerCase();
+        var locator = (item.evidence_locator || '').toLowerCase();
+        var authority = (item.source_authority || item.source_name || '').toLowerCase();
+        return title.indexOf(q) !== -1 || excerpt.indexOf(q) !== -1 || locator.indexOf(q) !== -1 || authority.indexOf(q) !== -1;
+      });
+
+      if (sourceId === 'charaka' || sourceId === 'sushruta') {
+        var plantMatch = searchDravyaIndexLocal(q);
+        if (plantMatch) {
+          state.khIntegratedResult = {
+            query: query,
+            has_plant_match: true,
+            has_classical_match: state.khFilteredItems.length > 0,
+            plant_match: plantMatch,
+            classical_evidence: state.khFilteredItems
+          };
+
+          try {
+            var exp = await api('/api/knowledge/plant-explanation/' + sourceId + '/' + plantMatch.plant_id);
+            if (token === state.khSearchToken && exp && exp.ai_available) {
+              state.khPlantExplanation = exp;
+            }
+          } catch (e) {
+            // Silently skip if no plant explanation exists yet
+          }
+        } else {
+          state.khIntegratedResult = {
+            query: query,
+            has_plant_match: false,
+            has_classical_match: state.khFilteredItems.length > 0,
+            plant_match: null,
+            classical_evidence: state.khFilteredItems
+          };
+          state.khPlantExplanation = null;
+        }
       } else {
         state.khIntegratedResult = null;
         state.khPlantExplanation = null;
-        state.khFilteredItems = allItems;
-      }
-    } else {
-      state.khIntegratedResult = null;
-      if (!q) {
-        state.khFilteredItems = allItems;
-      } else {
-        state.khFilteredItems = allItems.filter(function (item) {
-          var title = (item.title || '').toLowerCase();
-          var excerpt = (item.excerpt || item.summary || '').toLowerCase();
-          var locator = (item.evidence_locator || '').toLowerCase();
-          var authority = (item.source_authority || item.source_name || '').toLowerCase();
-          return title.indexOf(q) !== -1 || excerpt.indexOf(q) !== -1 || locator.indexOf(q) !== -1 || authority.indexOf(q) !== -1;
-        });
       }
     }
+
+    if (token !== state.khSearchToken) return;
 
     var contentEl = document.getElementById('kh-library-items-list');
     var countEl = document.getElementById('kh-search-count-pill');
@@ -6750,6 +6909,87 @@
     return html;
   }
 
+  function renderProductAnalysisCardInner(sourceId, activeCase, pa) {
+    if (!activeCase) {
+      return `
+        <div class="kh-prod-analysis-card">
+          <div class="kh-prod-analysis-header">
+            <div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px;">
+                PRODUCT-SPECIFIC SOURCE RESEARCH
+              </div>
+              <h3 style="margin:0;font-size:15px;font-weight:600;color:#f8fafc;">Select a product case to analyze this source against your formulation</h3>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="if(window.AYUR){state.view='product-cases';render();}">
+              Select Product →
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || { title: 'Source' };
+    var paSections = (pa && pa.structured_sections) || {};
+    var cases = state.cases || [];
+    var activeCaseId = activeCase.public_id || activeCase.id;
+
+    var caseOptionsHtml = cases.map(function (c) {
+      var cId = c.public_id || c.id;
+      var selected = (String(cId) === String(activeCaseId) || String(c.id) === String(activeCase.id)) ? 'selected' : '';
+      return `<option value="${escapeHtml(cId)}" ${selected}>${escapeHtml(c.name)}</option>`;
+    }).join('');
+
+    return `
+      <div class="kh-prod-analysis-card">
+        <div class="kh-prod-analysis-header">
+          <div>
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:#34d399;text-transform:uppercase;margin-bottom:4px;">
+              RESEARCH THIS SOURCE FOR YOUR PRODUCT
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:2px;">
+              <label style="font-size:12px;color:#94a3b8;font-weight:600;margin:0;">Selected Product:</label>
+              <select class="form-select form-select-sm" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(52,211,153,0.4);border-radius:6px;padding:4px 10px;font-size:13px;font-weight:600;max-width:260px;" onchange="switchKnowledgeProductCase('${escapeHtml(sourceId)}', this.value)">
+                ${caseOptionsHtml || `<option value="${escapeHtml(activeCaseId)}" selected>${escapeHtml(activeCase.name)}</option>`}
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="kh-analyze-prod-btn" onclick="generateProductSourceAnalysis('${escapeHtml(sourceId)}', '${escapeHtml(activeCaseId)}')">
+            ✨ ${pa ? 'Re-Analyze Source for Product' : 'Analyze Source for My Product'}
+          </button>
+        </div>
+
+        ${pa && pa.summary_60s ? `
+          <div style="background:rgba(15,23,42,0.7);border:1px solid rgba(52,211,153,0.3);border-radius:10px;padding:16px;margin-top:12px;">
+            <div style="font-size:11px;font-weight:800;color:#34d399;margin-bottom:6px;letter-spacing:0.5px;">GROUNDED PRODUCT INTELLIGENCE OVERVIEW</div>
+            <p style="font-size:13.5px;color:#f8fafc;line-height:1.6;margin:0 0 12px 0;">${escapeHtml(pa.summary_60s)}</p>
+            ${paSections.relevant_ingredients ? `
+              <div style="margin-bottom:10px;">
+                <span style="font-size:11px;font-weight:700;color:#94a3b8;display:block;margin-bottom:4px;">MATCHED PRODUCT INGREDIENTS:</span>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  ${(Array.isArray(paSections.relevant_ingredients) ? paSections.relevant_ingredients : [paSections.relevant_ingredients]).map(ing => `<span class="chip" style="background:rgba(52,211,153,0.15);color:#34d399;font-size:11px;">${escapeHtml(String(ing))}</span>`).join('')}
+                </div>
+              </div>
+            ` : ''}
+            ${paSections.source_findings ? `
+              <div style="margin-top:10px;font-size:12.5px;color:#cbd5e1;line-height:1.5;">
+                <strong style="color:#e2e8f0;">Source Findings:</strong> ${escapeHtml(typeof paSections.source_findings === 'object' ? JSON.stringify(paSections.source_findings) : String(paSections.source_findings))}
+              </div>
+            ` : ''}
+            ${paSections.limitations ? `
+              <div style="margin-top:8px;font-size:11.5px;color:#94a3b8;font-style:italic;">
+                ⚠️ ${escapeHtml(String(paSections.limitations))}
+              </div>
+            ` : ''}
+          </div>
+        ` : `
+          <p style="font-size:13px;color:#94a3b8;margin:12px 0 0 0;">
+            Click <strong>Analyze Source for My Product</strong> to evaluate how evidence in ${escapeHtml(sourceMeta.title)} specifically applies to your active formulation (<em>${escapeHtml(activeCase.name)}</em>).
+          </p>
+        `}
+      </div>
+    `;
+  }
+
   function renderKnowledgeLibraryView(sourceId) {
     var sourceMeta = knowledgeSources.find(function (s) { return s.id === sourceId; }) || {
       title: 'Knowledge Source',
@@ -6774,73 +7014,11 @@
       itemsHtml = renderLibraryItemsContent(items);
     }
 
-    var prodAnalysisHtml = '';
-    if (activeCase) {
-      var pa = state.khProductAnalysis;
-      var paSections = (pa && pa.structured_sections) || {};
-      prodAnalysisHtml = `
-        <div class="kh-prod-analysis-card">
-          <div class="kh-prod-analysis-header">
-            <div>
-              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:#34d399;text-transform:uppercase;margin-bottom:4px;">
-                RESEARCH THIS SOURCE FOR YOUR PRODUCT
-              </div>
-              <h3 style="margin:0;font-size:17px;font-weight:700;color:#f8fafc;">
-                Selected Product: <span style="color:#34d399;">${escapeHtml(activeCase.name)}</span>
-              </h3>
-            </div>
-            <button class="btn btn-primary btn-sm" id="kh-analyze-prod-btn" onclick="generateProductSourceAnalysis('${escapeHtml(sourceId)}', '${escapeHtml(activeCase.id)}')">
-              ✨ ${pa ? 'Re-Analyze Source for Product' : 'Analyze Source for My Product'}
-            </button>
-          </div>
+    var prodAnalysisHtml = `<div id="kh-prod-analysis-container">${renderProductAnalysisCardInner(sourceId, activeCase, state.khProductAnalysis)}</div>`;
 
-          ${pa && pa.summary_60s ? `
-            <div style="background:rgba(15,23,42,0.7);border:1px solid rgba(52,211,153,0.3);border-radius:10px;padding:16px;margin-top:12px;">
-              <div style="font-size:11px;font-weight:800;color:#34d399;margin-bottom:6px;letter-spacing:0.5px;">GROUNDED PRODUCT INTELLIGENCE OVERVIEW</div>
-              <p style="font-size:13.5px;color:#f8fafc;line-height:1.6;margin:0 0 12px 0;">${escapeHtml(pa.summary_60s)}</p>
-              ${paSections.relevant_ingredients ? `
-                <div style="margin-bottom:10px;">
-                  <span style="font-size:11px;font-weight:700;color:#94a3b8;display:block;margin-bottom:4px;">MATCHED PRODUCT INGREDIENTS:</span>
-                  <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    ${(Array.isArray(paSections.relevant_ingredients) ? paSections.relevant_ingredients : [paSections.relevant_ingredients]).map(ing => `<span class="chip" style="background:rgba(52,211,153,0.15);color:#34d399;font-size:11px;">${escapeHtml(String(ing))}</span>`).join('')}
-                  </div>
-                </div>
-              ` : ''}
-              ${paSections.source_findings ? `
-                <div style="margin-top:10px;font-size:12.5px;color:#cbd5e1;line-height:1.5;">
-                  <strong style="color:#e2e8f0;">Source Findings:</strong> ${escapeHtml(typeof paSections.source_findings === 'object' ? JSON.stringify(paSections.source_findings) : String(paSections.source_findings))}
-                </div>
-              ` : ''}
-              ${paSections.limitations ? `
-                <div style="margin-top:8px;font-size:11.5px;color:#94a3b8;font-style:italic;">
-                  ⚠️ ${escapeHtml(String(paSections.limitations))}
-                </div>
-              ` : ''}
-            </div>
-          ` : `
-            <p style="font-size:13px;color:#94a3b8;margin:0;">
-              Click <strong>Analyze Source for My Product</strong> to evaluate how evidence in ${escapeHtml(sourceMeta.title)} specifically applies to your active formulation (<em>${escapeHtml(activeCase.name)}</em>).
-            </p>
-          `}
-        </div>
-      `;
-    } else {
-      prodAnalysisHtml = `
-        <div class="kh-prod-analysis-card">
-          <div class="kh-prod-analysis-header">
-            <div>
-              <div style="font-size:11px;font-weight:700;letter-spacing:0.6px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px;">
-                PRODUCT-SPECIFIC SOURCE RESEARCH
-              </div>
-              <h3 style="margin:0;font-size:15px;font-weight:600;color:#f8fafc;">Select a product case to analyze this source against your formulation</h3>
-            </div>
-            <button class="btn btn-secondary btn-sm" onclick="if(window.AYUR){state.view='product-cases';render();}">
-              Select Product →
-            </button>
-          </div>
-        </div>
-      `;
-    }
+    var countPillText = state.khLibraryLoading
+      ? 'Loading evidence records...'
+      : `Showing ${items.length} of ${totalItems} evidence records`;
 
     return `
       <div class="knowledge-library">
@@ -6878,7 +7056,7 @@
           <span class="kh-source-search-icon">🔍</span>
           <input type="text" class="kh-source-search-input" id="kh-library-search-input" placeholder="${escapeHtml(sourceMeta.searchPlaceholder)}" value="${escapeHtml(state.khSearchQuery || '')}" onkeyup="filterSourceLibrarySearch(this.value)">
           <span class="chip" id="kh-search-count-pill" style="background:rgba(52,211,153,0.15);color:#34d399;font-weight:600;font-size:12px;white-space:nowrap;padding:6px 12px;">
-            Showing ${items.length} of ${totalItems} evidence records
+            ${escapeHtml(countPillText)}
           </span>
         </div>
 
@@ -6959,22 +7137,50 @@
       `;
     });
 
+    var defaultUrls = {
+      charaka: 'https://niimh.nic.in/e-books/e-caraka/',
+      sushruta: 'https://niimh.nic.in/e-books/e-caraka/',
+      pmc: 'https://pmc.ncbi.nlm.nih.gov/',
+      fssai: 'https://www.fssai.gov.in/',
+      ayush_guidelines: 'https://ayush.gov.in/',
+      drugs_act: 'https://cdsco.gov.in/'
+    };
+
     var evidenceHtml = '';
     var officialUrl = '';
+    var isDeepLink = false;
     evidenceItems.forEach(function (ev, idx) {
       if (!officialUrl && (ev.official_url || ev.source_url)) {
-        officialUrl = ev.official_url || ev.source_url;
+        var rawUrl = ev.official_url || ev.source_url;
+        if (rawUrl && (rawUrl.indexOf('http://') === 0 || rawUrl.indexOf('https://') === 0)) {
+          officialUrl = rawUrl;
+          isDeepLink = true;
+        }
       }
       evidenceHtml += `
         <div style="margin-bottom:14px;">
-          <div style="font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:4px;">
-            Evidence #${idx + 1}: ${escapeHtml(ev.evidence_locator || ev.source_identifier || 'Record')}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <div style="font-size:12px;font-weight:600;color:#94a3b8;">
+              Evidence #${idx + 1}: ${escapeHtml(ev.evidence_locator || ev.source_identifier || 'Record')}
+            </div>
+            ${(ev.official_url || ev.source_url) ? `
+              <a href="${escapeHtml(ev.official_url || ev.source_url)}" target="_blank" rel="noopener" style="font-size:11px;color:#34d399;font-weight:600;">
+                Open Passage ↗
+              </a>
+            ` : ''}
           </div>
           <div class="kh-evidence-text">${escapeHtml(ev.excerpt || ev.raw_text || ev.summary || 'No raw text excerpt available.')}</div>
           ${ev.content_hash ? `<div style="font-size:10px;font-family:monospace;color:#64748b;">SHA256: ${escapeHtml(ev.content_hash)}</div>` : ''}
         </div>
       `;
     });
+
+    if (!officialUrl) {
+      officialUrl = defaultUrls[state.khActiveSource] || defaultUrls.charaka;
+      isDeepLink = false;
+    }
+
+    var sourceBtnText = isDeepLink ? 'Read Original Source ↗' : 'Open Official Source ↗';
 
     return `
       <div class="kh-reader-container">
@@ -6992,7 +7198,7 @@
           </div>
           ${officialUrl ? `
             <a class="btn btn-secondary btn-sm" href="${escapeHtml(officialUrl)}" target="_blank" rel="noopener">
-              Read Original Source ↗
+              ${escapeHtml(sourceBtnText)}
             </a>
           ` : ''}
         </div>
