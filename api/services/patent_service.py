@@ -851,10 +851,15 @@ def run_patent_intelligence(
 
     now = datetime.now(timezone.utc)
 
+    query_plan_envelope = {
+        "version": "2.0_INDIA_PATENT_UPGRADE",
+        "plan": query_plan,
+    }
+
     search = PatentSearch(
         owner_id=owner.id,
         product_case_id=case.id,
-        search_concepts=json.dumps(query_plan),
+        search_concepts=json.dumps(query_plan_envelope),
         jurisdictions_searched=json.dumps(search_jurisdictions),
         total_results=len(analyzed_candidates),
         raw_discovered_count=raw_discovered,
@@ -909,6 +914,33 @@ def run_patent_intelligence(
             db.add(record)
             db.commit()
             db.refresh(record)
+        else:
+            rec_updated = False
+            if not record.application_number and res.application_number:
+                record.application_number = res.application_number
+                rec_updated = True
+            if res.family_members:
+                existing_fm = []
+                if record.family_members_json:
+                    try:
+                        existing_fm = json.loads(record.family_members_json)
+                    except Exception:
+                        existing_fm = []
+                for fm in res.family_members:
+                    if fm not in existing_fm:
+                        existing_fm.append(fm)
+                        rec_updated = True
+                if rec_updated:
+                    record.family_members_json = json.dumps(existing_fm)
+            if not record.priority_date and res.priority_date:
+                record.priority_date = res.priority_date
+                rec_updated = True
+            if not record.filing_date and res.filing_date:
+                record.filing_date = res.filing_date
+                rec_updated = True
+            if rec_updated:
+                db.commit()
+                db.refresh(record)
 
         has_abstract = bool(res.abstract and len(res.abstract.strip()) > 10)
         has_claims = bool(getattr(res, "claims", None) and len(getattr(res, "claims", [])) > 0)
@@ -1044,6 +1076,16 @@ def get_or_run_patent_intelligence(
             .first()
         )
         if existing_search:
+            if case.is_demo or case.public_id == "demo-001":
+                sc_raw = existing_search.search_concepts or ""
+                if "2.0_INDIA_PATENT_UPGRADE" not in sc_raw:
+                    logger.info("Invalidating stale pre-2.0 demo patent search ID %s", existing_search.id)
+                    db.query(PatentRelevance).filter(PatentRelevance.search_id == existing_search.id).delete()
+                    db.query(PatentSearch).filter(PatentSearch.id == existing_search.id).delete()
+                    db.commit()
+                    existing_search = None
+
+        if existing_search:
             relevances = (
                 db.query(PatentRelevance)
                 .filter(PatentRelevance.search_id == existing_search.id)
@@ -1052,7 +1094,17 @@ def get_or_run_patent_intelligence(
             items = [_relevance_to_dict(r) for r in relevances]
             items.sort(key=lambda x: (x["relevance_score"] is not None, x["relevance_score"] if x["relevance_score"] is not None else -1), reverse=True)
 
-            query_plan = _deserialize_list(existing_search.search_concepts)
+            qp_raw = existing_search.search_concepts
+            query_plan = []
+            if qp_raw:
+                try:
+                    parsed_qp = json.loads(qp_raw)
+                    if isinstance(parsed_qp, dict):
+                        query_plan = parsed_qp.get("plan", [])
+                    elif isinstance(parsed_qp, list):
+                        query_plan = parsed_qp
+                except Exception:
+                    query_plan = []
 
             raw_disc = getattr(existing_search, "raw_discovered_count", None) or len(items)
             uniq_scr = getattr(existing_search, "unique_screened_count", None) or len(items)

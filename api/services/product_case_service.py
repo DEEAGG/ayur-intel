@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import time
 from typing import List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -564,6 +564,21 @@ def get_or_create_demo_case(db: Session, owner: User) -> dict:
 
         # Check if already updated to 5-ingredient sleep showcase concept
         if len(curr_ings) == 5 and demo_case.name == "AYUR-INTEL NidraAdapt Botanical Complex":
+            # Invalidate stale pre-2.0 patent search for demo-001 if present
+            try:
+                stale_searches = db.execute(
+                    text("SELECT id, search_concepts FROM patent_searches WHERE product_case_id = :cid"),
+                    {"cid": demo_case.id}
+                ).fetchall()
+                for s_row in stale_searches:
+                    sc_text = str(s_row[1] or "")
+                    if "2.0_INDIA_PATENT_UPGRADE" not in sc_text:
+                        db.execute(text("DELETE FROM patent_relevances WHERE search_id = :sid"), {"sid": s_row[0]})
+                        db.execute(text("DELETE FROM patent_searches WHERE id = :sid"), {"sid": s_row[0]})
+                        db.commit()
+                        logger.info("Invalidated stale pre-2.0 patent search %s for demo-001", s_row[0])
+            except Exception as e:
+                logger.debug("Demo patent search version check note: %s", e)
             return _case_to_dict(demo_case)
 
         # Stale demo case found — Perform IN-PLACE MIGRATION of canonical demo-001

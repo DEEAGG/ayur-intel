@@ -1776,6 +1776,7 @@
 
     // Jurisdiction Breakdown & Coverage Summary Box
     var jurCounts = { IN: 0, US: 0, WO: 0, EP: 0, OTHER: 0, UNKNOWN: 0 };
+    var indiaConnectedCount = 0;
     items.forEach(function(item) {
       var rec = item.patent || {};
       var code = getPatentJurisdictionCode(rec);
@@ -1785,17 +1786,20 @@
       else if (code === "EP") jurCounts.EP++;
       else if (code === "UNKNOWN") jurCounts.UNKNOWN++;
       else jurCounts.OTHER++;
+
+      if (hasIndiaConnection(rec)) indiaConnectedCount++;
     });
 
     html += '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);padding:12px 16px;border-radius:8px;margin-bottom:20px;font-size:12px;">'
-      + '<div style="font-weight:700;color:#94a3b8;letter-spacing:0.05em;text-transform:uppercase;">Jurisdiction Coverage:</div>'
+      + '<div style="font-weight:700;color:#94a3b8;letter-spacing:0.05em;text-transform:uppercase;">Publication Jurisdiction:</div>'
       + '<div style="display:flex;gap:14px;flex-wrap:wrap;color:#f8fafc;font-weight:600;">'
-      + '<span>🇮🇳 IN: <strong>' + jurCounts.IN + '</strong></span>'
-      + '<span>🇺🇸 US: <strong>' + jurCounts.US + '</strong></span>'
-      + '<span>🌐 WO: <strong>' + jurCounts.WO + '</strong></span>'
-      + '<span>🇪🇺 EP: <strong>' + jurCounts.EP + '</strong></span>'
+      + '<span>🇮🇳 IN Pubs: <strong>' + jurCounts.IN + '</strong></span>'
+      + '<span>🇺🇸 US Pubs: <strong>' + jurCounts.US + '</strong></span>'
+      + '<span>🌐 WO Pubs: <strong>' + jurCounts.WO + '</strong></span>'
+      + '<span>🇪🇺 EP Pubs: <strong>' + jurCounts.EP + '</strong></span>'
       + '<span>Other: <strong>' + jurCounts.OTHER + '</strong></span>'
       + '<span>Unknown: <strong>' + jurCounts.UNKNOWN + '</strong></span>'
+      + '<span style="border-left:1px solid rgba(255,255,255,0.2);padding-left:14px;color:#fbbf24;">🇮🇳 India-Connected (Priority/App/Family): <strong>' + indiaConnectedCount + '</strong></span>'
       + '</div>'
       + '</div>';
 
@@ -1905,9 +1909,9 @@
       if (activeTab === "india" && indianItems.length === 0) {
         html += '<div class="card" style="padding:28px;background:rgba(15,23,42,0.8);border:1px solid rgba(245,158,11,0.3);margin-bottom:24px;text-align:center;">'
           + '<div style="font-size:36px;margin-bottom:8px;">🇮🇳</div>'
-          + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;margin-bottom:6px;">No India-Identified Patent Records in Current Public Screening</h3>'
+          + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;margin-bottom:6px;">No India-Connected Patent Records Identified</h3>'
           + '<p style="font-size:13px;color:#cbd5e1;max-width:640px;margin:0 auto 16px auto;line-height:1.6;">'
-          + 'No patent records with explicit Indian jurisdiction metadata (IN) were returned during this public literature screening for <strong>' + escapeHtml(caseName) + '</strong>.<br>'
+          + 'No India-connected patent records were identified in the current screening based on verified Indian publication, application, priority, or PCT/IN family metadata.<br>'
           + 'Public literature indices cover a subset of published Indian patents. For a complete Indian patent search, verify directly on official government search portals.'
           + '</p>'
           + '<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'
