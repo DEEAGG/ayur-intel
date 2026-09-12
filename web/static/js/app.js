@@ -6067,16 +6067,17 @@
       category: 'regulatory',
       categoryLabel: 'Regulatory',
       description: 'Official guidelines for Ayurvedic product manufacturing, licensing, and quality control.',
-      isLive: false,
-      badgeText: 'EXPANDING COVERAGE',
-      badgeClass: 'kh-card-badge-expanding',
+      isLive: true,
+      badgeText: 'LIVE SOURCE',
+      badgeClass: 'kh-card-badge-live',
+      searchPlaceholder: 'Search guidelines, GMP rules or quality standards (e.g. Schedule T, Quality, Licensing)...',
       overviewText: 'Official Ministry of Ayush regulatory directives, Good Manufacturing Practices (GMP), Pharmacopoeial Standards of Ayurveda (API), and licensing guidelines.',
       capabilities: [
         'Verify official manufacturing compliance standards and Schedule T requirements',
-        'Review mandatory quality control specifications and stability parameters',
+        'Review mandatory quality control specifications and pharmacopoeial monograph parameters',
         'Track regulatory licensing frameworks for Ayurvedic proprietary medicines'
       ],
-      disclaimer: 'EXPANDING COVERAGE · OFFICIAL GAZETTE INTEGRATION IN PROGRESS.'
+      disclaimer: 'Official Ministry of Ayush regulatory directives, gazette notices, and pharmacopoeial standards context preserved.'
     },
     {
       id: 'fssai',
@@ -6104,17 +6105,17 @@
       title: 'Indian Patent Office',
       category: 'patent',
       categoryLabel: 'Patents',
-      description: 'Search Indian patents related to Ayurvedic formulations and herbal products.',
+      description: 'Indian Patent Office literature, prior art research & formulation intelligence.',
       isLive: false,
       badgeText: 'PATENT INTEL',
       badgeClass: 'kh-card-badge-patent',
-      overviewText: 'Indian Patent Intelligence helps investigate published patent literature for herbal formulations, active fractions, extraction processes, and technical concepts.',
+      overviewText: 'Explore official Indian Patent System context, CGPDTM patent literature, published specifications, and prior-art screening for herbal formulations.',
       capabilities: [
-        'Screen patent prior art to identify potential novelty barriers and freedom-to-operate risks',
-        'Compare formulation claims against published patent claims and specifications',
-        'Evaluate patent family members, filing dates, and legal status'
+        'Review Indian Patent Office (CGPDTM) examination context and publication framework',
+        'Investigate published patent specifications for herbal extraction processes and active fractions',
+        'Screen patent literature prior art for technical formulation research'
       ],
-      disclaimer: 'Search and prior art screening are performed via AYUR-INTEL Patent Intelligence module.'
+      disclaimer: 'Patent search and prior art screening are performed for technical research and decision-support via AYUR-INTEL Patent Intelligence module. Does not constitute legal advice or formal freedom-to-operate opinion.'
     },
     {
       id: 'drugs_act',
@@ -6123,16 +6124,17 @@
       category: 'regulatory',
       categoryLabel: 'Regulatory',
       description: 'Regulatory framework for Ayurvedic, Siddha, and Unani drugs in India.',
-      isLive: false,
-      badgeText: 'EXPANDING COVERAGE',
-      badgeClass: 'kh-card-badge-expanding',
+      isLive: true,
+      badgeText: 'LIVE SOURCE',
+      badgeClass: 'kh-card-badge-live',
+      searchPlaceholder: 'Search statutes, rules or provisions (e.g. Chapter IV-A, Misbranding, Rule 161)...',
       overviewText: 'Primary statutory framework governing Ayurvedic, Siddha, and Unani drugs under Chapter IV-A of the Drugs and Cosmetics Act 1940 and Rules 1945.',
       capabilities: [
-        'Review statutory drug definitions, manufacturing license rules, and misbranding laws',
+        'Review statutory drug definitions, manufacturing license rules, and Section 33EEB misbranding laws',
         'Inspect Schedule T Good Manufacturing Practice (GMP) requirements',
-        'Track official regulations for Ayurvedic drug labeling and prohibited claims'
+        'Track Rule 161 mandatory labelling rules and Ayurvedic Medicine container declarations'
       ],
-      disclaimer: 'EXPANDING COVERAGE · STATUTORY DIGEST IN PROGRESS.'
+      disclaimer: 'Statutory Drugs & Cosmetics Act 1940 and Rules 1945 digest preserved for regulatory decision-support.'
     }
   ];
 
@@ -6232,45 +6234,48 @@
       charaka: 'Charaka',
       sushruta: 'Sushruta',
       pmc: 'PMC',
-      fssai: 'FSSAI'
+      fssai: 'FSSAI',
+      ayush_guidelines: 'AYUSH Guidelines',
+      drugs_act: 'Drugs and Cosmetics Act'
     };
     var q = queryMap[sourceId] || '';
+    var activeCase = state.currentCase || (state.cases && state.cases[0]);
 
-    try {
-      var data = await api('/api/knowledge/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, limit: 30 })
-      });
-      var items = [];
-      if (data && data.sources) {
-        data.sources.forEach(function (src) {
-          if (src.results && src.results.length > 0) {
-            src.results.forEach(function (r) {
-              if (sourceId === 'charaka' && r.title.indexOf('Charaka') === -1) return;
-              if (sourceId === 'sushruta' && r.title.indexOf('Sushruta') === -1) return;
-              items.push(r);
-            });
-          }
-        });
-      }
-      state.khLibraryItems = items;
-      state.khFilteredItems = items;
-    } catch (e) {
+    var searchPromise = api('/api/knowledge/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q, limit: 30 })
+    }).catch(function (e) {
       toast('Failed to load library items: ' + e.message, 'error');
+      return null;
+    });
+
+    var paPromise = activeCase ? api('/api/knowledge/source-analysis/' + sourceId + '/' + activeCase.id).catch(function () { return null; }) : Promise.resolve(null);
+
+    var res = await Promise.all([searchPromise, paPromise]);
+    var data = res[0];
+    var paData = res[1];
+
+    var items = [];
+    if (data && data.sources) {
+      data.sources.forEach(function (src) {
+        if (src.results && src.results.length > 0) {
+          src.results.forEach(function (r) {
+            if (sourceId === 'charaka' && r.title.indexOf('Charaka') === -1) return;
+            if (sourceId === 'sushruta' && r.title.indexOf('Sushruta') === -1) return;
+            if (sourceId === 'ayush_guidelines' && r.title.indexOf('AYUSH') === -1 && r.source_name !== 'AYUSH_GUIDELINES') return;
+            if (sourceId === 'drugs_act' && r.title.indexOf('Drugs') === -1 && r.source_name !== 'DRUGS_ACT') return;
+            items.push(r);
+          });
+        }
+      });
     }
+    state.khLibraryItems = items;
+    state.khFilteredItems = items;
     state.khLibraryLoading = false;
 
-    var activeCase = state.currentCase || (state.cases && state.cases[0]);
-    if (activeCase) {
-      try {
-        var paData = await api('/api/knowledge/source-analysis/' + sourceId + '/' + activeCase.id);
-        if (paData && paData.ai_available) {
-          state.khProductAnalysis = paData;
-        }
-      } catch (e) {
-        // Silently skip if no product analysis exists yet
-      }
+    if (paData && paData.ai_available) {
+      state.khProductAnalysis = paData;
     }
 
     render({ scroll: 'top' });

@@ -189,8 +189,13 @@ def search_knowledge(
     }
 
 
+_sources_synced = False
+
 def _sync_sources(db: Session, registry: SourceRegistry) -> None:
     """Ensure all registered adapters have corresponding Source records in DB."""
+    global _sources_synced
+    if _sources_synced:
+        return
     for adapter in registry.get_all():
         existing = db.query(Source).filter(Source.name == adapter.name).first()
         if existing is None:
@@ -210,8 +215,8 @@ def _sync_sources(db: Session, registry: SourceRegistry) -> None:
             db.add(src)
         else:
             existing.is_configured = adapter.is_configured()
-            existing.updated_at = datetime.now(timezone.utc)
     db.commit()
+    _sources_synced = True
 
 
 # ---------------------------------------------------------------------------

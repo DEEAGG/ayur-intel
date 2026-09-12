@@ -350,10 +350,14 @@ def get_source_registry() -> SourceRegistry:
             PubMedCentralAdapter,
             FssaiRegulationsAdapter,
             ClassicalSamhitaAdapter,
+            AyushGuidelinesAdapter,
+            DrugsActAdapter,
         )
         _registry.register(PubMedCentralAdapter())
         _registry.register(FssaiRegulationsAdapter())
         _registry.register(ClassicalSamhitaAdapter())
+        _registry.register(AyushGuidelinesAdapter())
+        _registry.register(DrugsActAdapter())
     except Exception as e:
         logger.warning("Failed to register real knowledge adapters: %s", e)
 

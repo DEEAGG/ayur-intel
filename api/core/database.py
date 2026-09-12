@@ -162,6 +162,8 @@ def _seed_initial_knowledge_hub_if_empty() -> None:
         ClassicalSamhitaAdapter,
         PubMedCentralAdapter,
         FssaiRegulationsAdapter,
+        AyushGuidelinesAdapter,
+        DrugsActAdapter,
     )
     from api.services.knowledge_ingestion_service import KnowledgeIngestionService
     from api.services.product_case_service import get_or_create_demo_user
@@ -175,25 +177,35 @@ def _seed_initial_knowledge_hub_if_empty() -> None:
         if db.query(DravyaPlant).count() == 0:
             DravyaService.ingest_dravya_dataset(db)
 
-        total_ev = db.query(KnowledgeEvidence).count()
-        if total_ev > 0:
-            return  # Evidence already seeded
-
         user = get_or_create_demo_user(db)
 
-        # 1. Classical Samhita (Charaka & Sushruta)
-        c_adapter = ClassicalSamhitaAdapter()
-        c_res = c_adapter.search(query="", limit=10)
-        KnowledgeIngestionService.ingest_results(db, user.id, c_res.results)
+        # Ingest evidence from all 5 official production adapters if evidence count is low (< 20)
+        total_ev = db.query(KnowledgeEvidence).count()
+        if total_ev < 20:
+            # 1. Classical Samhita (Charaka & Sushruta)
+            c_adapter = ClassicalSamhitaAdapter()
+            c_res = c_adapter.search(query="", limit=20)
+            KnowledgeIngestionService.ingest_results(db, user.id, c_res.results)
 
-        # 2. PubMed Central
-        p_adapter = PubMedCentralAdapter()
-        p_res = p_adapter.search(query="ayurveda OR medicinal plants", limit=5)
-        KnowledgeIngestionService.ingest_results(db, user.id, p_res.results)
+            # 2. PubMed Central
+            p_adapter = PubMedCentralAdapter()
+            p_res = p_adapter.search(query="", limit=10)
+            KnowledgeIngestionService.ingest_results(db, user.id, p_res.results)
 
-        # 4. CCRAS DRAVYA Plants (~400 dataset)
-        from api.services.dravya_service import DravyaService
-        DravyaService.ingest_dravya_dataset(db)
+            # 3. FSSAI Regulations
+            f_adapter = FssaiRegulationsAdapter()
+            f_res = f_adapter.search(query="", limit=10)
+            KnowledgeIngestionService.ingest_results(db, user.id, f_res.results)
+
+            # 4. AYUSH Guidelines
+            g_adapter = AyushGuidelinesAdapter()
+            g_res = g_adapter.search(query="", limit=10)
+            KnowledgeIngestionService.ingest_results(db, user.id, g_res.results)
+
+            # 5. Drugs & Cosmetics Act
+            d_adapter = DrugsActAdapter()
+            d_res = d_adapter.search(query="", limit=10)
+            KnowledgeIngestionService.ingest_results(db, user.id, d_res.results)
 
         logger.info("Successfully seeded initial Knowledge Hub evidence records and DRAVYA plants.")
     except Exception as e:

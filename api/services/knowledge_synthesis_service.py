@@ -549,9 +549,13 @@ RETRIEVED EVIDENCE BOUNDED CONTEXT:
         from api.models.models import ProductCase, Source, KnowledgeEvidence, KnowledgeSynthesis
         doc_id = f"SOURCE_ANALYSIS_{source_name.upper()}_{case_id}"
 
-        p_case = db.query(ProductCase).filter(
-            (ProductCase.public_id == case_id) | (ProductCase.id == case_id)
-        ).first()
+        case_id_str = str(case_id).strip()
+        if case_id_str.isdigit():
+            p_case = db.query(ProductCase).filter(
+                (ProductCase.public_id == case_id_str) | (ProductCase.id == int(case_id_str))
+            ).first()
+        else:
+            p_case = db.query(ProductCase).filter(ProductCase.public_id == case_id_str).first()
 
         if not p_case:
             return {
@@ -564,14 +568,40 @@ RETRIEVED EVIDENCE BOUNDED CONTEXT:
                 "evidence_items": [],
             }
 
-        src_obj = db.query(Source).filter(Source.name == source_name.upper()).first()
+        # Map frontend source alias to canonical backend source name
+        source_map = {
+            "CHARAKA": "NIIMH_CLASSICAL",
+            "SUSHRUTA": "NIIMH_CLASSICAL",
+            "PMC": "PUBMED_CENTRAL",
+            "FSSAI": "FSSAI",
+            "AYUSH_GUIDELINES": "AYUSH_GUIDELINES",
+            "DRUGS_ACT": "DRUGS_ACT",
+        }
+        canonical_source = source_map.get(source_name.upper(), source_name.upper())
+
+        src_obj = db.query(Source).filter(
+            (Source.name == canonical_source) | (Source.name == source_name.upper())
+        ).first()
+
         evidence_query = db.query(KnowledgeEvidence)
         if src_obj:
             evidence_query = evidence_query.filter(KnowledgeEvidence.source_id == src_obj.id)
+        elif source_name.upper() in ("CHARAKA", "SUSHRUTA"):
+            evidence_query = evidence_query.filter(
+                (KnowledgeEvidence.source_identifier.ilike(f"%{source_name}%")) |
+                (KnowledgeEvidence.title.ilike(f"%{source_name}%")) |
+                (KnowledgeEvidence.excerpt.ilike(f"%{source_name}%"))
+            )
 
         evidence_rows = evidence_query.all()
         evidence_list = []
         for ev in evidence_rows:
+            # Filter specifically by Charaka or Sushruta if requested
+            if source_name.upper() == "CHARAKA" and "Charaka" not in (ev.title or "") and "Charaka" not in (ev.evidence_locator or "") and "Charaka" not in (ev.source_identifier or ""):
+                continue
+            if source_name.upper() == "SUSHRUTA" and "Sushruta" not in (ev.title or "") and "Sushruta" not in (ev.evidence_locator or "") and "Sushruta" not in (ev.source_identifier or ""):
+                continue
+
             evidence_list.append({
                 "id": ev.public_id,
                 "title": ev.title or "Evidence Record",
