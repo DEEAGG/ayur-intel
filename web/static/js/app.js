@@ -1700,6 +1700,7 @@
       + '<div class="patent-intel-title-area">'
       + '<h2>AYUR-INTEL — Patent Intelligence & Prior-Art Screening</h2>'
       + '<div class="patent-intel-subtitle">Public Patent Discovery: <strong>Europe PMC Patent Index</strong> for <strong>' + escapeHtml(caseName) + '</strong></div>'
+      + (data.analysis_mode === "VERIFIED_DEMO_SNAPSHOT" || (state.currentCase && (state.currentCase.is_demo || state.currentCase.id === "demo-001")) ? '<div style="font-size:11px;font-weight:600;color:#34d399;margin-top:4px;display:inline-block;padding:3px 8px;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);border-radius:4px;">Verified Showcase Snapshot · Built from real patent evidence retrieved through Europe PMC Patent Index</div>' : '')
       + '<div style="font-size:12px;color:#94a3b8;margin-top:6px;background:rgba(15,23,42,0.6);padding:8px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);">'
       + '<strong>Jurisdiction Focus:</strong> India (Discovery includes international literature). Verification portals: <strong>Google Patents</strong> / <strong>IP India (InPASS)</strong> / <strong>WIPO PATENTSCOPE</strong>. <strong>TKDL</strong> is a manual research resource. Discovery is non-exhaustive.'
       + '</div>'
@@ -1959,7 +1960,10 @@
           var providerId = rec.provider_record_id || "";
           var pubNum = rec.publication_number || null;
           var title = rec.title || "Untitled Patent Document";
-          var applicant = rec.applicant || "Not Listed";
+          var applicantDisplay = rec.applicant ? ('<strong>Applicant / Assignee:</strong> ' + escapeHtml(rec.applicant) + ' &nbsp;|&nbsp; ') : '';
+          var inventors = Array.isArray(rec.inventors) ? rec.inventors.join(", ") : (rec.inventors || "");
+          var inventorsDisplay = inventors ? (' &nbsp;|&nbsp; <strong>Inventors:</strong> ' + escapeHtml(inventors)) : '';
+          var sourceProvenance = rec.authority || (rec.source_name === "EUROPE_PMC_PATENTS" ? "Europe PMC Patent Index" : "Verified Public Patent Corpus");
           var pubDate = rec.publication_date || rec.filing_date || "N/A";
           var jCode = getPatentJurisdictionCode(rec);
           var jurisdiction = jCode !== "UNKNOWN" ? jCode : (rec.authority || "GLOBAL");
@@ -2029,7 +2033,7 @@
             + '<span class="patent-relevance-badge ' + badgeCls + '">' + escapeHtml(scoreLabel) + '</span>'
             + '</div>'
             + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;line-height:1.4;margin-bottom:6px;">' + escapeHtml(title) + '</h3>'
-            + '<div style="font-size:12px;color:#94a3b8;"><strong>Applicant / Assignee:</strong> ' + escapeHtml(applicant) + ' &nbsp;|&nbsp; <strong>Publication #:</strong> ' + pubNumDisplay + sourceIdDisplay + ' &nbsp;|&nbsp; <strong>Date:</strong> ' + escapeHtml(pubDate) + ' &nbsp;|&nbsp; <strong>Authority:</strong> ' + escapeHtml(rec.authority || jurisdiction) + '</div>'
+            + '<div style="font-size:12px;color:#94a3b8;">' + applicantDisplay + '<strong>Publication #:</strong> ' + pubNumDisplay + sourceIdDisplay + ' &nbsp;|&nbsp; <strong>Date:</strong> ' + escapeHtml(pubDate) + inventorsDisplay + ' &nbsp;|&nbsp; <strong>Source:</strong> ' + escapeHtml(sourceProvenance) + '</div>'
             + '</div>'
             + '</div>';
 

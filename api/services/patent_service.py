@@ -1057,18 +1057,20 @@ def get_or_run_patent_intelligence(
     force_rerun: bool = False,
 ) -> Optional[dict]:
     """GET-first retrieval of persisted patent intelligence analysis for a Product Case."""
-    case = (
-        db.query(ProductCase)
-        .filter(
-            ProductCase.public_id == case_public_id,
-            (ProductCase.owner_id == owner.id) | ((ProductCase.public_id == "demo-001") & (ProductCase.is_demo == True)),
-        )
-        .first()
-    )
+    query = db.query(ProductCase).filter(ProductCase.public_id == case_public_id)
+    if owner is not None:
+        query = query.filter((ProductCase.owner_id == owner.id) | ((ProductCase.public_id == "demo-001") & (ProductCase.is_demo == True)))
+    else:
+        query = query.filter((ProductCase.public_id == "demo-001") & (ProductCase.is_demo == True))
+    case = query.first()
     if case is None:
         return None
 
     if not force_rerun:
+        if case.is_demo or case.public_id == "demo-001":
+            from api.services.product_case_service import ensure_demo_patent_snapshot
+            ensure_demo_patent_snapshot(db, case)
+
         existing_search = (
             db.query(PatentSearch)
             .filter(PatentSearch.product_case_id == case.id)
@@ -1078,12 +1080,18 @@ def get_or_run_patent_intelligence(
         if existing_search:
             if case.is_demo or case.public_id == "demo-001":
                 sc_raw = existing_search.search_concepts or ""
-                if "2.0_INDIA_PATENT_UPGRADE" not in sc_raw:
-                    logger.info("Invalidating stale pre-2.0 demo patent search ID %s", existing_search.id)
+                if "DEMO_SHOWCASE_V3_PRECOMPUTED" not in sc_raw:
+                    logger.info("Invalidating stale demo patent search ID %s", existing_search.id)
                     db.query(PatentRelevance).filter(PatentRelevance.search_id == existing_search.id).delete()
                     db.query(PatentSearch).filter(PatentSearch.id == existing_search.id).delete()
                     db.commit()
-                    existing_search = None
+                    ensure_demo_patent_snapshot(db, case)
+                    existing_search = (
+                        db.query(PatentSearch)
+                        .filter(PatentSearch.product_case_id == case.id)
+                        .order_by(PatentSearch.created_at.desc())
+                        .first()
+                    )
 
         if existing_search:
             relevances = (
@@ -1134,6 +1142,7 @@ def get_or_run_patent_intelligence(
                 "results": items,
                 "patents": items,
                 "has_searched": True,
+                "analysis_mode": "VERIFIED_DEMO_SNAPSHOT" if (case.is_demo or case.public_id == "demo-001") else "LIVE_SEARCH",
                 "created_at": existing_search.created_at.isoformat() if existing_search.created_at else "",
             }
         else:
