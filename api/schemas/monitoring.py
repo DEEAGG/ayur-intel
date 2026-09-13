@@ -46,6 +46,10 @@ class AlertResponse(BaseModel):
     created_at: str
 
 
+class UpdateAlertRequest(BaseModel):
+    status: str
+
+
 class MonitoringRunResponse(BaseModel):
     id: str
     status: str

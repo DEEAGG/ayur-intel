@@ -5,14 +5,16 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from api.core.database import get_db
-from api.models.models import User
+from api.models.models import User, ProductCase
 from api.schemas.monitoring import (
     MonitoringConfigResponse,
     UpdateMonitoringConfigRequest,
     AlertResponse,
+    UpdateAlertRequest,
 )
 from api.services.monitoring_service import (
     get_or_create_config,
@@ -59,10 +61,16 @@ def create_monitoring(
     user: User = Depends(get_current_user),
 ):
     """Create or get monitoring configuration."""
-    from api.models.models import ProductCase
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = db.query(ProductCase).filter(
-        ProductCase.public_id == case_id,
-        ProductCase.owner_id == user.id,
+        or_(*conds),
+        or_(
+            ProductCase.owner_id == user.id,
+            ProductCase.is_demo == True,
+            ProductCase.public_id == "demo-001",
+        ),
     ).first()
     if not case:
         raise HTTPException(status_code=404, detail="Product Case not found")
@@ -127,7 +135,7 @@ def get_history(
 @router.patch("/monitoring/alerts/{alert_id}")
 def patch_alert(
     alert_id: str,
-    body: AlertResponse,
+    body: UpdateAlertRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

@@ -3844,121 +3844,337 @@
   // ----------------------------------------------------------------
   // Monitoring Center View (Phase 14)
   // ----------------------------------------------------------------
+  // ----------------------------------------------------------------
+  // Monitoring Center View & Helper Engine
+  // ----------------------------------------------------------------
+  var _isCheckingMonitoring = false;
+  var _monitoringFilter = 'ALL';
+
+  window.loadMonitoringData = async function (caseId) {
+    if (!caseId) return;
+    try {
+      var data = await api("/api/cases/" + caseId + "/monitoring");
+      state.monitoringData = data;
+      render({ scroll: "preserve" });
+    } catch (e) {
+      console.warn("Failed to load monitoring data:", e);
+    }
+  };
+
+  window.switchMonitoringProduct = async function (caseId) {
+    if (!caseId) {
+      state.currentCase = null;
+      state.monitoringData = null;
+      render({ scroll: "preserve" });
+      return;
+    }
+    var found = (state.cases || []).find(function (c) { return String(c.id) === String(caseId) || c.public_id === caseId; });
+    if (found) {
+      state.currentCase = found;
+      saveStateToLocalStorage();
+      updateTopbarUI();
+    }
+    await window.loadMonitoringData(caseId);
+  };
+
+  window.runMonitoringCheckNow = async function () {
+    if (!state.currentCase || _isCheckingMonitoring) return;
+    _isCheckingMonitoring = true;
+
+    var btn = document.getElementById("monitoring-check-updates-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-sm"></span> Checking…';
+    }
+
+    try {
+      var caseId = state.currentCase.public_id || state.currentCase.id;
+      var res = await api("/api/cases/" + caseId + "/monitoring/run", { method: "POST" });
+      if (res && res.summary) {
+        state.monitoringData = res.summary;
+      }
+      var count = res ? (res.changes_detected || res.alerts_created || 0) : 0;
+      if (count > 0) {
+        showToast("🔔 Found " + count + " new monitoring signal(s).", "success");
+      } else {
+        showToast("You're up to date. No new monitoring signals were found.", "info");
+      }
+    } catch (err) {
+      console.error("Monitoring check failed:", err);
+      showToast("❌ Monitoring check failed: " + (err.message || "Server error"), "error");
+    } finally {
+      _isCheckingMonitoring = false;
+      render({ scroll: "preserve" });
+    }
+  };
+
+  window.setMonitoringFilter = function (filterType) {
+    _monitoringFilter = filterType;
+    render({ scroll: "preserve" });
+  };
+
+  window.markMonitoringSignalReviewed = async function (signalId) {
+    try {
+      await api("/api/monitoring/alerts/" + signalId, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "REVIEWED" })
+      });
+      if (state.monitoringData && state.monitoringData.signals) {
+        var sig = state.monitoringData.signals.find(function (s) { return s.id === signalId; });
+        if (sig) sig.status = "REVIEWED";
+        var newCount = state.monitoringData.signals.filter(function (s) { return s.status === "NEW"; }).length;
+        state.monitoringData.new_signals = newCount;
+      }
+      showToast("Signal marked as reviewed.", "success");
+      render({ scroll: "preserve" });
+    } catch (e) {
+      console.error("Failed to mark signal reviewed:", e);
+      showToast("❌ Failed to update signal", "error");
+    }
+  };
+
+  window.updateMonitoringWatchSettings = async function (key, isChecked) {
+    if (!state.currentCase) return;
+    try {
+      var caseId = state.currentCase.public_id || state.currentCase.id;
+      var body = {};
+      body[key] = isChecked;
+      await api("/api/cases/" + caseId + "/monitoring", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (state.monitoringData && state.monitoringData.config) {
+        state.monitoringData.config[key] = isChecked;
+      }
+      showToast("⚙️ Watch preferences updated", "info");
+    } catch (e) {
+      console.error("Failed to update watch settings:", e);
+      showToast("❌ Failed to update settings", "error");
+    }
+  };
+
   function renderMonitoringCenter() {
+    var cases = state.cases || [];
+    var currentCase = state.currentCase;
     var m = state.monitoringData;
-    if (!m) return '<div class="card"><div class="card-body"><p>No monitoring data available.</p></div></div>';
+
+    var html = '<div class="pd-wrapper">'
+      // HEADER
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:20px;">'
+      + '<div>'
+      + '<h1 class="pd-title" style="margin:0;">' + icon('visibility', 28) + ' <span>Continuous Monitoring</span></h1>'
+      + '<p class="pd-subtitle" style="margin:4px 0 0;">Track meaningful changes around your selected product and see what to review next.</p>'
+      + '</div>'
+      + (currentCase ? '<button class="btn btn-primary" id="monitoring-check-updates-btn" onclick="window.runMonitoringCheckNow()">' + icon('sync', 18) + ' Check for Updates</button>' : '')
+      + '</div>';
+
+    // PRODUCT SELECTOR BAR
+    html += '<div style="background:rgba(15,23,42,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">'
+      + '<div style="display:flex;align-items:center;gap:12px;flex:1;min-width:240px;">'
+      + '<label style="font-size:13px;font-weight:700;color:#34d399;white-space:nowrap;">Monitoring Product:</label>'
+      + '<select id="monitoring-product-select" class="form-select" style="max-width:340px;background:#0f172a;color:#f8fafc;border-color:rgba(255,255,255,0.15);" onchange="window.switchMonitoringProduct(this.value)">'
+      + '<option value="">-- Select Product --</option>';
+
+    cases.forEach(function (c) {
+      var isSel = currentCase && (String(c.id) === String(currentCase.id) || c.public_id === currentCase.public_id);
+      html += '<option value="' + escapeHtml(c.public_id || c.id) + '"' + (isSel ? ' selected' : '') + '>' + escapeHtml(c.name || 'Unnamed Product') + (c.is_demo ? ' (Demo)' : '') + '</option>';
+    });
+
+    html += '</select></div>'
+      + (currentCase ? ('<div style="font-size:12px;color:#94a3b8;">Active Case: <strong style="color:#f8fafc;">' + escapeHtml(currentCase.name) + '</strong></div>') : '')
+      + '</div>';
+
+    // EMPTY STATE IF NO PRODUCT SELECTED
+    if (!currentCase) {
+      html += '<div id="monitoring-empty-state" class="pd-card" style="text-align:center;padding:60px 20px;">'
+        + '<div style="font-size:48px;margin-bottom:12px;">📊</div>'
+        + '<h3 style="font-size:18px;color:#f8fafc;margin-bottom:6px;">Select a Product to Start Monitoring</h3>'
+        + '<p style="font-size:13.5px;max-width:440px;margin:0 auto 20px;color:#94a3b8;line-height:1.5;">Choose a product from the dropdown above to track new patent disclosures, supporting research evidence, and regulatory guidelines.</p>'
+        + '<button class="btn btn-primary" onclick="state.view=\'product-cases\';render();">' + icon('inventory_2', 18) + ' Go to Products</button>'
+        + '</div></div>';
+      return html;
+    }
+
+    if (!m) {
+      html += '<div class="pd-card" style="text-align:center;padding:40px;"><div class="skeleton skeleton-card" style="height:140px;"></div></div></div>';
+      return html;
+    }
 
     var config = m.config || {};
-    var severityColors = { HIGH: 'var(--color-error)', MEDIUM: '#d97706', LOW: 'var(--color-secondary)', INFO: 'var(--color-scientific-blue)' };
-    var severityLabels = { HIGH: 'HIGH', MEDIUM: 'MEDIUM', LOW: 'LOW', INFO: 'INFO' };
-    var typeLabels = { NEW_PATENT: 'New Patent', PATENT_UPDATE: 'Patent Update', REGULATORY_UPDATE: 'Regulatory Update', JURISDICTION_UPDATE: 'Jurisdiction Update', SOURCE_UPDATE: 'Source Update', MONITORING_FAILURE: 'Monitoring Failure' };
-    var statusLabels = { NEW: 'New', SEEN: 'Seen', UNDER_REVIEW: 'Under Review', RESOLVED: 'Resolved', DISMISSED: 'Dismissed' };
+    var signals = m.signals || [];
 
-    var html = ''
-      + '<div class="view-header"><button class="btn btn-ghost btn-sm" id="back-from-monitoring">' + icon('arrow_back', 15) + ' Back to Case</button></div>'
-
-      // Header
-      + '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon('visibility', 20) + ' Continuous Monitoring</h2>'
-      + '<p>Monitor saved Product Cases for potentially relevant changes</p></div><div class="card-body">'
-
-      // Status
-      + '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">'
-      + '<div class="patent-stat-card"><div class="patent-stat-label">STATUS</div><div class="patent-stat-value" style="font-size:14px;color:' + (config.enabled ? 'var(--color-secondary)' : 'var(--color-error)') + '">' + (config.enabled ? 'ACTIVE' : 'PAUSED') + '</div></div>'
-      + '<div class="patent-stat-card"><div class="patent-stat-label">FREQUENCY</div><div class="patent-stat-value" style="font-size:14px">' + (config.frequency || 'WEEKLY') + '</div></div>'
-      + '<div class="patent-stat-card"><div class="patent-stat-label">LAST CHECKED</div><div class="patent-stat-value" style="font-size:12px">' + (config.last_checked_at ? new Date(config.last_checked_at).toLocaleDateString() : 'Never') + '</div></div>'
-      + '<div class="patent-stat-card"><div class="patent-stat-label">TOTAL ALERTS</div><div class="patent-stat-value">' + (m.total_alerts || 0) + '</div></div>'
+    // MAIN CONTENT AREA
+    html += '<div id="monitoring-content-area">'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:14px;margin-bottom:24px;">'
+      + '<div class="pd-card" style="padding:16px;background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.25);">'
+      + '<div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#34d399;text-transform:uppercase;margin-bottom:4px;">NEW SIGNALS</div>'
+      + '<div id="stat-new-signals" style="font-size:28px;font-weight:700;color:#f8fafc;">' + (m.new_signals || 0) + '</div>'
+      + '<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">Unreviewed notifications</div>'
       + '</div>'
-
-      // Monitoring scope
-      + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">'
-      + '<span class="chip' + (config.patent_monitoring ? ' selected' : '') + '" style="cursor:default">' + icon('gavel', 12) + ' Patents</span>'
-      + '<span class="chip' + (config.regulatory_monitoring ? ' selected' : '') + '" style="cursor:default">' + icon('policy', 12) + ' Regulations</span>'
-      + '<span class="chip' + (config.jurisdiction_monitoring ? ' selected' : '') + '" style="cursor:default">' + icon('language', 12) + ' Jurisdictions</span>'
-      + '<span class="chip' + (config.source_monitoring ? ' selected' : '') + '" style="cursor:default">' + icon('source', 12) + ' Sources</span>'
+      + '<div class="pd-card" style="padding:16px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.25);">'
+      + '<div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#60a5fa;text-transform:uppercase;margin-bottom:4px;">PATENT SIGNALS</div>'
+      + '<div id="stat-patent-signals" style="font-size:28px;font-weight:700;color:#f8fafc;">' + (m.patent_signals || 0) + '</div>'
+      + '<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">Prior art disclosures</div>'
       + '</div>'
-
-      // Actions
-      + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-      + '<button class="btn btn-primary btn-sm" id="monitoring-check-now">' + icon('refresh', 14) + ' Check Now</button>'
-      + '<button class="btn btn-secondary btn-sm" id="monitoring-toggle">' + icon(config.enabled ? 'pause' : 'play_arrow', 14) + ' ' + (config.enabled ? 'Pause' : 'Resume') + '</button>'
-      + '<button class="btn btn-secondary btn-sm" id="monitoring-history-btn">' + icon('history', 14) + ' History</button>'
+      + '<div class="pd-card" style="padding:16px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.25);">'
+      + '<div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#c084fc;text-transform:uppercase;margin-bottom:4px;">RESEARCH SIGNALS</div>'
+      + '<div id="stat-research-signals" style="font-size:28px;font-weight:700;color:#f8fafc;">' + (m.research_signals || 0) + '</div>'
+      + '<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">Scientific monographs</div>'
       + '</div>'
-      + '</div></div>';
+      + '<div class="pd-card" style="padding:16px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.25);">'
+      + '<div style="font-size:11px;font-weight:700;letter-spacing:0.06em;color:#fbbf24;text-transform:uppercase;margin-bottom:4px;">REGULATORY SIGNALS</div>'
+      + '<div id="stat-regulatory-signals" style="font-size:28px;font-weight:700;color:#f8fafc;">' + (m.regulatory_signals || 0) + '</div>'
+      + '<div style="font-size:11.5px;color:#94a3b8;margin-top:2px;">AYUSH / FSSAI sources</div>'
+      + '</div>'
+      + '</div>';
 
-    // Alert summary
-    if (m.total_alerts > 0) {
-      html += '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon('notifications', 18) + ' Alert Summary</h2></div><div class="card-body">'
-        + '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">'
-        + '<div style="font-size:14px;font-weight:600;color:var(--color-error)">' + (m.high_alerts || 0) + ' High</div>'
-        + '<div style="font-size:14px;font-weight:600;color:#d97706">' + (m.medium_alerts || 0) + ' Medium</div>'
-        + '<div style="font-size:14px;font-weight:600;color:var(--color-scientific-blue)">' + (m.new_alerts || 0) + ' New</div>'
-        + '</div>'
-        + '</div></div>';
-    }
+    // TWO COLUMN MAIN LAYOUT
+    html += '<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:20px;">'
 
-    // Recent alerts
-    if (m.recent_alerts && m.recent_alerts.length > 0) {
-      html += '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon('notifications_active', 18) + ' Recent Alerts</h2>'
-        + '<p>' + m.recent_alerts.length + ' alert(s)</p></div><div class="card-body">';
+      // LEFT COLUMN: RECENT SIGNALS FEED
+      + '<div class="pd-card">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;">'
+      + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;margin:0;display:flex;align-items:center;gap:8px;">' + icon('rss_feed', 20) + ' Recent Signals</h3>'
 
-      m.recent_alerts.forEach(function (alert) {
-        var sev = severityColors[alert.severity] || 'var(--color-outline)';
-        html += '<div class="knowledge-finding-card" style="margin-bottom:12px;border-left:4px solid ' + sev + '">'
-          + '<div class="knowledge-finding-header">'
-          + '<div class="knowledge-finding-title">' + (severityLabels[alert.severity] || '') + ' ' + escapeHtml(alert.title) + '</div>'
-          + '<span class="chip' + (alert.status === 'NEW' ? ' selected' : '') + '" style="font-size:10px">' + (statusLabels[alert.status] || alert.status) + '</span>'
-          + '</div>';
-        if (alert.summary) html += '<div class="knowledge-finding-summary">' + escapeHtml(alert.summary) + '</div>';
-        html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--color-on-surface-variant)">'
-          + '<span>' + icon('label', 12) + ' ' + (typeLabels[alert.alert_type] || alert.alert_type) + '</span>';
-        if (alert.jurisdiction) html += '<span>' + icon('language', 12) + ' ' + escapeHtml(alert.jurisdiction) + '</span>';
-        if (alert.source_name) html += '<span>' + icon('source', 12) + ' ' + escapeHtml(alert.source_name) + '</span>';
-        html += '</div>';
+      // Filter Chips
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+      + '<button class="chip' + (_monitoringFilter === 'ALL' ? ' selected' : '') + '" onclick="window.setMonitoringFilter(\'ALL\')">All (' + signals.length + ')</button>'
+      + '<button class="chip' + (_monitoringFilter === 'PATENT' ? ' selected' : '') + '" onclick="window.setMonitoringFilter(\'PATENT\')">Patent</button>'
+      + '<button class="chip' + (_monitoringFilter === 'RESEARCH' ? ' selected' : '') + '" onclick="window.setMonitoringFilter(\'RESEARCH\')">Research</button>'
+      + '<button class="chip' + (_monitoringFilter === 'REGULATORY' ? ' selected' : '') + '" onclick="window.setMonitoringFilter(\'REGULATORY\')">Regulatory</button>'
+      + '</div>'
+      + '</div>';
 
-        // Alert actions
-        html += '<div style="display:flex;gap:6px;margin-top:8px">';
-        if (alert.status !== 'RESOLVED' && alert.status !== 'DISMISSED') {
-          html += '<button class="btn btn-ghost btn-xs alert-action" data-alert-id="' + alert.id + '" data-action="UNDER_REVIEW">Review</button>'
-            + '<button class="btn btn-ghost btn-xs alert-action" data-alert-id="' + alert.id + '" data-action="RESOLVED">Resolve</button>'
-            + '<button class="btn btn-ghost btn-xs alert-action" data-alert-id="' + alert.id + '" data-action="DISMISSED">Dismiss</button>';
-        }
-        html += '</div></div>';
-      });
-      html += '</div></div>';
+    // Filter Signals List
+    var filteredSignals = signals.filter(function (s) {
+      if (_monitoringFilter === 'ALL') return true;
+      return (s.alert_type || '').toUpperCase() === _monitoringFilter;
+    });
+
+    if (filteredSignals.length === 0) {
+      html += '<div style="text-align:center;padding:40px 20px;color:#94a3b8;">'
+        + '<div style="font-size:36px;margin-bottom:8px;">✨</div>'
+        + '<h4 style="font-size:15px;color:#f8fafc;margin-bottom:4px;">No ' + escapeHtml(_monitoringFilter === 'ALL' ? '' : _monitoringFilter) + ' Signals Found</h4>'
+        + '<p style="font-size:12.5px;margin:0;">Run "Check for Updates" to compare ' + escapeHtml(currentCase.name) + ' against current AYUR-INTEL evidence.</p>'
+        + '</div>';
     } else {
-      html += '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon('notifications_none', 18) + ' Recent Alerts</h2></div>'
-        + '<div class="card-body"><div style="text-align:center;padding:24px;color:var(--color-on-surface-variant)">'
-        + icon('check_circle', 32) + '<br>No alerts yet. Run a check to start monitoring.</div></div></div>';
-    }
+      html += '<div style="display:flex;flex-direction:column;gap:12px;">';
+      filteredSignals.forEach(function (sig) {
+        var isNew = sig.status === 'NEW';
+        var typeBadgeClass = sig.alert_type === 'PATENT' ? 'pd-badge-high' : (sig.alert_type === 'RESEARCH' ? 'pd-badge-likely' : 'pd-badge-low');
+        var typeIcon = sig.alert_type === 'PATENT' ? 'gavel' : (sig.alert_type === 'RESEARCH' ? 'menu_book' : 'policy');
+        var detDate = sig.detected_at ? new Date(sig.detected_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recently';
 
-    // Recent runs
-    if (m.recent_runs && m.recent_runs.length > 0) {
-      html += '<div class="card" style="margin-bottom:20px"><div class="card-head"><h2>' + icon('history', 18) + ' Recent Checks</h2></div><div class="card-body">'
-        + '<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">'
-        + '<thead><tr style="border-bottom:1px solid var(--color-outline-variant)">'  
-        + '<th style="padding:8px 12px;text-align:left">Date</th>'
-        + '<th style="padding:8px 12px;text-align:left">Status</th>'
-        + '<th style="padding:8px 12px;text-align:left">Sources Checked</th>'
-        + '<th style="padding:8px 12px;text-align:left">Changes</th>'
-        + '<th style="padding:8px 12px;text-align:left">Alerts</th>'
-        + '</tr></thead><tbody>';
+        html += '<div style="padding:14px;background:rgba(15,23,42,0.5);border:1px solid ' + (isNew ? 'rgba(52,211,153,0.3)' : 'rgba(255,255,255,0.08)') + ';border-radius:10px;">'
+          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;">'
+          + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+          + '<span class="chip ' + typeBadgeClass + '" style="font-size:10.5px;font-weight:700;padding:2px 8px;">' + icon(typeIcon, 12) + ' ' + escapeHtml(sig.alert_type) + '</span>'
+          + (isNew ? '<span class="chip" style="font-size:10px;background:rgba(52,211,153,0.15);color:#34d399;font-weight:700;">NEW</span>' : '<span class="chip" style="font-size:10px;background:rgba(148,163,184,0.1);color:#94a3b8;">REVIEWED</span>')
+          + '</div>'
+          + '<span style="font-size:11px;color:#64748b;">' + escapeHtml(detDate) + '</span>'
+          + '</div>'
+          + '<div style="font-size:14px;font-weight:700;color:#f8fafc;margin-bottom:6px;">' + escapeHtml(sig.title) + '</div>'
+          + '<div style="font-size:12.5px;color:#cbd5e1;line-height:1.5;margin-bottom:10px;">' + escapeHtml(sig.summary || '') + '</div>'
+          + '<div style="font-size:11.5px;color:#38bdf8;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);padding:6px 10px;border-radius:6px;margin-bottom:12px;">'
+          + '💡 <strong>Next step:</strong> ' + escapeHtml(sig.next_step || 'Review source evidence.')
+          + '</div>'
 
-      m.recent_runs.forEach(function (run) {
-        var statusColor = run.status === 'SUCCESS' ? 'var(--color-secondary)' : (run.status === 'PARTIAL' ? '#d97706' : 'var(--color-error)');
-        html += '<tr style="border-bottom:1px solid var(--color-outline-variant)">'  
-          + '<td style="padding:8px 12px">' + (run.started_at ? new Date(run.started_at).toLocaleString() : '-') + '</td>'
-          + '<td style="padding:8px 12px;color:' + statusColor + ';font-weight:600">' + (run.status || '-') + '</td>'
-          + '<td style="padding:8px 12px">' + (run.sources_checked || 0) + '</td>'
-          + '<td style="padding:8px 12px">' + (run.changes_detected || 0) + '</td>'
-          + '<td style="padding:8px 12px">' + (run.alerts_created || 0) + '</td>'
-          + '</tr>';
+          // Action Toolbar
+          + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">'
+          + '<span style="font-size:11px;color:#94a3b8;">Source · <strong style="color:#cbd5e1;">' + escapeHtml(sig.source_name || 'AYUR-INTEL') + '</strong></span>'
+          + '<div style="display:flex;gap:8px;">';
+
+        if (sig.alert_type === 'PATENT') {
+          html += '<button class="btn btn-secondary btn-xs" onclick="openPatentIntelligence(\'' + escapeHtml(currentCase.public_id || currentCase.id) + '\')">Open Patent Intelligence →</button>';
+        } else if (sig.alert_type === 'RESEARCH') {
+          html += '<button class="btn btn-secondary btn-xs" onclick="state.view=\'knowledge-hub\';render({scroll:\'top\'});">Open Knowledge Hub →</button>';
+        } else {
+          html += '<button class="btn btn-secondary btn-xs" onclick="state.view=\'case-detail\';render({scroll:\'top\'});">Review Guidance →</button>';
+        }
+
+        if (isNew) {
+          html += '<button class="btn btn-primary btn-xs" onclick="window.markMonitoringSignalReviewed(\'' + escapeHtml(sig.id) + '\')">Mark Reviewed</button>';
+        }
+
+        html += '</div></div></div>';
       });
-      html += '</tbody></table></div></div></div>';
+      html += '</div>';
     }
 
-    // Disclaimer
-    html += '<div class="innovation-disclaimer">' + icon('warning', 18) + '<div><strong>Continuous Monitoring.</strong> Change detection is based on source availability. Detected changes are informational -- not regulatory or legal conclusions.</div></div>';
+    html += '</div>'; // End left column pd-card
 
+    // RIGHT COLUMN: WHAT TO DO NEXT (TIMELINE) & WATCH SETTINGS
+    html += '<div style="display:flex;flex-direction:column;gap:20px;">'
+
+      // WHAT TO DO NEXT TIMELINE CARD
+      + '<div class="pd-card">'
+      + '<h3 style="font-size:16px;font-weight:700;color:#f8fafc;margin-bottom:4px;display:flex;align-items:center;gap:8px;">'
+      + icon('checklist', 20) + ' <span>What To Do Next</span>'
+      + '</h3>'
+      + '<p style="font-size:12px;color:#94a3b8;margin:0 0 16px;">State-driven research roadmap for ' + escapeHtml(currentCase.name) + '.</p>'
+      + '<div style="display:flex;flex-direction:column;gap:14px;">';
+
+    var timeline = m.timeline || [];
+    timeline.forEach(function (item) {
+      var isComp = item.status === 'Completed';
+      var isNext = item.status === 'Next';
+      var statusClass = isComp ? 'pd-badge-high' : (isNext ? 'pd-badge-likely' : 'pd-badge-low');
+      var statusIcon = isComp ? '✓' : (isNext ? '➔' : '○');
+
+      html += '<div class="timeline-step" style="display:flex;gap:12px;align-items:flex-start;">'
+        + '<div style="width:24px;height:24px;border-radius:50%;background:' + (isComp ? 'rgba(52,211,153,0.15)' : (isNext ? 'rgba(59,130,246,0.15)' : 'rgba(148,163,184,0.1)')) + ';color:' + (isComp ? '#34d399' : (isNext ? '#60a5fa' : '#64748b')) + ';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;margin-top:2px;">'
+        + statusIcon
+        + '</div>'
+        + '<div style="flex:1;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+        + '<strong style="font-size:13px;color:#f8fafc;">' + escapeHtml(item.title) + '</strong>'
+        + '<span class="chip ' + statusClass + '" style="font-size:9.5px;padding:1px 6px;">' + escapeHtml(item.status) + '</span>'
+        + '</div>'
+        + '<p style="font-size:12px;color:#94a3b8;margin:2px 0 6px;">' + escapeHtml(item.desc) + '</p>';
+
+      if (item.action) {
+        if (item.module === 'passport-wizard') {
+          html += '<button class="btn btn-secondary btn-xs" onclick="window.editProductPassport(\'' + escapeHtml(currentCase.id) + '\')">' + escapeHtml(item.action) + ' →</button>';
+        } else if (item.module === 'patent-intelligence') {
+          html += '<button class="btn btn-secondary btn-xs" onclick="openPatentIntelligence(\'' + escapeHtml(currentCase.public_id || currentCase.id) + '\')">' + escapeHtml(item.action) + ' →</button>';
+        } else if (item.module === 'knowledge-hub') {
+          html += '<button class="btn btn-secondary btn-xs" onclick="state.view=\'knowledge-hub\';render({scroll:\'top\'});">' + escapeHtml(item.action) + ' →</button>';
+        } else if (item.module === 'case-detail') {
+          html += '<button class="btn btn-secondary btn-xs" onclick="state.view=\'case-detail\';render({scroll:\'top\'});">' + escapeHtml(item.action) + ' →</button>';
+        } else if (item.module === 'monitoring-center') {
+          html += '<button class="btn btn-secondary btn-xs" onclick="window.runMonitoringCheckNow()">' + escapeHtml(item.action) + ' →</button>';
+        }
+      }
+
+      html += '</div></div>';
+    });
+
+    html += '</div></div>'; // End timeline card
+
+    // WATCH SETTINGS CARD
+    html += '<div class="pd-card">'
+      + '<h3 style="font-size:15px;font-weight:700;color:#f8fafc;margin-bottom:12px;display:flex;align-items:center;gap:8px;">'
+      + icon('tune', 18) + ' <span>Watch Preferences</span>'
+      + '</h3>'
+      + '<div style="display:flex;flex-direction:column;gap:10px;">'
+      + '<label style="display:flex;align-items:center;gap:10px;font-size:13px;color:#cbd5e1;cursor:pointer;">'
+      + '<input type="checkbox" ' + (config.patent_monitoring ? 'checked' : '') + ' onchange="window.updateMonitoringWatchSettings(\'patent_monitoring\', this.checked)">'
+      + '<span>' + icon('gavel', 16) + ' Patent Literature</span>'
+      + '</label>'
+      + '<label style="display:flex;align-items:center;gap:10px;font-size:13px;color:#cbd5e1;cursor:pointer;">'
+      + '<input type="checkbox" ' + (config.source_monitoring ? 'checked' : '') + ' onchange="window.updateMonitoringWatchSettings(\'source_monitoring\', this.checked)">'
+      + '<span>' + icon('menu_book', 16) + ' Research Evidence</span>'
+      + '</label>'
+      + '<label style="display:flex;align-items:center;gap:10px;font-size:13px;color:#cbd5e1;cursor:pointer;">'
+      + '<input type="checkbox" ' + (config.regulatory_monitoring ? 'checked' : '') + ' onchange="window.updateMonitoringWatchSettings(\'regulatory_monitoring\', this.checked)">'
+      + '<span>' + icon('policy', 16) + ' Regulatory Sources</span>'
+      + '</label>'
+      + '</div>'
+      + '</div>';
+
+    html += '</div></div></div>'; // End right column, main grid, and pd-wrapper
     return html;
   }
 
