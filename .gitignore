@@ -1,40 +1,71 @@
-# Python
+# Python artifacts
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
 .eggs/
+build/
+dist/
 
-# Environment / secrets
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Environment & secrets
 .env
 .env.*
 !.env.example
 
-# Database
-*.db
+# Database (keep tracked seed databases)
 *.sqlite
 *.sqlite3
+*.db
 !data/ayur_intel.db
 !data/dravya.db
 !data/*.db
 
-# IDE
+# Scratch, QA, and temporary outputs
+scratch/
+scratch_*
+*.tmp
+*.temp
+test-plant.jpg
+test_non_plant.png
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE & editors
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
+*~
+*.sublime-project
+*.sublime-workspace
 
-# OS
+# OS metadata
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
-
-# Node.js (if Next.js added later)
-node_modules/
-.next/
-out/
+Desktop.ini
 
 # Logs
 *.log
+logs/
 
-.venv/
+# Node.js / Serverless
+node_modules/
+.next/
+out/
 .vercel
-.env*
