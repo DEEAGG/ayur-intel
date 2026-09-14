@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -20,6 +21,22 @@ from api.models.monitoring import (
 )
 
 logger = logging.getLogger("ayur_intel.monitoring_service")
+
+# In-memory monitoring summary cache: keyed by f"{case_identifier}_{user_id}" -> (timestamp, data)
+_MONITORING_CACHE: Dict[str, tuple[float, dict]] = {}
+_MONITORING_CACHE_TTL = 15.0  # seconds
+
+
+def _invalidate_monitoring_cache(case_identifier: Optional[str] = None) -> None:
+    """Invalidate cached monitoring summary for a given case, or all if None."""
+    global _MONITORING_CACHE
+    if not case_identifier:
+        _MONITORING_CACHE.clear()
+        return
+    c_str = str(case_identifier)
+    keys_to_del = [k for k in _MONITORING_CACHE if k.startswith(f"{c_str}_") or f"_{c_str}_" in k]
+    for k in keys_to_del:
+        _MONITORING_CACHE.pop(k, None)
 
 
 def _deserialize(value) -> list:
@@ -102,6 +119,8 @@ def update_config(db: Session, user: User, case_public_id: str, updates: dict) -
 
     config.updated_at = datetime.now(timezone.utc)
     db.commit()
+    _invalidate_monitoring_cache(case.public_id)
+    _invalidate_monitoring_cache(str(case.id))
     return _config_to_dict(config)
 
 
@@ -313,6 +332,8 @@ def run_monitoring_check(db: Session, user: User, case_public_id: str) -> Option
     ).count()
 
     db.commit()
+    _invalidate_monitoring_cache(case.public_id)
+    _invalidate_monitoring_cache(str(case.id))
 
     return {
         "success": True,
@@ -462,6 +483,14 @@ def get_monitoring_summary(db: Session, user: User, case_public_id: str) -> Opti
     if not case:
         return None
 
+    # Check in-memory cache
+    cache_key = f"{case.public_id}_{user.id}"
+    now_ts = time.time()
+    if cache_key in _MONITORING_CACHE:
+        cached_ts, cached_data = _MONITORING_CACHE[cache_key]
+        if now_ts - cached_ts < _MONITORING_CACHE_TTL:
+            return cached_data
+
     config = get_or_create_config(db, user, case)
 
     # Auto-seed initial signals if none exist yet
@@ -496,7 +525,7 @@ def get_monitoring_summary(db: Session, user: User, case_public_id: str) -> Opti
 
     timeline = _build_next_actions_timeline(case, patent_search_done, alerts)
 
-    return {
+    summary = {
         "product_case_id": case.public_id,
         "product_name": case.name or "Unnamed Product",
         "config": _config_to_dict(config),
@@ -508,6 +537,10 @@ def get_monitoring_summary(db: Session, user: User, case_public_id: str) -> Opti
         "regulatory_signals": regulatory_count,
         "timeline": timeline,
     }
+
+    _MONITORING_CACHE[cache_key] = (now_ts, summary)
+    _MONITORING_CACHE[f"{case.id}_{user.id}"] = (now_ts, summary)
+    return summary
 
 
 def get_monitoring_history(db: Session, user: User, case_public_id: str) -> Optional[dict]:
@@ -538,6 +571,11 @@ def update_alert_status(db: Session, user: User, alert_public_id: str, status: s
         ).count()
 
     db.commit()
+
+    if case:
+        _invalidate_monitoring_cache(case.public_id)
+        _invalidate_monitoring_cache(str(case.id))
+
     return _alert_to_dict(alert)
 
 

@@ -3850,6 +3850,7 @@
   var _isCheckingMonitoring = false;
   var _monitoringFilter = 'ALL';
   var _monitoringExpandedSignals = false;
+  var _monitoringRequestId = 0;
 
   window.toggleMonitoringSignalsExpanded = function () {
     _monitoringExpandedSignals = !_monitoringExpandedSignals;
@@ -3869,19 +3870,28 @@
 
   window.loadMonitoringData = async function (caseId) {
     if (!caseId) return;
+    var currentReqId = ++_monitoringRequestId;
     try {
       var data = await api("/api/cases/" + caseId + "/monitoring");
-      state.monitoringData = data;
-      render({ scroll: "preserve" });
+      if (currentReqId === _monitoringRequestId) {
+        state.monitoringData = data;
+        setCachedModule(caseId, "monitoringData", data);
+        render({ scroll: "preserve" });
+      }
     } catch (e) {
-      console.warn("Failed to load monitoring data:", e);
+      if (currentReqId === _monitoringRequestId) {
+        console.warn("Failed to load monitoring data:", e);
+      }
     }
   };
 
   window.switchMonitoringProduct = async function (caseId) {
+    var currentReqId = ++_monitoringRequestId;
     if (!caseId) {
       state.currentCase = null;
       state.monitoringData = null;
+      saveStateToLocalStorage();
+      updateTopbarUI();
       render({ scroll: "preserve" });
       return;
     }
@@ -3890,13 +3900,42 @@
       state.currentCase = found;
       saveStateToLocalStorage();
       updateTopbarUI();
+    } else {
+      state.currentCase = { id: caseId, public_id: caseId, name: "Product " + caseId };
+      saveStateToLocalStorage();
+      updateTopbarUI();
     }
-    await window.loadMonitoringData(caseId);
+
+    // Check module cache first for instant switch rendering
+    var cached = getCachedModule(caseId, "monitoringData");
+    if (cached) {
+      state.monitoringData = cached;
+      render({ scroll: "preserve" });
+    } else {
+      state.monitoringData = null;
+      render({ scroll: "preserve" });
+    }
+
+    try {
+      var data = await api("/api/cases/" + caseId + "/monitoring");
+      if (currentReqId === _monitoringRequestId) {
+        state.monitoringData = data;
+        setCachedModule(caseId, "monitoringData", data);
+        render({ scroll: "preserve" });
+      }
+    } catch (e) {
+      if (currentReqId === _monitoringRequestId) {
+        console.warn("Failed to load monitoring data for " + caseId + ":", e);
+      }
+    }
   };
 
   window.runMonitoringCheckNow = async function () {
     if (!state.currentCase || _isCheckingMonitoring) return;
     _isCheckingMonitoring = true;
+
+    var activeCase = state.currentCase;
+    var caseId = activeCase.public_id || activeCase.id;
 
     var btn = document.getElementById("monitoring-check-updates-btn");
     if (btn) {
@@ -3905,10 +3944,18 @@
     }
 
     try {
-      var caseId = state.currentCase.public_id || state.currentCase.id;
       var res = await api("/api/cases/" + caseId + "/monitoring/run", { method: "POST" });
+      // Invalidate case monitoring caches
+      invalidateClientApiCache("/api/cases/" + caseId + "/monitoring");
+      invalidateCaseModuleCache(caseId);
+      if (activeCase.id) invalidateCaseModuleCache(activeCase.id);
+      if (activeCase.public_id) invalidateCaseModuleCache(activeCase.public_id);
+
       if (res && res.summary) {
-        state.monitoringData = res.summary;
+        if (state.currentCase && (state.currentCase.id === activeCase.id || state.currentCase.public_id === activeCase.public_id)) {
+          state.monitoringData = res.summary;
+          setCachedModule(caseId, "monitoringData", res.summary);
+        }
       }
       var count = res ? (res.changes_detected || res.alerts_created || 0) : 0;
       if (count > 0) {
@@ -3931,17 +3978,30 @@
   };
 
   window.markMonitoringSignalReviewed = async function (signalId) {
+    var activeCase = state.currentCase;
+    var caseId = activeCase ? (activeCase.public_id || activeCase.id) : null;
     try {
       await api("/api/monitoring/alerts/" + signalId, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "REVIEWED" })
       });
+
+      if (caseId) {
+        invalidateClientApiCache("/api/cases/" + caseId + "/monitoring");
+        invalidateCaseModuleCache(caseId);
+        if (activeCase.id) invalidateCaseModuleCache(activeCase.id);
+        if (activeCase.public_id) invalidateCaseModuleCache(activeCase.public_id);
+      }
+
       if (state.monitoringData && state.monitoringData.signals) {
         var sig = state.monitoringData.signals.find(function (s) { return s.id === signalId; });
         if (sig) sig.status = "REVIEWED";
         var newCount = state.monitoringData.signals.filter(function (s) { return s.status === "NEW"; }).length;
         state.monitoringData.new_signals = newCount;
+        if (caseId) {
+          setCachedModule(caseId, "monitoringData", state.monitoringData);
+        }
       }
       showToast("Signal marked as reviewed.", "success");
       render({ scroll: "preserve" });
@@ -3953,8 +4013,9 @@
 
   window.updateMonitoringWatchSettings = async function (key, isChecked) {
     if (!state.currentCase) return;
+    var activeCase = state.currentCase;
+    var caseId = activeCase.public_id || activeCase.id;
     try {
-      var caseId = state.currentCase.public_id || state.currentCase.id;
       var body = {};
       body[key] = isChecked;
       await api("/api/cases/" + caseId + "/monitoring", {
@@ -3962,8 +4023,15 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
+
+      invalidateClientApiCache("/api/cases/" + caseId + "/monitoring");
+      invalidateCaseModuleCache(caseId);
+      if (activeCase.id) invalidateCaseModuleCache(activeCase.id);
+      if (activeCase.public_id) invalidateCaseModuleCache(activeCase.public_id);
+
       if (state.monitoringData && state.monitoringData.config) {
         state.monitoringData.config[key] = isChecked;
+        setCachedModule(caseId, "monitoringData", state.monitoringData);
       }
       showToast("⚙️ Watch preferences updated", "info");
     } catch (e) {
@@ -4141,8 +4209,9 @@
           + '<span style="font-size:10.5px;color:#94a3b8;">Source: <strong style="color:#cbd5e1;">' + escapeHtml(sig.source_name || 'AYUR-INTEL') + '</strong></span>'
           + '<div style="display:flex;gap:6px;">';
 
+        var caseRef = currentCase ? escapeHtml(currentCase.public_id || currentCase.id) : '';
         if (sig.alert_type === 'PATENT') {
-          html += '<button class="btn btn-secondary btn-xs" onclick="window.openPatentIntelligenceForCase()">Open Patent Intel →</button>';
+          html += '<button class="btn btn-secondary btn-xs" onclick="window.openPatentIntelligenceForCase(\'' + caseRef + '\')">Open Patent Intel →</button>';
         } else if (sig.alert_type === 'RESEARCH') {
           html += '<button class="btn btn-secondary btn-xs" onclick="window.navigateToView(\'knowledge-hub\')">Open Knowledge Hub →</button>';
         } else {
@@ -8235,6 +8304,11 @@
               render({ scroll: "preserve" });
             }
           });
+        } else if (view === "monitoring-center") {
+          if (state.currentCase) {
+            var caseId = state.currentCase.public_id || state.currentCase.id;
+            window.switchMonitoringProduct(caseId);
+          }
         }
       });
     });
