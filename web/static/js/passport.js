@@ -268,9 +268,13 @@
   function initPassportData(existingCase) {
     var c = (existingCase && typeof existingCase === "object") ? existingCase : {};
 
+    var rawIngs = c.ingredients;
+    if (typeof rawIngs === "string") {
+      try { rawIngs = JSON.parse(rawIngs); } catch (e) { rawIngs = []; }
+    }
     var ingredients = [];
-    if (c.ingredients && Array.isArray(c.ingredients)) {
-      ingredients = c.ingredients.map(function (ing) {
+    if (rawIngs && Array.isArray(rawIngs)) {
+      ingredients = rawIngs.map(function (ing) {
         if (typeof ing === "string") return { name: ing, botanical: "", quantity: null, status: "USER_PROVIDED" };
         return {
           name: ing.name || "",
@@ -1614,6 +1618,10 @@
 
       console.log("✅ AI Normalization response:", res);
 
+      if (state.passportData !== pd) {
+        return;
+      }
+
       if (res) {
         if (res.product_name && !pd.name) {
           pd.name = res.product_name;
@@ -1814,7 +1822,11 @@
         } catch (e) {
           caseData = pd;
         }
-        window.AYUR.state.currentCase = caseData || pd;
+        if (window.AYUR && typeof window.AYUR.setActiveProduct === 'function') {
+          window.AYUR.setActiveProduct(caseData || pd);
+        } else {
+          window.AYUR.state.currentCase = caseData || pd;
+        }
         window.AYUR.state.passportData = null;
         if (typeof window.AYUR.saveStateToLocalStorage === 'function') {
           window.AYUR.saveStateToLocalStorage();
@@ -1880,8 +1892,11 @@
     console.log('💾 SAVING WITH PAYLOAD:', payload);
 
     try {
-      var response = await fetch('/api/cases', {
-        method: 'POST',
+      var isUpdate = Boolean(pd.id && !pd.is_demo);
+      var saveUrl = isUpdate ? ('/api/cases/' + pd.id) : '/api/cases';
+      var saveMethod = isUpdate ? 'PUT' : 'POST';
+      var response = await fetch(saveUrl, {
+        method: saveMethod,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -1903,7 +1918,11 @@
         }
 
         // Update state
-        window.AYUR.state.currentCase = data;
+        if (window.AYUR && typeof window.AYUR.setActiveProduct === 'function') {
+          window.AYUR.setActiveProduct(data);
+        } else {
+          window.AYUR.state.currentCase = data;
+        }
         window.AYUR.state.passportData = null;
 
         // Persist to localStorage

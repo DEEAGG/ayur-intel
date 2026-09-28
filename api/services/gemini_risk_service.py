@@ -213,8 +213,8 @@ def gather_case_risk_context(
             findings_summary.append({
                 "title": cf.title,
                 "confidence": cf.confidence,
-                "evidence_status": cf.evidence_status,
-                "summary": cf.summary,
+                "evidence_status": getattr(cf, "evidence_status", "SUPPORTED" if getattr(cf, "evidence_count", 0) > 0 else "PARTIAL"),
+                "summary": getattr(cf, "summary", getattr(cf, "content", "")),
             })
         knowledge_context = {
             "status": "AVAILABLE",

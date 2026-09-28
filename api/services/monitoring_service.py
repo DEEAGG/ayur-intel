@@ -362,6 +362,7 @@ def _alert_to_dict(alert: Alert) -> dict:
 
     return {
         "id": alert.public_id,
+        "product_case_id": alert.product_case_id,
         "alert_type": alert.alert_type,
         "severity": alert.severity,
         "title": alert.title,
@@ -604,6 +605,7 @@ def _config_to_dict(config: MonitoringConfig) -> dict:
 def _alert_to_dict(alert: Alert) -> dict:
     return {
         "id": alert.public_id,
+        "product_case_id": alert.product_case_id,
         "alert_type": alert.alert_type,
         "severity": alert.severity,
         "relevance": alert.relevance,

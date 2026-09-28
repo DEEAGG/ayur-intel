@@ -27,11 +27,72 @@
     riskData: null,
     dashboardData: null,
     monitoringData: null,
+    monitoringError: null,
     knowledgeGraphData: null,
     sourceRouterData: null,
     passportData: null,
     patentAnalyses: null,
   };
+
+  var _activeProductSeq = 0;
+  var _activeModuleSeq = 0;
+
+  function getActiveProductId() {
+    if (!state.currentCase) return null;
+    return String(state.currentCase.public_id || state.currentCase.id || "");
+  }
+
+  function clearPerProductState() {
+    state.plantDiscoveries = [];
+    state.knowledgeFindings = null;
+    state.knowledgeSources = [];
+    state.innovationAnalysis = null;
+    state.patentSearchResults = null;
+    state.patentSavedResults = null;
+    state.patentDeepAnalysis = null;
+    state.ipStrategy = null;
+    state.regulatoryProfile = null;
+    state.jurisdictionComparison = null;
+    state.evidenceData = null;
+    state.riskData = null;
+    state.dashboardData = null;
+    state.monitoringData = null;
+    state.monitoringError = null;
+    state.knowledgeGraphData = null;
+    state.sourceRouterData = null;
+    state.passportData = null;
+    state.patentAnalyses = null;
+  }
+
+  function setActiveProduct(caseOrId, options) {
+    _activeProductSeq++;
+    clearPerProductState();
+
+    if (!caseOrId) {
+      state.currentCase = null;
+      if (typeof updateTopbarUI === "function") updateTopbarUI();
+      if (typeof saveStateToLocalStorage === "function") saveStateToLocalStorage();
+      return null;
+    }
+
+    var targetCase = null;
+    if (typeof caseOrId === "object" && caseOrId !== null) {
+      targetCase = caseOrId;
+    } else {
+      var strId = String(caseOrId);
+      targetCase = (state.cases || []).find(function (c) {
+        return String(c.id) === strId || String(c.public_id) === strId;
+      });
+      if (!targetCase) {
+        targetCase = { id: caseOrId, public_id: caseOrId, name: "Product " + caseOrId };
+      }
+    }
+
+    state.currentCase = targetCase;
+    if (typeof updateTopbarUI === "function") updateTopbarUI();
+    if (typeof saveStateToLocalStorage === "function") saveStateToLocalStorage();
+    return targetCase;
+  }
 
   var ICONS = {};
 
@@ -304,11 +365,16 @@
 
   async function openCaseModule(key, endpoint, targetView, httpOptions) {
     if (!state.currentCase) return;
+    var targetCase = state.currentCase;
+    var targetCaseId = getActiveProductId();
+    var seq = ++_activeModuleSeq;
+
     var isNewView = state.view !== targetView;
     if (isNewView) {
       saveCurrentViewScrollPosition();
     }
-    var cached = getCachedModule(state.currentCase.id, key);
+
+    var cached = getCachedModule(targetCaseId, key) || (targetCase.id ? getCachedModule(targetCase.id, key) : null);
     if (cached) {
       state[key] = cached;
       state.view = targetView;
@@ -316,19 +382,31 @@
       render({ scroll: isNewView ? "top" : "preserve" });
       return;
     }
+
+    // Clear stale module state so old product's data is never displayed
+    state[key] = null;
     state.loading = true;
     render({ scroll: isNewView ? "top" : "preserve" });
+
     try {
       var data = await api(endpoint, httpOptions);
-      setCachedModule(state.currentCase.id, key, data);
-      state[key] = data;
-      state.view = targetView;
-      saveStateToLocalStorage();
+      if (getActiveProductId() === targetCaseId && seq === _activeModuleSeq) {
+        setCachedModule(targetCaseId, key, data);
+        if (targetCase.id) setCachedModule(targetCase.id, key, data);
+        state[key] = data;
+        state.view = targetView;
+        saveStateToLocalStorage();
+      }
     } catch (e) {
-      state.error = "Failed to load " + targetView + ".";
+      if (getActiveProductId() === targetCaseId && seq === _activeModuleSeq) {
+        state.error = "Failed to load " + targetView + ".";
+      }
+    } finally {
+      if (seq === _activeModuleSeq) {
+        state.loading = false;
+        render({ scroll: isNewView ? "top" : "preserve" });
+      }
     }
-    state.loading = false;
-    render({ scroll: isNewView ? "top" : "preserve" });
   }
 
   // ----------------------------------------------------------------
@@ -1516,17 +1594,14 @@
     var targetCase = null;
 
     if (caseId) {
-      targetCase = (s.cases || []).find(function(item) { return String(item.id) === String(caseId); });
-      if (!targetCase && s.currentCase && String(s.currentCase.id) === String(caseId)) {
+      targetCase = (s.cases || []).find(function(item) {
+        return String(item.id) === String(caseId) || item.public_id === String(caseId);
+      });
+      if (!targetCase && s.currentCase && (String(s.currentCase.id) === String(caseId) || s.currentCase.public_id === String(caseId))) {
         targetCase = s.currentCase;
       }
     } else if (s.currentCase) {
       targetCase = s.currentCase;
-    } else if (s.cases && s.cases.length > 0) {
-      var demoCase = s.cases.find(function(item) { return item.id === "demo-001" || item.is_demo; });
-      if (demoCase) {
-        targetCase = demoCase;
-      }
     }
 
     if (!targetCase) {
@@ -1534,7 +1609,8 @@
       return;
     }
     s.currentCase = targetCase;
-    openCaseModule("patentSearchResults", "/api/cases/" + targetCase.id + "/patents", "patent-intelligence");
+    var cId = targetCase.public_id || targetCase.id;
+    openCaseModule("patentSearchResults", "/api/cases/" + cId + "/patents", "patent-intelligence");
   }
   window.openPatentIntelligence = openPatentIntelligence;
 
@@ -3236,15 +3312,25 @@
   var _isRiskAssessmentGenerating = false;
 
   async function generateRiskAssessment(caseId, forceReassess) {
-    var c = state.currentCase || (state.cases && state.cases.find(function(item) { return item.id === caseId; }));
-    if (!c && state.cases && state.cases.length > 0) {
-      c = state.cases[0];
-      state.currentCase = c;
+    var c = null;
+    if (caseId) {
+      c = (state.cases || []).find(function(item) {
+        return String(item.id) === String(caseId) || item.public_id === String(caseId);
+      });
+      if (!c && state.currentCase && (String(state.currentCase.id) === String(caseId) || state.currentCase.public_id === String(caseId))) {
+        c = state.currentCase;
+      }
+    }
+    if (!c) {
+      c = state.currentCase;
     }
     if (!c) {
       showToast('⚠️ No active product case found', 'error');
       return;
     }
+    state.currentCase = c;
+    var targetId = c.public_id || c.id;
+    var seq = ++_activeModuleSeq;
 
     if (_isRiskAssessmentGenerating) {
       showToast('⏳ Risk assessment generation is already in progress...', 'info');
@@ -3259,7 +3345,7 @@
 
     var cacheKey = "riskAssessment";
     if (!forceReassess) {
-      var cached = getCachedModule(c.id, cacheKey) || getCachedModule(c.id, "riskData");
+      var cached = getCachedModule(targetId, cacheKey) || getCachedModule(c.id, cacheKey) || getCachedModule(targetId, "riskData");
       if (cached) {
         state.riskData = cached;
         state.riskLoading = false;
@@ -3270,6 +3356,7 @@
       }
     }
 
+    state.riskData = null;
     _isRiskAssessmentGenerating = true;
     state.riskLoading = true;
     state.riskLoadingStep = 1;
@@ -3278,51 +3365,58 @@
 
     // Visual step sequence
     var stepTimer1 = setTimeout(function() {
-      if (state.riskLoading) { state.riskLoadingStep = 2; render({ scroll: "preserve" }); }
+      if (state.riskLoading && seq === _activeModuleSeq) { state.riskLoadingStep = 2; render({ scroll: "preserve" }); }
     }, 450);
     var stepTimer2 = setTimeout(function() {
-      if (state.riskLoading) { state.riskLoadingStep = 3; render({ scroll: "preserve" }); }
+      if (state.riskLoading && seq === _activeModuleSeq) { state.riskLoadingStep = 3; render({ scroll: "preserve" }); }
     }, 900);
     var stepTimer3 = setTimeout(function() {
-      if (state.riskLoading) { state.riskLoadingStep = 4; render({ scroll: "preserve" }); }
+      if (state.riskLoading && seq === _activeModuleSeq) { state.riskLoadingStep = 4; render({ scroll: "preserve" }); }
     }, 1400);
 
     try {
       var data = null;
       if (forceReassess) {
-        data = await api("/api/cases/" + c.id + "/risk-assessment/reassess", {
+        data = await api("/api/cases/" + targetId + "/risk-assessment/reassess", {
           method: "POST",
           headers: { "Content-Type": "application/json" }
         });
       } else {
         try {
-          data = await api("/api/cases/" + c.id + "/risk-assessment");
+          data = await api("/api/cases/" + targetId + "/risk-assessment");
         } catch (getErr) {
-          data = await api("/api/cases/" + c.id + "/risk-assessment", {
+          data = await api("/api/cases/" + targetId + "/risk-assessment", {
             method: "POST",
             headers: { "Content-Type": "application/json" }
           });
         }
       }
 
-      if (data) {
-        setCachedModule(c.id, cacheKey, data);
-        setCachedModule(c.id, "riskData", data);
+      if (data && getActiveProductId() === String(targetId) && seq === _activeModuleSeq) {
+        setCachedModule(targetId, cacheKey, data);
+        setCachedModule(targetId, "riskData", data);
+        if (c.id) {
+          setCachedModule(c.id, cacheKey, data);
+          setCachedModule(c.id, "riskData", data);
+        }
         state.riskData = data;
         state.riskLoading = false;
         saveStateToLocalStorage();
       }
     } catch (e) {
       console.error("Risk assessment generation failed:", e);
-      state.riskLoading = false;
-      showToast("⚠️ Could not generate AI Risk Assessment right now.", "error");
+      if (getActiveProductId() === String(targetId) && seq === _activeModuleSeq) {
+        showToast("⚠️ Could not generate AI Risk Assessment right now.", "error");
+      }
     } finally {
       clearTimeout(stepTimer1);
       clearTimeout(stepTimer2);
       clearTimeout(stepTimer3);
       _isRiskAssessmentGenerating = false;
-      state.riskLoading = false;
-      render({ scroll: "preserve" });
+      if (seq === _activeModuleSeq) {
+        state.riskLoading = false;
+        render({ scroll: "preserve" });
+      }
     }
   }
   window.generateRiskAssessment = generateRiskAssessment;
@@ -3865,7 +3959,7 @@
   window.openPatentIntelligenceForCase = function (caseId) {
     var cId = caseId || (state.currentCase ? (state.currentCase.public_id || state.currentCase.id) : null);
     if (!cId) return;
-    openCaseModule("patentData", "/api/cases/" + cId + "/patents", "patent-intelligence");
+    openCaseModule("patentSearchResults", "/api/cases/" + cId + "/patents", "patent-intelligence");
   };
 
   window.loadMonitoringData = async function (caseId) {
@@ -3873,13 +3967,14 @@
     var currentReqId = ++_monitoringRequestId;
     try {
       var data = await api("/api/cases/" + caseId + "/monitoring");
-      if (currentReqId === _monitoringRequestId) {
+      if (currentReqId === _monitoringRequestId && getActiveProductId() === String(caseId)) {
         state.monitoringData = data;
+        state.monitoringError = null;
         setCachedModule(caseId, "monitoringData", data);
         render({ scroll: "preserve" });
       }
     } catch (e) {
-      if (currentReqId === _monitoringRequestId) {
+      if (currentReqId === _monitoringRequestId && getActiveProductId() === String(caseId)) {
         console.warn("Failed to load monitoring data:", e);
       }
     }
@@ -3888,44 +3983,40 @@
   window.switchMonitoringProduct = async function (caseId) {
     var currentReqId = ++_monitoringRequestId;
     if (!caseId) {
-      state.currentCase = null;
+      setActiveProduct(null);
       state.monitoringData = null;
-      saveStateToLocalStorage();
-      updateTopbarUI();
+      state.monitoringError = null;
       render({ scroll: "preserve" });
       return;
     }
-    var found = (state.cases || []).find(function (c) { return String(c.id) === String(caseId) || c.public_id === caseId; });
-    if (found) {
-      state.currentCase = found;
-      saveStateToLocalStorage();
-      updateTopbarUI();
-    } else {
-      state.currentCase = { id: caseId, public_id: caseId, name: "Product " + caseId };
-      saveStateToLocalStorage();
-      updateTopbarUI();
-    }
+
+    var target = setActiveProduct(caseId);
+    var targetId = target ? (target.public_id || target.id || caseId) : caseId;
 
     // Check module cache first for instant switch rendering
-    var cached = getCachedModule(caseId, "monitoringData");
+    var cached = getCachedModule(targetId, "monitoringData") || (target && target.id ? getCachedModule(target.id, "monitoringData") : null);
     if (cached) {
       state.monitoringData = cached;
-      render({ scroll: "preserve" });
     } else {
       state.monitoringData = null;
-      render({ scroll: "preserve" });
     }
+    state.monitoringError = null;
+    render({ scroll: "preserve" });
 
     try {
-      var data = await api("/api/cases/" + caseId + "/monitoring");
-      if (currentReqId === _monitoringRequestId) {
+      var data = await api("/api/cases/" + targetId + "/monitoring");
+      if (currentReqId === _monitoringRequestId && getActiveProductId() === String(targetId)) {
         state.monitoringData = data;
-        setCachedModule(caseId, "monitoringData", data);
+        state.monitoringError = null;
+        setCachedModule(targetId, "monitoringData", data);
+        if (target && target.id) setCachedModule(target.id, "monitoringData", data);
         render({ scroll: "preserve" });
       }
     } catch (e) {
-      if (currentReqId === _monitoringRequestId) {
-        console.warn("Failed to load monitoring data for " + caseId + ":", e);
+      if (currentReqId === _monitoringRequestId && getActiveProductId() === String(targetId)) {
+        console.warn("Failed to load monitoring data for " + targetId + ":", e);
+        state.monitoringError = "Unable to load monitoring signals for " + (target && target.name ? target.name : "selected product") + ".";
+        render({ scroll: "preserve" });
       }
     }
   };
@@ -4083,6 +4174,16 @@
     }
 
     if (!m) {
+      if (state.monitoringError) {
+        var retryId = escapeHtml(currentCase.public_id || currentCase.id);
+        html += '<div class="pd-card" style="text-align:center;padding:40px;">'
+          + '<div style="font-size:36px;margin-bottom:12px;">⚠️</div>'
+          + '<h3 style="font-size:16px;color:#f87171;margin-bottom:6px;">Unable to Load Monitoring Signals</h3>'
+          + '<p style="font-size:13px;max-width:440px;margin:0 auto 16px;color:#94a3b8;">' + escapeHtml(state.monitoringError) + '</p>'
+          + '<button class="btn btn-secondary btn-sm" onclick="window.switchMonitoringProduct(\'' + retryId + '\')">' + icon('refresh', 16) + ' Retry</button>'
+          + '</div></div>';
+        return html;
+      }
       html += '<div class="pd-card" style="text-align:center;padding:40px;"><div class="skeleton skeleton-card" style="height:140px;"></div></div></div>';
       return html;
     }
@@ -4269,16 +4370,25 @@
   // ----------------------------------------------------------------
   async function openKnowledgeGraph(caseId) {
     var s = (window.AYUR && window.AYUR.state) || state;
-    var c = s.currentCase || (s.cases && s.cases.find(function(item) { return item.id === caseId; }));
-    if (!c && s.cases && s.cases.length > 0) {
-      c = s.cases[0];
-      s.currentCase = c;
+    var c = null;
+    if (caseId) {
+      c = (s.cases || []).find(function(item) {
+        return String(item.id) === String(caseId) || item.public_id === String(caseId);
+      });
+      if (!c && s.currentCase && (String(s.currentCase.id) === String(caseId) || s.currentCase.public_id === String(caseId))) {
+        c = s.currentCase;
+      }
+    }
+    if (!c) {
+      c = s.currentCase;
     }
     if (!c) {
       showToast('⚠️ Please select a product case first', 'error');
       return;
     }
-    openCaseModule("knowledgeGraphData", "/api/cases/" + c.id + "/knowledge-graph", "knowledge-graph");
+    s.currentCase = c;
+    var targetId = c.public_id || c.id;
+    openCaseModule("knowledgeGraphData", "/api/cases/" + targetId + "/knowledge-graph", "knowledge-graph");
   }
   window.openKnowledgeGraph = openKnowledgeGraph;
 
@@ -4580,21 +4690,32 @@
 
   async function generateRegulatoryAnalysis(caseId, jurisdiction) {
     var j = jurisdiction || "IN";
-    var c = state.currentCase || (state.cases && state.cases.find(function(item) { return item.id === caseId; }));
-    if (!c && state.cases && state.cases.length > 0) {
-      c = state.cases[0];
-      state.currentCase = c;
+    var c = null;
+    if (caseId) {
+      c = (state.cases || []).find(function(item) {
+        return String(item.id) === String(caseId) || item.public_id === String(caseId);
+      });
+      if (!c && state.currentCase && (String(state.currentCase.id) === String(caseId) || state.currentCase.public_id === String(caseId))) {
+        c = state.currentCase;
+      }
+    }
+    if (!c) {
+      c = state.currentCase;
     }
     if (!c) {
       showToast('⚠️ No active product case found', 'error');
       return;
     }
+    state.currentCase = c;
+    var targetId = c.public_id || c.id;
+    var seq = ++_activeModuleSeq;
+
     var isNewView = state.view !== "regulatory-intelligence";
     if (isNewView) {
       saveCurrentViewScrollPosition();
     }
     var cacheKey = "regulatoryProfile:" + j;
-    var cached = getCachedModule(c.id, cacheKey) || getCachedModule(c.id, "regulatoryProfile");
+    var cached = getCachedModule(targetId, cacheKey) || getCachedModule(c.id, cacheKey) || getCachedModule(targetId, "regulatoryProfile");
     if (cached && (cached.jurisdiction === j || !j)) {
       state.regulatoryProfile = cached;
       state.view = "regulatory-intelligence";
@@ -4602,32 +4723,43 @@
       render({ scroll: isNewView ? "top" : "preserve" });
       return;
     }
+
+    state.regulatoryProfile = null;
     state.loading = true;
     render({ scroll: isNewView ? "top" : "preserve" });
     try {
       var data = null;
       try {
-        data = await api("/api/cases/" + c.id + "/regulatory-analysis?jurisdiction=" + encodeURIComponent(j));
+        data = await api("/api/cases/" + targetId + "/regulatory-analysis?jurisdiction=" + encodeURIComponent(j));
       } catch (getErr) {
-        data = await api("/api/cases/" + c.id + "/regulatory-analysis", {
+        data = await api("/api/cases/" + targetId + "/regulatory-analysis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ jurisdiction: j })
         });
       }
-      if (data) {
-        setCachedModule(c.id, cacheKey, data);
-        setCachedModule(c.id, "regulatoryProfile", data);
+      if (data && getActiveProductId() === String(targetId) && seq === _activeModuleSeq) {
+        setCachedModule(targetId, cacheKey, data);
+        setCachedModule(targetId, "regulatoryProfile", data);
+        if (c.id) {
+          setCachedModule(c.id, cacheKey, data);
+          setCachedModule(c.id, "regulatoryProfile", data);
+        }
         state.regulatoryProfile = data;
         state.view = "regulatory-intelligence";
         saveStateToLocalStorage();
       }
     } catch (e) {
       console.error("Regulatory analysis failed:", e);
-      state.error = "Failed to generate regulatory analysis.";
+      if (getActiveProductId() === String(targetId) && seq === _activeModuleSeq) {
+        state.error = "Failed to generate regulatory analysis.";
+      }
+    } finally {
+      if (seq === _activeModuleSeq) {
+        state.loading = false;
+        render({ scroll: isNewView ? "top" : "preserve" });
+      }
     }
-    state.loading = false;
-    render({ scroll: isNewView ? "top" : "preserve" });
   }
   window.generateRegulatoryAnalysis = generateRegulatoryAnalysis;
 
@@ -6953,7 +7085,7 @@
   }
 
   async function fetchProductSourceAnalysisAsync(sourceId) {
-    var activeCase = state.currentCase || (state.cases && state.cases[0]);
+    var activeCase = state.currentCase;
     if (!activeCase) return;
     var caseId = activeCase.public_id || activeCase.id;
     try {
@@ -6974,7 +7106,7 @@
     var cases = state.cases || [];
     var foundCase = cases.find(function(c) { return String(c.id) === String(caseIdStr) || String(c.public_id) === String(caseIdStr); });
     if (foundCase) {
-      state.currentCase = foundCase;
+      setActiveProduct(foundCase);
     }
     state.khProductAnalysis = null;
     var container = document.getElementById('kh-prod-analysis-container');
@@ -6983,7 +7115,7 @@
     }
     await fetchProductSourceAnalysisAsync(sourceId);
     if (!state.khProductAnalysis && container) {
-      var activeCase = state.currentCase || (state.cases && state.cases[0]);
+      var activeCase = state.currentCase;
       container.innerHTML = renderProductAnalysisCardInner(sourceId, activeCase, null);
     }
   }
@@ -7566,7 +7698,7 @@
 
     var items = state.khFilteredItems || state.khLibraryItems || [];
     var totalItems = (state.khLibraryItems || []).length;
-    var activeCase = state.currentCase || (state.cases && state.cases[0]);
+    var activeCase = state.currentCase;
 
     var itemsHtml = '';
     if (state.khLibraryLoading) {
@@ -7908,7 +8040,7 @@
   }
 
   function renderPatentSourceInfoView() {
-    var activeCase = state.currentCase || (state.cases && state.cases[0]);
+    var activeCase = state.currentCase;
     var btnOnClick = activeCase
       ? "navigate('patent-intelligence')"
       : "if(window.AYUR){state.view='product-cases';render();}";
@@ -9180,11 +9312,9 @@
     var patentBtn = document.getElementById("open-patent-btn");
     if (patentBtn) {
       patentBtn.addEventListener("click", function () {
-        if (state.view !== "patent-intelligence") {
-          saveCurrentViewScrollPosition();
-        }
-        state.view = "patent-intelligence";
-        render({ scroll: "top" });
+        if (!state.currentCase) return;
+        var cId = state.currentCase.public_id || state.currentCase.id;
+        openCaseModule("patentSearchResults", "/api/cases/" + cId + "/patents", "patent-intelligence");
       });
     }
 
@@ -10458,34 +10588,22 @@
   }
 
   async function loadCase(id) {
-    var existing = (state.cases || []).find(function (c) { return String(c.id) === String(id); });
-    // Reset active module transient states so they do not bleed between cases
-    state.innovationAnalysis = null;
-    state.ipStrategy = null;
-    state.regulatoryProfile = null;
-    state.riskData = null;
-    state.evidenceData = null;
-    state.dashboardData = null;
-    state.knowledgeGraphData = null;
-    state.monitoringData = null;
+    var target = setActiveProduct(id);
+    var seq = _activeProductSeq;
+    state.view = "case-detail";
+    state.error = null;
+    render({ scroll: "top" });
 
-    if (existing) {
-      state.currentCase = existing;
-      state.view = "case-detail";
-      state.error = null;
-      updateTopbarUI();
-      render({ scroll: "top" });
-    }
     try {
       var data = await api("/api/cases/" + id);
-      state.currentCase = data;
-      state.view = "case-detail";
-      state.error = null;
-      saveStateToLocalStorage();
-      updateTopbarUI();
-      render(existing ? { scroll: "preserve" } : { scroll: "top" });
+      if (seq === _activeProductSeq) {
+        state.currentCase = data;
+        saveStateToLocalStorage();
+        updateTopbarUI();
+        render({ scroll: "preserve" });
+      }
     } catch (e) {
-      if (!existing) {
+      if (seq === _activeProductSeq && !target) {
         state.error = "Failed to load case.";
         render({ scroll: "top" });
       }
@@ -10496,7 +10614,7 @@
     if (window.AYUR && window.AYUR.initPassportData) {
       window.AYUR.initPassportData(null);
     }
-    state.currentCase = null;
+    setActiveProduct(null);
     state.view = "passport-wizard";
     state.passportStep = 0;
     updateTopbarUI();
@@ -10506,7 +10624,7 @@
 
   async function exploreDemoCase() {
     showToast("🌿 Opening official Ayurvedic Demo Case in Product Passport...", "info");
-    state.currentCase = null;
+    setActiveProduct(null);
     var demoData = null;
     try {
       demoData = await api("/api/cases/demo");
@@ -10537,18 +10655,57 @@
   async function init() {
     bindNavigation();
 
-    // Default state: Always start clean on dashboard with No Active Case
-    state.currentCase = null;
-    state.view = "dashboard";
+    var restoredCase = null;
+    var restoredView = "dashboard";
+    try {
+      var savedStr = localStorage.getItem('ayur_intel_state');
+      if (savedStr) {
+        var saved = JSON.parse(savedStr);
+        if (saved && saved.currentCase) {
+          restoredCase = saved.currentCase;
+        }
+        if (saved && saved.view && saved.view !== "dashboard") {
+          restoredView = saved.view;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not restore saved state:", e);
+    }
+
+    if (restoredCase) {
+      state.currentCase = restoredCase;
+    } else {
+      state.currentCase = null;
+    }
+    state.view = restoredView;
     state.passportData = null;
 
     updateTopbarUI();
     render({ scroll: "top" });
 
     loadCases().then(function () {
-      if (state.view === "dashboard" || state.view === "product-cases") {
-        render({ scroll: "preserve" });
+      if (state.currentCase) {
+        var match = (state.cases || []).find(function (c) {
+          return String(c.id) === String(state.currentCase.id) ||
+                 (c.public_id && c.public_id === state.currentCase.public_id);
+        });
+        if (match) {
+          state.currentCase = match;
+          if (state.view === "monitoring-center") {
+            window.switchMonitoringProduct(match.public_id || match.id);
+          } else if (state.view === "patent-intelligence") {
+            window.openPatentIntelligenceForCase(match.public_id || match.id);
+          } else if (state.view === "regulatory-intelligence" || state.view === "regulatory-select") {
+            generateRegulatoryAnalysis(match.id, "IN");
+          }
+        } else {
+          state.currentCase = null;
+          state.view = "dashboard";
+        }
       }
+      updateTopbarUI();
+      saveStateToLocalStorage();
+      render({ scroll: "preserve" });
     });
   }
 
@@ -10592,6 +10749,9 @@
 
   window.AYUR = {
     state: state,
+    setActiveProduct: setActiveProduct,
+    getActiveProductId: getActiveProductId,
+    clearPerProductState: clearPerProductState,
     api: api,
     toast: toast,
     escapeHtml: escapeHtml,

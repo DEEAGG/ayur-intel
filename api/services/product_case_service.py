@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import time
 from typing import List, Optional
 
-from sqlalchemy import func, text
+from sqlalchemy import func, text, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -71,6 +71,7 @@ def _case_to_dict(case: ProductCase) -> dict:
     """Convert a ProductCase ORM object to a dict for API response."""
     return {
         "id": case.public_id,
+        "public_id": case.public_id,
         "name": case.name,
         "stage": case.stage,
         "jurisdictions": _deserialize_list(case.jurisdictions),
@@ -309,11 +310,14 @@ def list_product_cases(
 
 def get_product_case(db: Session, owner: User, public_id: str) -> Optional[dict]:
     """Get a single Product Case by public ID, scoped to owner or demo."""
+    conds = [ProductCase.public_id == public_id]
+    if str(public_id).isdigit():
+        conds.append(ProductCase.id == int(public_id))
     case = (
         db.query(ProductCase)
         .filter(
-            ProductCase.public_id == public_id,
-            (ProductCase.owner_id == owner.id) | (ProductCase.is_demo == True),
+            or_(*conds),
+            (ProductCase.owner_id == owner.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
         )
         .first()
     )
@@ -329,11 +333,14 @@ def update_product_case(
     updates: dict,
 ) -> Optional[dict]:
     """Update a Product Case. Creates a new version if material facts change."""
+    conds = [ProductCase.public_id == public_id]
+    if str(public_id).isdigit():
+        conds.append(ProductCase.id == int(public_id))
     case = (
         db.query(ProductCase)
         .filter(
-            ProductCase.public_id == public_id,
-            ProductCase.owner_id == owner.id,
+            or_(*conds),
+            (ProductCase.owner_id == owner.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
         )
         .first()
     )

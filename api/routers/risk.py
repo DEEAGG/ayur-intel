@@ -3,6 +3,7 @@ import logging
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from api.core.database import get_db
@@ -69,9 +70,12 @@ def get_risk_assessment_endpoint(
     user: User = Depends(get_current_user),
 ):
     """Retrieve the latest saved Risk Assessment for a Product Case."""
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = db.query(ProductCase).filter(
-        ProductCase.public_id == case_id,
-        (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True),
+        or_(*conds),
+        (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
     ).first()
     if not case:
         raise HTTPException(status_code=404, detail="Product Case not found")
@@ -94,9 +98,12 @@ def create_or_get_risk_assessment_endpoint(
     user: User = Depends(get_current_user),
 ):
     """Generate structured AI Risk Assessment, or return saved if already exists (thread-safe)."""
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = db.query(ProductCase).filter(
-        ProductCase.public_id == case_id,
-        (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True),
+        or_(*conds),
+        (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
     ).first()
     if not case:
         raise HTTPException(status_code=404, detail="Product Case not found")
@@ -149,9 +156,12 @@ def reassess_risk_endpoint(
     user: User = Depends(get_current_user),
 ):
     """Explicitly regenerate Risk Assessment with fresh Gemini AI synthesis (thread-safe)."""
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = db.query(ProductCase).filter(
-        ProductCase.public_id == case_id,
-        (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True),
+        or_(*conds),
+        (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
     ).first()
     if not case:
         raise HTTPException(status_code=404, detail="Product Case not found")
@@ -219,10 +229,12 @@ def list_risks(
     user: User = Depends(get_current_user),
 ):
     """List all risks for a Product Case."""
-    from api.models.models import ProductCase
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = db.query(ProductCase).filter(
-        ProductCase.public_id == case_id,
-        ProductCase.owner_id == user.id,
+        or_(*conds),
+        (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
     ).first()
     if not case:
         raise HTTPException(status_code=404, detail="Product Case not found")

@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from api.core.database import get_db
@@ -45,11 +46,14 @@ def generate_ip_roadmap_endpoint(
     user: User = Depends(get_current_user),
 ):
     """Generate complete IP strategy roadmap for a product case."""
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = (
         db.query(ProductCase)
         .filter(
-            ProductCase.public_id == case_id,
-            ProductCase.owner_id == user.id,
+            or_(*conds),
+            (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
         )
         .first()
     )
@@ -68,11 +72,14 @@ def create_ip_strategy(
     user: User = Depends(get_current_user),
 ):
     """Generate an IP Strategy Map for a Product Case."""
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = (
         db.query(ProductCase)
         .filter(
-            ProductCase.public_id == case_id,
-            ProductCase.owner_id == user.id,
+            or_(*conds),
+            (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
         )
         .first()
     )
@@ -90,11 +97,14 @@ def get_ip_strategy(
     user: User = Depends(get_current_user),
 ):
     """Get the latest IP Strategy for a Product Case."""
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = (
         db.query(ProductCase)
         .filter(
-            ProductCase.public_id == case_id,
-            ProductCase.owner_id == user.id,
+            or_(*conds),
+            (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
         )
         .first()
     )

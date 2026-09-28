@@ -14,6 +14,7 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from api.models.models import (
@@ -1050,6 +1051,18 @@ def run_patent_intelligence(
 # GET-First Public API
 # -------------------------------------------------------------------
 
+def _get_case_for_patent(db: Session, owner: Optional[User], case_public_id: str) -> Optional[ProductCase]:
+    conds = [ProductCase.public_id == case_public_id]
+    if str(case_public_id).isdigit():
+        conds.append(ProductCase.id == int(case_public_id))
+    query = db.query(ProductCase).filter(or_(*conds))
+    if owner is not None:
+        query = query.filter((ProductCase.owner_id == owner.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"))
+    else:
+        query = query.filter((ProductCase.public_id == "demo-001") | (ProductCase.is_demo == True))
+    return query.first()
+
+
 def get_or_run_patent_intelligence(
     db: Session,
     owner: User,
@@ -1057,12 +1070,7 @@ def get_or_run_patent_intelligence(
     force_rerun: bool = False,
 ) -> Optional[dict]:
     """GET-first retrieval of persisted patent intelligence analysis for a Product Case."""
-    query = db.query(ProductCase).filter(ProductCase.public_id == case_public_id)
-    if owner is not None:
-        query = query.filter((ProductCase.owner_id == owner.id) | ((ProductCase.public_id == "demo-001") & (ProductCase.is_demo == True)))
-    else:
-        query = query.filter((ProductCase.public_id == "demo-001") & (ProductCase.is_demo == True))
-    case = query.first()
+    case = _get_case_for_patent(db, owner, case_public_id)
     if case is None:
         return None
 
@@ -1183,14 +1191,7 @@ def run_patent_search(
     limit: int = 20,
 ) -> Optional[dict]:
     """Legacy wrapper for manual patent search trigger."""
-    case = (
-        db.query(ProductCase)
-        .filter(
-            ProductCase.public_id == case_public_id,
-            ProductCase.owner_id == owner.id,
-        )
-        .first()
-    )
+    case = _get_case_for_patent(db, owner, case_public_id)
     if case is None:
         return None
 
@@ -1205,14 +1206,7 @@ def get_saved_patents(
     case_public_id: str,
 ) -> List[dict]:
     """Get all saved patent relevances for a Product Case."""
-    case = (
-        db.query(ProductCase)
-        .filter(
-            ProductCase.public_id == case_public_id,
-            ProductCase.owner_id == owner.id,
-        )
-        .first()
-    )
+    case = _get_case_for_patent(db, owner, case_public_id)
     if case is None:
         return []
 
@@ -1241,14 +1235,7 @@ def save_patent(
     user_notes: Optional[str] = None,
 ) -> Optional[dict]:
     """Save a patent record to a Product Case."""
-    case = (
-        db.query(ProductCase)
-        .filter(
-            ProductCase.public_id == case_public_id,
-            ProductCase.owner_id == owner.id,
-        )
-        .first()
-    )
+    case = _get_case_for_patent(db, owner, case_public_id)
     if case is None:
         return None
 
@@ -1307,14 +1294,7 @@ def retry_patent_ai_analysis(
     case_public_id: str,
 ) -> Optional[dict]:
     """Re-run AI semantic evaluation on existing persisted shortlisted candidates without re-querying Europe PMC."""
-    case = (
-        db.query(ProductCase)
-        .filter(
-            ProductCase.public_id == case_public_id,
-            ProductCase.owner_id == owner.id,
-        )
-        .first()
-    )
+    case = _get_case_for_patent(db, owner, case_public_id)
     if case is None:
         return None
 

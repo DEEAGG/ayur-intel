@@ -90,6 +90,7 @@ class ProductCaseResponse(BaseModel):
     """Schema for returning a Product Case in API responses."""
 
     id: str = Field(..., description="Public case ID")
+    public_id: Optional[str] = Field(None, description="Public case identifier")
     name: str
     stage: str
     jurisdictions: List[str]

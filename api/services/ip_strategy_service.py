@@ -11,6 +11,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from api.models import (
@@ -766,9 +767,12 @@ def generate_summary(case_data: Dict, innovative_count: int, traditional_count: 
 
 def generate_ip_strategy(db: Session, user: User, case_id: str) -> Optional[IPStrategy]:
     """Generate or retrieve database IPStrategy model."""
+    conds = [ProductCase.public_id == case_id]
+    if str(case_id).isdigit():
+        conds.append(ProductCase.id == int(case_id))
     case = db.query(ProductCase).filter(
-        ProductCase.public_id == case_id,
-        ProductCase.owner_id == user.id
+        or_(*conds),
+        (ProductCase.owner_id == user.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
     ).first()
     if not case:
         return None
