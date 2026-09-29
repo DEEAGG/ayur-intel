@@ -32,6 +32,8 @@ def chat_with_assistant(
 
     and return a grounded response with safe navigation actions.
     """
+    import time
+    t0 = time.perf_counter()
     try:
         result = process_assistant_chat(
             db=db,
@@ -41,6 +43,8 @@ def chat_with_assistant(
             active_product_id=request.active_product_id,
             active_product_name=request.active_product_name,
         )
+        if "server_processing_ms" not in result or result["server_processing_ms"] is None:
+            result["server_processing_ms"] = round((time.perf_counter() - t0) * 1000, 2)
         return AssistantChatResponse(**result)
     except Exception as e:
         logger.error("Error processing assistant chat: %s", e, exc_info=True)

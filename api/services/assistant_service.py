@@ -1,8 +1,8 @@
 """AYUR-INTEL — In-App RAG Assistant Service.
 
 Handles query normalization, intent classification, follow-up resolution,
-lightweight deterministic chunk retrieval, intent action mapping,
-grounded Gemini synthesis, and deterministic fallback generation.
+instant local fast-path responses, high-confidence RAG fast-path responses,
+bounded Gemini synthesis (last layer with 4.0s timeout), and resilient fallbacks.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -21,7 +22,7 @@ from api.services.assistant_knowledge import KNOWLEDGE_CHUNKS
 
 logger = logging.getLogger("ayur_intel.assistant_service")
 
-# Candidate models for Gemini API
+# Candidate model for Gemini API
 CANDIDATE_GEMINI_MODELS = [
     "gemini-flash-latest",
 ]
@@ -112,6 +113,16 @@ class MessageIntent:
     NAVIGATION = "NAVIGATION"
     DOMAIN_KNOWLEDGE = "DOMAIN_KNOWLEDGE"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
+
+
+class SourceType:
+    """Diagnostic source indicators for assistant answers."""
+    FAST_LOCAL = "FAST_LOCAL"
+    FAST_RAG = "FAST_RAG"
+    GEMINI = "GEMINI"
+    FALLBACK_TIMEOUT = "FALLBACK_TIMEOUT"
+    FALLBACK_429 = "FALLBACK_429"
+    FALLBACK = "FALLBACK"
 
 
 # Unambiguous Hinglish tokens in Roman script (conversational Hindi markers)
@@ -271,11 +282,12 @@ def classify_intent(query: str, history: Optional[List[Any]] = None) -> str:
     self_keywords = [
         "who are you", "what are you", "tum kaun ho", "tum kya ho", "tum kya karte ho",
         "what do you do", "what can you do", "tum meri kya help kar sakte ho", "how can you help",
-        "what can i ask you", "kya puch sakta hun", "kya pooch sakta hoon",
+        "what can i ask you", "what can i ask", "kya puch sakta hun", "kya pooch sakta hoon",
         "are you ai", "are you a bot", "are you a chatbot", "are you gemini", "are you chatgpt",
         "kya tum chatgpt ho", "chatgpt ho", "who made you", "tumhe kisne banaya", "what powers you",
         "how do you work", "do you use rag", "what is your knowledge based on", "what are your limits",
-        "limitations", "apne baare mein batao", "tell me about yourself", "who is ayush", "ayush kya hai"
+        "limitations", "apne baare mein batao", "tell me about yourself", "who is ayush", "ayush kya hai",
+        "supported languages", "kaunsi bhasha", "which languages"
     ]
     if any(k in q_lower for k in self_keywords):
         return MessageIntent.SELF_KNOWLEDGE
@@ -302,7 +314,7 @@ def classify_intent(query: str, history: Optional[List[Any]] = None) -> str:
     if not has_domain_term:
         casual_phrases = [
             "achha mujhe kuch jan na hai", "accha mujhe kuch jan na hai", "mujhe kuch jan na hai",
-            "kuch jan na hai", "kuch janna hai", "kuch puchna hai", "kuch poochna hai",
+            "kuch jan na hai", "kuch janna hai", "kuch puchna hai", "kuch poochna hai", "mujhe kuch puchna hai",
             "kuch batana hai", "ek sawal hai", "ek question hai", "help chahiye",
             "help me", "can you help me", "help", "kya tum meri madad kar sakte ho", "madad chahiye",
             "hi", "hello", "hey", "namaste", "pranam", "kya haal hai", "kaise ho",
@@ -319,7 +331,8 @@ def classify_intent(query: str, history: Optional[List[Any]] = None) -> str:
     # 7. Explicit navigation intent
     nav_phrases = [
         "take me to", "go to", "navigate to", "open products", "open dashboard",
-        "open monitoring", "open patent", "kholo", "dekhna hai", "le chalo"
+        "open monitoring", "open patent", "kholo", "dekhna hai", "le chalo",
+        "view products", "mere products dikhao", "create product", "new product"
     ]
     if any(k in q_lower for k in nav_phrases) and not any(k in q_lower for k in ["how", "what", "kaise", "kya"]):
         return MessageIntent.NAVIGATION
@@ -427,8 +440,8 @@ def score_chunk(query_lower: str, tokens: List[str], chunk: Dict[str, Any]) -> f
     return score
 
 
-def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[Dict[str, Any]]:
-    """Retrieve top relevant knowledge chunks using deterministic scoring."""
+def score_all_chunks(query: str) -> List[Tuple[float, Dict[str, Any]]]:
+    """Score all chunks deterministically and return sorted list."""
     query_clean = sanitize_input(query)
     query_lower = query_clean.lower()
     tokens = normalize_query_tokens(query_clean)
@@ -440,15 +453,64 @@ def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[Dict[str, Any]]
             scored.append((s, chunk))
 
     scored.sort(key=lambda x: x[0], reverse=True)
+    return scored
 
+
+def retrieve_relevant_chunks(query: str, top_k: int = 4) -> List[Dict[str, Any]]:
+    """Retrieve top relevant knowledge chunks using deterministic scoring."""
+    scored = score_all_chunks(query)
     if not scored:
-        # Fallback to general overview and navigation chunks
         return [
             next(c for c in KNOWLEDGE_CHUNKS if c["id"] == "kb_platform_overview"),
             next(c for c in KNOWLEDGE_CHUNKS if c["id"] == "kb_navigation_guide"),
         ]
-
     return [item[1] for item in scored[:top_k]]
+
+
+COMPLEX_SYNTHESIS_MARKERS = [
+    "compare", "comparison", "versus", "vs.", "difference between",
+    "synthesize", "combine", "trade-off", "tradeoff", "evaluate both",
+    "if i have", "my formulation has", "what if", "suggest a formula",
+    "critique", "pros and cons", "detailed roadmap for my specific",
+    "multiple herbs", "which one is better"
+]
+
+CANONICAL_FAST_RAG_KEYWORDS = [
+    "what is product passport", "product passport kya", "passport kya hota", "passport kya hai", "product passport",
+    "what is patent", "patent intelligence", "prior art", "section 3p", "freedom to operate",
+    "what is regulatory", "regulatory intelligence", "asu drug", "fssai", "regulatory analysis",
+    "what is monitoring", "monitoring center", "continuous monitoring", "monitoring kaise",
+    "how do i create a product", "create a product", "naya product kaise", "product banau", "kaise banau",
+    "where are my products", "mere products kaha", "mere products kidhar", "my products",
+    "how does ayur-intel use ai", "ai use", "ai kaha", "artificial intelligence",
+    "tech stack", "kis tech", "built with", "architecture", "pe bana",
+    "guarantee", "patent approval", "pakka",
+    "react", "built in react", "is this react",
+    "plant discovery", "plantnet", "botanical identification", "dravya guna",
+    "workflow", "how does ayur-intel work", "lifecycle", "formulation workflow",
+    "what is ayur-intel", "ayur-intel kya", "what can ayur-intel do", "platform mission",
+    "evidence hub", "decision dashboard", "risk assessment"
+]
+
+
+def is_fast_rag_eligible(query_lower: str, top_chunk: Optional[Dict[str, Any]], top_score: float) -> bool:
+    """Determine if query can be answered immediately with high-confidence RAG chunk without invoking Gemini."""
+    if not top_chunk:
+        return False
+
+    # Never fast-path complex multi-domain synthesis queries
+    if any(marker in query_lower for marker in COMPLEX_SYNTHESIS_MARKERS):
+        return False
+
+    # Direct canonical question match
+    if any(kw in query_lower for kw in CANONICAL_FAST_RAG_KEYWORDS):
+        return True
+
+    # High-confidence score threshold (title or tag match) for concise queries
+    if top_score >= 18.0 and len(query_lower.split()) <= 12:
+        return True
+
+    return False
 
 
 def resolve_actions(
@@ -475,7 +537,7 @@ def resolve_actions(
         seen_ids.add("CREATE_PRODUCT")
 
     # 2. View Products / Inventory intent
-    if any(w in query_lower for w in ["where are my products", "my products", "mere products", "products kaha", "inventory", "view products", "list products", "products"]):
+    if any(w in query_lower for w in ["where are my products", "my products", "mere products", "products kaha", "inventory", "view products", "list products", "products", "dikhao"]):
         if "OPEN_PRODUCTS" not in seen_ids:
             actions.append(AssistantAction(
                 id="OPEN_PRODUCTS",
@@ -626,7 +688,7 @@ def generate_fallback_answer(
 ) -> str:
     """Generate a deterministic, grounded answer directly from KB chunks mirroring user language.
 
-    Guarantees that the assistant remains fully functional and natural if Gemini fails or is unconfigured.
+    Guarantees that the assistant remains fully functional, instant, and natural.
     """
     if detected_language is None:
         detected_language = detect_language(query)
@@ -661,7 +723,7 @@ def generate_fallback_answer(
             "and regulatory pathways."
         )
 
-    # 2. Casual Conversation / Openers (No RAG dump!)
+    # 2. Casual Conversation / Openers (Instant Fast Path)
     if intent == MessageIntent.CASUAL:
         if in_hinglish:
             return (
@@ -841,7 +903,7 @@ def generate_fallback_answer(
         )
 
     # 9. Where are my products?
-    if any(k in query_lower for k in ["where are my products", "mere products", "products kaha", "inventory"]):
+    if any(k in query_lower for k in ["where are my products", "mere products", "products kaha", "inventory", "my products", "dikhao"]):
         if in_hinglish:
             return (
                 "Aapke saare saved products left navigation sidebar ke **'Products'** section mein hain.\n\n"
@@ -1084,7 +1146,7 @@ def generate_gemini_answer(
     """Generate grounded answer using Google Gemini API with fallback safeguard.
 
     Returns:
-        (answer_text, source_type) where source_type is "GEMINI" or "FALLBACK"
+        (answer_text, source_type) where source_type is "GEMINI", "FALLBACK_TIMEOUT", "FALLBACK_429", or "FALLBACK"
     """
     if detected_language is None:
         detected_language = detect_language(query)
@@ -1105,7 +1167,7 @@ def generate_gemini_answer(
             active_product_name,
             detected_language=detected_language,
             intent=intent,
-        ), "FALLBACK"
+        ), SourceType.FALLBACK
 
     # Assemble bounded context from retrieved chunks
     if retrieved_chunks:
@@ -1162,7 +1224,7 @@ def generate_gemini_answer(
             "\nINTENT INSTRUCTION (CASUAL OPENER):\n"
             "- The user is greeting you or casually opening the conversation (e.g. 'achha mujhe kuch jan na hai', 'hi', 'help me').\n"
             "- Do NOT output a large documentation dump or recite entire modules.\n"
-            "- Warmly welcome them as AYUSH, confirm you are ready to help, and concisely suggest 3-4 topics they can explore (Product Passport, Section 3(p) Patent prior-art, ASU vs FSSAI compliance, Continuous Monitoring).\n"
+            "- Warmly welcome them as AYUSH, confirm you are ready to help, and concisely suggest 3-4 topics they can explore.\n"
         )
     elif intent == MessageIntent.SELF_KNOWLEDGE:
         conversational_guidance = (
@@ -1208,22 +1270,16 @@ Current UI View: {current_view}
         import google.generativeai as genai
         genai.configure(api_key=api_key)
 
-        for model_name in CANDIDATE_GEMINI_MODELS:
-            try:
-                model = genai.GenerativeModel(model_name=model_name)
-                response = model.generate_content(
-                    full_prompt,
-                    request_options={"timeout": 6.0}
-                )
-                if response and response.text and response.text.strip():
-                    answer = sanitize_output(response.text.strip())
-                    logger.info("✅ Assistant response generated via Gemini model %s", model_name)
-                    return answer, "GEMINI"
-            except Exception as model_err:
-                logger.warning("Gemini model %s failed: %s", model_name, model_err)
-                continue
+        model = genai.GenerativeModel(model_name=CANDIDATE_GEMINI_MODELS[0])
+        response = model.generate_content(
+            full_prompt,
+            request_options={"timeout": 4.0}
+        )
+        if response and response.text and response.text.strip():
+            answer = sanitize_output(response.text.strip())
+            logger.info("✅ Assistant response generated via Gemini model %s", CANDIDATE_GEMINI_MODELS[0])
+            return answer, SourceType.GEMINI
 
-        logger.warning("All candidate Gemini models failed. Switching to deterministic fallback.")
         return generate_fallback_answer(
             query,
             retrieved_chunks,
@@ -1231,10 +1287,20 @@ Current UI View: {current_view}
             active_product_name,
             detected_language=detected_language,
             intent=intent,
-        ), "FALLBACK"
+        ), SourceType.FALLBACK
 
     except Exception as e:
-        logger.error("Gemini Assistant call failed with exception: %s. Using fallback.", e)
+        err_msg = str(e).lower()
+        if "timeout" in err_msg or "deadline" in err_msg or "timed out" in err_msg:
+            logger.warning("⏱️ Gemini request timed out (>=4.0s). Using fast deterministic fallback.")
+            source_type = SourceType.FALLBACK_TIMEOUT
+        elif "429" in err_msg or "quota" in err_msg or "resourceexhausted" in err_msg:
+            logger.warning("⚠️ Gemini rate limit / quota exceeded (429). Using fast deterministic fallback.")
+            source_type = SourceType.FALLBACK_429
+        else:
+            logger.error("Gemini Assistant call failed with exception: %s. Using fallback.", e)
+            source_type = SourceType.FALLBACK
+
         return generate_fallback_answer(
             query,
             retrieved_chunks,
@@ -1242,7 +1308,7 @@ Current UI View: {current_view}
             active_product_name,
             detected_language=detected_language,
             intent=intent,
-        ), "FALLBACK"
+        ), source_type
 
 
 def verify_active_product(db: Session, product_id: Optional[str]) -> Tuple[Optional[str], Optional[str], bool]:
@@ -1277,17 +1343,20 @@ def process_assistant_chat(
     active_product_id: Optional[str] = None,
     active_product_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Execute complete in-app RAG assistant pipeline.
+    """Execute complete in-app RAG assistant pipeline with instant fast paths.
 
     1. Sanitize user query
     2. Verify active product context against DB
     3. Detect query language per message
     4. Classify intent and resolve follow-ups
-    5. Retrieve relevant chunks (skipped for casual/security/out-of-scope)
-    6. Resolve safe navigation actions
-    7. Generate grounded response (Gemini with deterministic fallback)
-    8. Return structured response with clean visual hierarchy metadata
+    5. Check FAST LOCAL path (casual, self-knowledge, identity, boundaries, product context, navigation)
+       -> If YES: return instant response immediately (<50ms, NO Gemini, NO external network)
+    6. Check FAST RAG path (high-confidence direct canonical factual questions)
+       -> If YES: return grounded deterministic response immediately (<50ms, NO Gemini)
+    7. GEMINI (LAST reasoning layer for complex multi-feature synthesis with 4.0s timeout)
     """
+    t0 = time.perf_counter()
+
     clean_message = sanitize_input(message)
     if not clean_message:
         return {
@@ -1297,7 +1366,8 @@ def process_assistant_chat(
                 AssistantAction(id="OPEN_PRODUCTS", label="View Products →", target="product-cases"),
             ],
             "sources": [],
-            "source_type": "FALLBACK",
+            "source_type": SourceType.FAST_LOCAL,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
             "product_context": ProductContextInfo(active_product_id=None, active_product_name=None, verified=False),
         }
 
@@ -1325,115 +1395,132 @@ def process_assistant_chat(
         if intent == MessageIntent.FOLLOW_UP:
             intent = MessageIntent.DOMAIN_KNOWLEDGE
 
-    retrieved_chunks: List[Dict[str, Any]] = []
-    sources: List[str] = []
-    actions: List[AssistantAction] = []
-
-    # Handle based on classified intent
-    if intent == MessageIntent.SECURITY:
-        answer = generate_fallback_answer(
-            clean_message, [], eff_prod_id, eff_prod_name, detected_language=detected_lang, intent=intent
-        )
-        source_type = "FALLBACK"
-
-    elif intent == MessageIntent.CASUAL:
-        # Crucial UX fix: NEVER dump RAG knowledge or source tags for casual openers/greetings
-        sources = []
-        actions = [
-            AssistantAction(id="CREATE_PRODUCT", label="Create Product →", target="passport-wizard"),
-            AssistantAction(id="OPEN_PRODUCTS", label="View Products →", target="product-cases"),
-        ]
-        answer, source_type = generate_gemini_answer(
-            query=clean_message,
-            retrieved_chunks=[],
-            current_view=current_view,
-            active_product_id=eff_prod_id,
-            active_product_name=eff_prod_name,
-            detected_language=detected_lang,
-            intent=intent,
-            history=history,
-        )
-
-    elif intent == MessageIntent.SELF_KNOWLEDGE:
-        retrieved_chunks = [c for c in KNOWLEDGE_CHUNKS if c["id"] == "kb_ayush_assistant"]
-        sources = ["AYUSH Assistant & Capabilities"]
-        actions = [
-            AssistantAction(id="CREATE_PRODUCT", label="Create Product →", target="passport-wizard"),
-            AssistantAction(id="OPEN_PRODUCTS", label="View Products →", target="product-cases"),
-        ]
-        answer, source_type = generate_gemini_answer(
-            query=clean_message,
-            retrieved_chunks=retrieved_chunks,
-            current_view=current_view,
-            active_product_id=eff_prod_id,
-            active_product_name=eff_prod_name,
-            detected_language=detected_lang,
-            intent=intent,
-            history=history,
-        )
-
-    elif intent == MessageIntent.PRODUCT_CONTEXT:
-        sources = ["Product Context"] if eff_prod_name else []
-        if eff_prod_name:
-            actions = [
-                AssistantAction(
-                    id="OPEN_PATENT",
-                    label=f"Open Patent Intelligence for {eff_prod_name} →",
-                    target="patent-intelligence",
-                    product_id=eff_prod_id,
-                ),
-                AssistantAction(
-                    id="OPEN_REGULATORY",
-                    label=f"Open Regulatory Intelligence for {eff_prod_name} →",
-                    target="regulatory-intelligence",
-                    product_id=eff_prod_id,
-                ),
-            ]
-        else:
+    # -------------------------------------------------------------------------
+    # 1. FAST LOCAL PATH
+    # -------------------------------------------------------------------------
+    if intent in (
+        MessageIntent.SECURITY,
+        MessageIntent.CASUAL,
+        MessageIntent.SELF_KNOWLEDGE,
+        MessageIntent.PRODUCT_CONTEXT,
+        MessageIntent.OUT_OF_SCOPE,
+        MessageIntent.NAVIGATION,
+    ):
+        if intent == MessageIntent.SELF_KNOWLEDGE:
+            sources = ["AYUSH Assistant & Capabilities"]
             actions = [
                 AssistantAction(id="CREATE_PRODUCT", label="Create Product →", target="passport-wizard"),
                 AssistantAction(id="OPEN_PRODUCTS", label="View Products →", target="product-cases"),
             ]
-        answer, source_type = generate_gemini_answer(
-            query=clean_message,
-            retrieved_chunks=[],
-            current_view=current_view,
-            active_product_id=eff_prod_id,
-            active_product_name=eff_prod_name,
-            detected_language=detected_lang,
-            intent=intent,
-            history=history,
-        )
+        elif intent == MessageIntent.PRODUCT_CONTEXT:
+            sources = ["Product Context"] if eff_prod_name else []
+            if eff_prod_name:
+                actions = [
+                    AssistantAction(
+                        id="OPEN_PATENT",
+                        label=f"Open Patent Intelligence for {eff_prod_name} →",
+                        target="patent-intelligence",
+                        product_id=eff_prod_id,
+                    ),
+                    AssistantAction(
+                        id="OPEN_REGULATORY",
+                        label=f"Open Regulatory Intelligence for {eff_prod_name} →",
+                        target="regulatory-intelligence",
+                        product_id=eff_prod_id,
+                    ),
+                ]
+            else:
+                actions = [
+                    AssistantAction(id="CREATE_PRODUCT", label="Create Product →", target="passport-wizard"),
+                    AssistantAction(id="OPEN_PRODUCTS", label="View Products →", target="product-cases"),
+                ]
+        elif intent == MessageIntent.CASUAL:
+            sources = []
+            actions = [
+                AssistantAction(id="CREATE_PRODUCT", label="Create Product →", target="passport-wizard"),
+                AssistantAction(id="OPEN_PRODUCTS", label="View Products →", target="product-cases"),
+            ]
+        elif intent == MessageIntent.NAVIGATION:
+            retrieved_chunks = retrieve_relevant_chunks(effective_query, top_k=2)
+            sources = [c["title"] for c in retrieved_chunks] if retrieved_chunks else []
+            actions = resolve_actions(effective_query, retrieved_chunks, eff_prod_id, eff_prod_name)
+        else:
+            # SECURITY or OUT_OF_SCOPE
+            sources = []
+            actions = []
 
-    elif intent == MessageIntent.OUT_OF_SCOPE:
-        sources = []
-        actions = []
         answer = generate_fallback_answer(
-            clean_message, [], eff_prod_id, eff_prod_name, detected_language=detected_lang, intent=intent
-        )
-        source_type = "FALLBACK"
-
-    else:
-        # Standard Domain Knowledge / Navigation
-        retrieved_chunks = retrieve_relevant_chunks(effective_query, top_k=3)
-        sources = [c["title"] for c in retrieved_chunks]
-        actions = resolve_actions(effective_query, retrieved_chunks, eff_prod_id, eff_prod_name)
-        answer, source_type = generate_gemini_answer(
-            query=effective_query,
-            retrieved_chunks=retrieved_chunks,
-            current_view=current_view,
+            clean_message,
+            retrieved_chunks=[],
             active_product_id=eff_prod_id,
             active_product_name=eff_prod_name,
             detected_language=detected_lang,
             intent=intent,
-            history=history,
         )
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": sources,
+            "source_type": SourceType.FAST_LOCAL,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(
+                active_product_id=eff_prod_id,
+                active_product_name=eff_prod_name,
+                verified=is_verified,
+            ),
+        }
+
+    # -------------------------------------------------------------------------
+    # 2. RAG RETRIEVAL & FAST RAG PATH
+    # -------------------------------------------------------------------------
+    scored_chunks = score_all_chunks(effective_query)
+    top_score = scored_chunks[0][0] if scored_chunks else 0.0
+    retrieved_chunks = [item[1] for item in scored_chunks[:3]] if scored_chunks else retrieve_relevant_chunks(effective_query, top_k=3)
+    sources = [c["title"] for c in retrieved_chunks]
+    actions = resolve_actions(effective_query, retrieved_chunks, eff_prod_id, eff_prod_name)
+
+    if is_fast_rag_eligible(effective_query.lower(), retrieved_chunks[0] if retrieved_chunks else None, top_score):
+        answer = generate_fallback_answer(
+            effective_query,
+            retrieved_chunks=retrieved_chunks,
+            active_product_id=eff_prod_id,
+            active_product_name=eff_prod_name,
+            detected_language=detected_lang,
+            intent=intent,
+        )
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": sources,
+            "source_type": SourceType.FAST_RAG,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(
+                active_product_id=eff_prod_id,
+                active_product_name=eff_prod_name,
+                verified=is_verified,
+            ),
+        }
+
+    # -------------------------------------------------------------------------
+    # 3. GEMINI SYNTHESIS (LAST LAYER)
+    # -------------------------------------------------------------------------
+    answer, source_type = generate_gemini_answer(
+        query=effective_query,
+        retrieved_chunks=retrieved_chunks,
+        current_view=current_view,
+        active_product_id=eff_prod_id,
+        active_product_name=eff_prod_name,
+        detected_language=detected_lang,
+        intent=intent,
+        history=history,
+    )
 
     return {
         "answer": answer,
         "actions": actions,
         "sources": sources,
         "source_type": source_type,
+        "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
         "product_context": ProductContextInfo(
             active_product_id=eff_prod_id,
             active_product_name=eff_prod_name,

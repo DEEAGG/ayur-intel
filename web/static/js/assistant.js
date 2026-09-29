@@ -759,8 +759,12 @@
     renderMessages(false);
 
     var loadingIndicator = document.getElementById("assistant-loading-indicator");
-    if (loadingIndicator) loadingIndicator.style.display = "flex";
-    scrollToBottom();
+    var loaderTimer = setTimeout(function () {
+      if (state.loading && loadingIndicator) {
+        loadingIndicator.style.display = "flex";
+        scrollToBottom();
+      }
+    }, 300);
 
     var currentSeq = ++state.requestId;
     var ctx = getAppContext();
@@ -819,6 +823,7 @@
       }
     } finally {
       if (currentSeq === state.requestId) {
+        clearTimeout(loaderTimer);
         state.loading = false;
         if (loadingIndicator) loadingIndicator.style.display = "none";
         renderMessages(true);

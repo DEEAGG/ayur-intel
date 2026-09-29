@@ -284,14 +284,53 @@ class TestBrowserAssistant(unittest.TestCase):
         }""")
         self.assertTrue(int(row_margin.replace('px', '')) >= 18, f"Row margin must be >= 18px for clear spacing, got {row_margin}")
 
-        # 16. Verify scrolling works with many messages
+        # 16. Fast Path & Perceived Performance Verification: "hi"
+        assistant_count += 1
+        input_el.fill("hi")
+        input_el.press("Enter")
+        # Assert user bubble appears immediately and input clears immediately
+        self.assertEqual(input_el.input_value(), "", "Input must clear immediately upon submission")
+        last_user_bubble = page.locator(".assistant-message-row.user").last
+        self.assertIn("hi", last_user_bubble.inner_text(), "User bubble must appear immediately")
+
+        page.wait_for_function(f"() => document.querySelectorAll('.assistant-message-row.assistant').length >= {assistant_count}", timeout=4000)
+        hi_ans = page.locator(".assistant-message-row.assistant").last.inner_text().lower()
+        self.assertTrue("ayush" in hi_ans or "help" in hi_ans)
+
+        # 17. Fast Path Verification: "tum kya karte ho?"
+        assistant_count += 1
+        input_el.fill("tum kya karte ho?")
+        input_el.press("Enter")
+        self.assertEqual(input_el.input_value(), "")
+        page.wait_for_function(f"() => document.querySelectorAll('.assistant-message-row.assistant').length >= {assistant_count}", timeout=4000)
+        kya_ans = page.locator(".assistant-message-row.assistant").last.inner_text().lower()
+        self.assertTrue("ayush" in kya_ans and ("gemini" in kya_ans or "formulation" in kya_ans or "patent" in kya_ans))
+
+        # 18. RAG Fast Path Verification: "Product Passport kya hota hai?"
+        assistant_count += 1
+        input_el.fill("Product Passport kya hota hai?")
+        input_el.press("Enter")
+        self.assertEqual(input_el.input_value(), "")
+        page.wait_for_function(f"() => document.querySelectorAll('.assistant-message-row.assistant').length >= {assistant_count}", timeout=4000)
+        passport_ans = page.locator(".assistant-message-row.assistant").last.inner_text()
+        self.assertIn("Product Passport", passport_ans)
+
+        # 19. Genuinely complex query verification
+        assistant_count += 1
+        input_el.fill("Compare the patent risk of Ashwagandha with Curcumin under Section 3(p) and synthesize regulatory hurdles")
+        input_el.press("Enter")
+        page.wait_for_function(f"() => document.querySelectorAll('.assistant-message-row.assistant').length >= {assistant_count}", timeout=8000)
+        complex_ans = page.locator(".assistant-message-row.assistant").last.inner_text()
+        self.assertTrue(len(complex_ans) > 20)
+
+        # 20. Verify scrolling works with many messages
         is_scrollable = page.evaluate("""() => {
             const el = document.getElementById('assistant-conversation');
             return el.scrollHeight > el.clientHeight;
         }""")
         self.assertTrue(is_scrollable, "Conversation container must be scrollable after multiple messages")
 
-        # 17. Verify zero console errors
+        # 21. Verify zero console errors
         critical_errors = [e for e in self.console_errors if "favicon" not in e.lower() and "404" not in e.lower()]
         self.assertEqual(len(critical_errors), 0, f"Encountered browser console errors: {critical_errors}")
 

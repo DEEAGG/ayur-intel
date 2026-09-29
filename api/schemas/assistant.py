@@ -49,5 +49,6 @@ class AssistantChatResponse(BaseModel):
     answer: str = Field(..., description="Grounded answer text in user's language")
     actions: List[AssistantAction] = Field(default_factory=list, description="Safe suggested navigation actions")
     sources: List[str] = Field(default_factory=list, description="Internal knowledge source labels")
-    source_type: str = Field("GEMINI", description="'GEMINI' or 'FALLBACK'")
+    source_type: str = Field("GEMINI", description="'FAST_LOCAL', 'FAST_RAG', 'GEMINI', 'FALLBACK_TIMEOUT', 'FALLBACK_429', 'FALLBACK'")
+    server_processing_ms: Optional[float] = Field(None, description="Server execution time in milliseconds")
     product_context: Optional[ProductContextInfo] = Field(None, description="Active product verification status")

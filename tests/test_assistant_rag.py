@@ -25,6 +25,7 @@ from api.services.assistant_service import (
     retrieve_relevant_chunks,
     resolve_actions,
     generate_fallback_answer,
+    generate_gemini_answer,
     process_assistant_chat,
     sanitize_input,
     sanitize_output,
@@ -293,7 +294,7 @@ class TestAssistantRAG(unittest.IsolatedAsyncioTestCase):
         data = resp.json()
         self.assertIn("answer", data)
         self.assertTrue(len(data["answer"]) > 20)
-        self.assertIn(data["source_type"], ["GEMINI", "FALLBACK"])
+        self.assertIn(data["source_type"], ["FAST_LOCAL", "FAST_RAG", "GEMINI", "FALLBACK"])
         self.assertTrue(len(data["sources"]) > 0)
 
     async def test_26_api_chat_hinglish_navigation(self):
@@ -390,12 +391,12 @@ class TestAssistantRAG(unittest.IsolatedAsyncioTestCase):
         with patch.dict("os.environ", {"GEMINI_API_KEY": "", "AYURINTEL_GEMINI_API_KEY": ""}):
             # English
             res_en = process_assistant_chat(self.db, "What is Product Passport?", current_view="dashboard")
-            self.assertEqual(res_en["source_type"], "FALLBACK")
+            self.assertIn(res_en["source_type"], ["FAST_RAG", "FALLBACK"])
             self.assertIn("is the comprehensive digital master dossier", res_en["answer"])
 
             # Hinglish
             res_hi = process_assistant_chat(self.db, "Product Passport kya hota hai?", current_view="dashboard")
-            self.assertEqual(res_hi["source_type"], "FALLBACK")
+            self.assertIn(res_hi["source_type"], ["FAST_RAG", "FALLBACK"])
             self.assertIn("digital master dossier hota hai", res_hi["answer"])
             self.assertIn("Product Passport", res_hi["answer"])
 
@@ -511,6 +512,75 @@ class TestAssistantRAG(unittest.IsolatedAsyncioTestCase):
         res = process_assistant_chat(self.db, "", current_view="dashboard")
         self.assertEqual(res["sources"], [])
         self.assertIn("ayush", res["answer"].lower())
+
+    # -------------------------------------------------------------------------
+    # 10. Performance, Fast Paths & Gemini Fallback Safeguard Tests
+    # -------------------------------------------------------------------------
+    def test_43_fast_paths_use_zero_gemini_calls(self):
+        # Verify that common casual, identity, navigation, and canonical RAG queries
+        # NEVER invoke Gemini under any circumstances.
+        queries_to_verify = [
+            ("hi", "FAST_LOCAL"),
+            ("achha mujhe kuch jan na hai", "FAST_LOCAL"),
+            ("tum kya karte ho?", "FAST_LOCAL"),
+            ("who are you?", "FAST_LOCAL"),
+            ("mere products dikhao", "FAST_LOCAL"),
+            ("What is Product Passport?", "FAST_RAG"),
+            ("Product Passport kya hota hai?", "FAST_RAG"),
+            ("How does monitoring work?", "FAST_RAG"),
+        ]
+
+        with patch("api.services.assistant_service.generate_gemini_answer") as mock_gemini:
+            for q, expected_type in queries_to_verify:
+                mock_gemini.reset_mock()
+                res = process_assistant_chat(self.db, q, current_view="dashboard")
+                self.assertEqual(
+                    mock_gemini.call_count, 0,
+                    f"Query '{q}' must NOT invoke Gemini (FAST PATH expected {expected_type}, got {res['source_type']})"
+                )
+                self.assertEqual(res["source_type"], expected_type)
+                self.assertTrue(len(res["answer"]) > 15)
+
+    def test_44_complex_synthesis_query_invokes_gemini(self):
+        # Multi-concept synthesis query should route to Gemini as the last layer
+        complex_q = "Compare the patent risk of Ashwagandha with Curcumin under Section 3(p) and synthesize the trade-off"
+        with patch("api.services.assistant_service.generate_gemini_answer", return_value=("Synthesized answer", "GEMINI")) as mock_gemini:
+            res = process_assistant_chat(self.db, complex_q, current_view="dashboard")
+            self.assertEqual(mock_gemini.call_count, 1, "Complex synthesis queries must invoke Gemini reasoning layer")
+            self.assertEqual(res["source_type"], "GEMINI")
+
+    def test_45_gemini_timeout_fallback(self):
+        # When Gemini call times out (>=4.0s), immediately return FALLBACK_TIMEOUT
+        complex_q = "Compare the patent risk of Ashwagandha with Curcumin under Section 3(p) and synthesize the trade-off"
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "fake_api_key_123"}):
+            with patch("google.generativeai.GenerativeModel") as mock_cls:
+                mock_inst = mock_cls.return_value
+                mock_inst.generate_content.side_effect = Exception("Request timed out (deadline exceeded)")
+                ans, stype = generate_gemini_answer(complex_q, [], "dashboard", None, None)
+                self.assertEqual(stype, "FALLBACK_TIMEOUT")
+                self.assertTrue(len(ans) > 20)
+
+    def test_46_gemini_429_quota_fallback(self):
+        # When Gemini returns 429 ResourceExhausted, immediately return FALLBACK_429
+        complex_q = "Compare the patent risk of Ashwagandha with Curcumin under Section 3(p) and synthesize the trade-off"
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "fake_api_key_123"}):
+            with patch("google.generativeai.GenerativeModel") as mock_cls:
+                mock_inst = mock_cls.return_value
+                mock_inst.generate_content.side_effect = Exception("429 ResourceExhausted: Quota exceeded for model")
+                ans, stype = generate_gemini_answer(complex_q, [], "dashboard", None, None)
+                self.assertEqual(stype, "FALLBACK_429")
+                self.assertTrue(len(ans) > 20)
+
+    def test_47_fast_path_latency_under_100ms(self):
+        # Verify server processing latency is well under 100ms for fast paths
+        fast_queries = ["hi", "who are you?", "mere products dikhao", "What is Product Passport?"]
+        for q in fast_queries:
+            res = process_assistant_chat(self.db, q, current_view="dashboard")
+            self.assertIn("server_processing_ms", res)
+            self.assertLess(
+                res["server_processing_ms"], 100.0,
+                f"Fast path for query '{q}' took {res['server_processing_ms']}ms, expected <100ms"
+            )
 
 
 if __name__ == "__main__":
