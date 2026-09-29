@@ -72,6 +72,9 @@
       state.currentCase = null;
       if (typeof updateTopbarUI === "function") updateTopbarUI();
       if (typeof saveStateToLocalStorage === "function") saveStateToLocalStorage();
+      if (window.AYUR_ASSISTANT && typeof window.AYUR_ASSISTANT.updateContext === "function") {
+        window.AYUR_ASSISTANT.updateContext();
+      }
       return null;
     }
 
@@ -91,6 +94,9 @@
     state.currentCase = targetCase;
     if (typeof updateTopbarUI === "function") updateTopbarUI();
     if (typeof saveStateToLocalStorage === "function") saveStateToLocalStorage();
+    if (window.AYUR_ASSISTANT && typeof window.AYUR_ASSISTANT.updateContext === "function") {
+      window.AYUR_ASSISTANT.updateContext();
+    }
     return targetCase;
   }
 
@@ -10763,6 +10769,9 @@
     loadCases: loadCases,
     deleteCase: deleteCase,
     openCase: openCase,
+    createCase: createCase,
+    openPatentIntelligence: openPatentIntelligence,
+    openCaseModule: openCaseModule,
     showIngredientPopup: showIngredientPopup,
     searchIngredients: searchIngredients,
     getIngredientDetail: getIngredientDetail,

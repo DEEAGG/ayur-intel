@@ -24,7 +24,12 @@ from fastapi.staticfiles import StaticFiles
 
 from api.core.config import PROJECT_ROOT, settings
 from api.core.database import init_db
-from api.routers import health, innovation, knowledge, patent, patent_analysis, ip_strategy, regulatory, plant_discovery, product_cases, jurisdiction_comparison, evidence, risk, decision, monitoring, knowledge_graph, source_router, security, review, analytics, ingredients, auth
+from api.routers import (
+    health, innovation, knowledge, patent, patent_analysis, ip_strategy,
+    regulatory, plant_discovery, product_cases, jurisdiction_comparison,
+    evidence, risk, decision, monitoring, knowledge_graph, source_router,
+    security, review, analytics, ingredients, auth, assistant
+)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -97,6 +102,7 @@ app.include_router(security.router)
 app.include_router(review.router)
 app.include_router(analytics.router)
 app.include_router(ingredients.router)
+app.include_router(assistant.router)
 
 # ---------------------------------------------------------------------------
 # Security Headers Middleware
