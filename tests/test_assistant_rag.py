@@ -29,6 +29,8 @@ from api.services.assistant_service import (
     sanitize_input,
     sanitize_output,
     is_hinglish,
+    detect_language,
+    DetectedLanguage,
 )
 
 
@@ -315,6 +317,87 @@ class TestAssistantRAG(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             "not guarantee" in answer_lower or "does not" in answer_lower or "no" in answer_lower
         )
+
+    # -------------------------------------------------------------------------
+    # 8. Dynamic Language Mirroring & Fallback Tests
+    # -------------------------------------------------------------------------
+    def test_28_language_detection(self):
+        # English detection
+        self.assertEqual(detect_language("What is Product Passport?"), DetectedLanguage.ENGLISH)
+        self.assertEqual(detect_language("Where are my products?"), DetectedLanguage.ENGLISH)
+        self.assertEqual(detect_language("How does monitoring work?"), DetectedLanguage.ENGLISH)
+        self.assertEqual(detect_language("What is AYUR-INTEL?"), DetectedLanguage.ENGLISH)
+
+        # Hinglish detection
+        self.assertEqual(detect_language("Product Passport kya hota hai?"), DetectedLanguage.HINGLISH)
+        self.assertEqual(detect_language("Mere products kaha hai?"), DetectedLanguage.HINGLISH)
+        self.assertEqual(detect_language("Patent intelligence kya karta hai?"), DetectedLanguage.HINGLISH)
+        self.assertEqual(detect_language("New product kaise banau?"), DetectedLanguage.HINGLISH)
+
+        # Hindi (Devanagari) detection
+        self.assertEqual(detect_language("प्रोडक्ट पासपोर्ट क्या है?"), DetectedLanguage.HINDI)
+        self.assertEqual(detect_language("मेरे प्रोडक्ट्स कहाँ हैं?"), DetectedLanguage.HINDI)
+
+    def test_29_fallback_language_mirroring_product_passport(self):
+        # English question -> English fallback
+        ans_en = generate_fallback_answer("What is Product Passport?", [], None, None)
+        self.assertIn("is the comprehensive digital master dossier", ans_en)
+        self.assertNotIn("karta hai", ans_en)
+        self.assertNotIn("aapke", ans_en.lower())
+
+        # Hinglish question -> Hinglish fallback
+        ans_hi = generate_fallback_answer("Product Passport kya hota hai?", [], None, None)
+        self.assertIn("complete digital master dossier hota hai", ans_hi)
+        self.assertIn("seedha Indian Patent searches", ans_hi)
+        # Technical terms preserved in English
+        self.assertIn("Product Passport", ans_hi)
+        self.assertIn("Botanical Identity", ans_hi)
+
+    def test_30_fallback_language_mirroring_products_and_actions(self):
+        # English: Where are my products? -> English + View Products action
+        actions_en = resolve_actions("Where are my products?", [], None, None)
+        self.assertEqual(actions_en[0].id, "OPEN_PRODUCTS")
+        self.assertEqual(actions_en[0].label, "View Products →")
+        ans_en = generate_fallback_answer("Where are my products?", [], None, None)
+        self.assertIn("You can find all your saved formulations", ans_en)
+
+        # Hinglish: Mere products kaha hai? -> Hinglish + same View Products action
+        actions_hi = resolve_actions("Mere products kaha hai?", [], None, None)
+        self.assertEqual(actions_hi[0].id, "OPEN_PRODUCTS")
+        self.assertEqual(actions_hi[0].label, "View Products →")
+        ans_hi = generate_fallback_answer("Mere products kaha hai?", [], None, None)
+        self.assertIn("Aapke saare saved products left navigation sidebar", ans_hi)
+
+    def test_31_dynamic_language_switching_in_same_session(self):
+        # Turn 1: English
+        res1 = process_assistant_chat(self.db, "What is AYUR-INTEL?", current_view="dashboard")
+        self.assertIn("AYUR-INTEL", res1["answer"])
+        self.assertNotIn("aapke", res1["answer"].lower())
+        self.assertNotIn("karta hai", res1["answer"].lower())
+
+        # Turn 2: Hinglish (adapts immediately per message)
+        res2 = process_assistant_chat(self.db, "Patent intelligence kya karta hai?", current_view="dashboard")
+        self.assertIn("karta hai", res2["answer"].lower())
+        self.assertIn("Patent Intelligence", res2["answer"])
+
+        # Turn 3: English again (switches back immediately)
+        res3 = process_assistant_chat(self.db, "How does monitoring work?", current_view="dashboard")
+        self.assertIn("Continuous Regulatory & Market Monitoring", res3["answer"])
+        self.assertNotIn("karta hai", res3["answer"].lower())
+
+    def test_32_gemini_disabled_fallback_english_and_hinglish(self):
+        # Test with empty API key to force deterministic fallback
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "", "AYURINTEL_GEMINI_API_KEY": ""}):
+            # English
+            res_en = process_assistant_chat(self.db, "What is Product Passport?", current_view="dashboard")
+            self.assertEqual(res_en["source_type"], "FALLBACK")
+            self.assertIn("is the comprehensive digital master dossier", res_en["answer"])
+
+            # Hinglish
+            res_hi = process_assistant_chat(self.db, "Product Passport kya hota hai?", current_view="dashboard")
+            self.assertEqual(res_hi["source_type"], "FALLBACK")
+            self.assertIn("digital master dossier hota hai", res_hi["answer"])
+            self.assertIn("Product Passport", res_hi["answer"])
 
 
 if __name__ == "__main__":

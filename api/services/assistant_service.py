@@ -94,15 +94,72 @@ def sanitize_output(text: str) -> str:
     return result
 
 
+class DetectedLanguage:
+    """Supported response languages/styles for per-message mirroring."""
+    ENGLISH = "ENGLISH"
+    HINGLISH = "HINGLISH"
+    HINDI = "HINDI"
+
+
+# Unambiguous Hinglish tokens in Roman script (conversational Hindi markers)
+HINGLISH_TOKENS = {
+    # Question words / Pronouns
+    "kya", "kyu", "kyun", "kaise", "kaha", "kahan", "kidhar", "kab", "kaun", "kitna", "kitne", "kitni",
+    "mere", "meri", "mera", "apna", "apni", "apne", "hum", "humare", "hamara", "hamare", "tum", "tumhara",
+    "aap", "aapka", "aapke", "aapki", "mujhe", "mujhko", "hume", "humein", "tujhe", "isse", "usse", "jisse",
+    # Verbs / Auxiliaries / Tense markers
+    "hai", "hain", "hoon", "hu", "tha", "thi", "the", "raha", "rahi", "rahe",
+    "hoga", "hogi", "hoge", "honge", "hota", "hoti", "hote",
+    "kare", "karein", "karo", "karna", "karta", "karti", "karte",
+    "batao", "bataiye", "bata", "dikhao", "dikhaye", "kholo", "khola",
+    "chahiye", "sakte", "sakta", "sakti", "sakenge",
+    "banau", "banaun", "banana", "banaye", "banayein", "banega", "banegi",
+    "samjhao", "dekhna", "dekho", "dekhein", "sikhao", "bhejo",
+    # Prepositions / Conjunctions / Particles
+    "mein", "aur", "toh", "bhi", "matlab", "nahi", "nahin", "sirf", "bas",
+    "zyada", "jyada", "kam", "achha", "accha", "theek", "thik", "pakka",
+    "khatra", "kanoon", "nirdesh", "praman", "saboot", "dikhana", "lagta", "lagti"
+}
+
+# Multi-word Hinglish phrase markers (handles multi-word colloquial combinations)
+HINGLISH_PHRASES = [
+    "kya hai", "kya hota", "kaise kare", "kaise karein", "kaise banaye", "kaise banayein",
+    "kaha hai", "kaha pe", "pe bana", "kis tech", "kaise kaam", "kya karta", "kya karti",
+    "nahi deta", "nahi hai", "karna hai", "banani hai", "banana hai"
+]
+
+
+def detect_language(text: str) -> str:
+    """Classify input text deterministically into ENGLISH, HINGLISH, or HINDI.
+
+    - HINDI: Text containing Devanagari Unicode characters (\\u0900-\\u097F).
+    - HINGLISH: Roman-script text containing conversational Hindi markers/tokens.
+    - ENGLISH: Standard English text.
+    """
+    if not text:
+        return DetectedLanguage.ENGLISH
+
+    # 1. Unicode script check: Devanagari characters
+    if re.search(r"[\u0900-\u097F]", text):
+        return DetectedLanguage.HINDI
+
+    clean = text.lower()
+
+    # 2. Multi-word Hinglish phrases
+    if any(phrase in clean for phrase in HINGLISH_PHRASES):
+        return DetectedLanguage.HINGLISH
+
+    # 3. Distinct Hinglish word tokens
+    words = re.findall(r"\b[a-zA-Z]+\b", clean)
+    if any(w in HINGLISH_TOKENS for w in words):
+        return DetectedLanguage.HINGLISH
+
+    return DetectedLanguage.ENGLISH
+
+
 def is_hinglish(text: str) -> bool:
-    """Check if query contains typical Hindi/Hinglish terms."""
-    lower = text.lower()
-    hinglish_markers = [
-        "kaha", "kidhar", "kaise", "kya", "banau", "banaun", "banana", "kholo",
-        "batao", "hai", "pe bana", "kis tech", "nirdesh", "praman", "saboot",
-        "mere", "apna", "karo", "karna", "chahiye", "hoga", "sakte", "nahi"
-    ]
-    return any(marker in lower for marker in hinglish_markers)
+    """Check if query is in Hinglish or Hindi (backward compatibility)."""
+    return detect_language(text) in (DetectedLanguage.HINGLISH, DetectedLanguage.HINDI)
 
 
 def normalize_query_tokens(query: str) -> List[str]:
@@ -386,13 +443,18 @@ def generate_fallback_answer(
     retrieved_chunks: List[Dict[str, Any]],
     active_product_id: Optional[str],
     active_product_name: Optional[str],
+    detected_language: Optional[str] = None,
 ) -> str:
-    """Generate a deterministic, grounded answer directly from KB chunks.
+    """Generate a deterministic, grounded answer directly from KB chunks mirroring user language.
 
-    Guarantees that the assistant remains fully functional if Gemini fails or is unconfigured.
+    Guarantees that the assistant remains fully functional and natural if Gemini fails or is unconfigured.
     """
+    if detected_language is None:
+        detected_language = detect_language(query)
+
     query_lower = query.lower()
-    in_hinglish = is_hinglish(query)
+    in_hinglish = (detected_language == DetectedLanguage.HINGLISH)
+    in_hindi = (detected_language == DetectedLanguage.HINDI)
     has_active = bool(active_product_id and active_product_name)
 
     # 1. Security & Prompt Injection attempts
@@ -400,6 +462,19 @@ def generate_fallback_answer(
         "password", "admin password", "credentials", "api key", "gemini key", "gemini_api_key",
         "system prompt", "ignore instructions", "ignore your instructions", "reveal instructions"
     ]):
+        if in_hinglish:
+            return (
+                "**Security Policy:**\n\n"
+                "System credentials, API keys, database secrets, aur internal system prompts strictly confidential hain "
+                "aur disclose nahi kiye ja sakte. Main aapko AYUR-INTEL ki Ayurvedic product intelligence, patent checks, "
+                "aur regulatory pathways mein guide karne ke liye yahan hoon."
+            )
+        if in_hindi:
+            return (
+                "**सुरक्षा नीति:**\n\n"
+                "सिस्टम क्रेडेंशियल्स, API कुंजियां, डेटाबेस पासवर्ड और आंतरिक प्रॉम्प्ट पूर्णतः गोपनीय हैं "
+                "और प्रकट नहीं किए जा सकते। मैं AYUR-INTEL के आयुर्वेदिक उत्पाद विश्लेषण, पेटेंट और विनियामक अनुपालन में आपकी सहायता के लिए उपस्थित हूँ।"
+            )
         return (
             "**Security Policy:**\n\n"
             "Administrative credentials, API keys, database secrets, and internal system prompts are strictly confidential "
@@ -409,6 +484,17 @@ def generate_fallback_answer(
 
     # 2. Unsupported / Unknown questions (Founder, Revenue, etc.)
     if any(k in query_lower for k in ["who founded", "founder", "revenue", "turnover", "valuation", "funding"]):
+        if in_hinglish:
+            return (
+                "Yeh information AYUR-INTEL ke verified platform knowledge base mein available nahi hai. "
+                "AYUR-INTEL ek evidence-backed decision-support system hai jo Ayurvedic formulation science, "
+                "Indian Patent prior-art, regulatory pathways (ASU vs. FSSAI), aur risk assessment par focused hai."
+            )
+        if in_hindi:
+            return (
+                "यह जानकारी AYUR-INTEL के सत्यापित प्लेटफॉर्म ज्ञानकोष में उपलब्ध नहीं है। "
+                "AYUR-INTEL आयुर्वेदिक फॉर्मूलेशन विज्ञान, भारतीय पेटेंट प्रायर-आर्ट और विनियामक अनुपालन पर केंद्रित निर्णय-समर्थन प्रणाली है।"
+            )
         return (
             "That information is not available in AYUR-INTEL's verified platform knowledge base. "
             "AYUR-INTEL is an evidence-backed intelligence system focused on Ayurvedic formulation science, "
@@ -417,6 +503,20 @@ def generate_fallback_answer(
 
     # 3. React vs Vanilla JS question
     if any(k in query_lower for k in ["react", "built in react", "is this react", "react pe"]):
+        if in_hinglish:
+            return (
+                "**Nahi, AYUR-INTEL React mein nahi bana hai.**\n\n"
+                "AYUR-INTEL ka frontend high-performance **Vanilla JavaScript (Single Page Application)**, "
+                "modern HTML5, aur CSS3 Botanical Intelligence design system se engineered hai. Interactive visual graphs "
+                "aur growth trees ke liye D3.js (v7) use hota hai. React aur complex bundling overhead avoid karne se "
+                "platform ko instant load speed, zero build steps, aur predictable UI state milti hai."
+            )
+        if in_hindi:
+            return (
+                "**नहीं, AYUR-INTEL React में नहीं बना है।**\n\n"
+                "AYUR-INTEL का फ्रंटएंड उच्च-प्रदर्शन **Vanilla JavaScript (Single Page Application)**, "
+                "HTML5 और CSS3 बॉटनिकल इंटेलिजेंस डिज़ाइन सिस्टम से निर्मित है। नॉलेज ग्राफ के लिए D3.js (v7) का उपयोग किया गया है।"
+            )
         return (
             "**No, AYUR-INTEL is NOT built in React.**\n\n"
             "AYUR-INTEL's frontend is intentionally engineered with high-performance **Vanilla JavaScript (Single Page Application)**, "
@@ -435,6 +535,12 @@ def generate_fallback_answer(
                 "novelty signals aur compliance risk ka analysis karta hai. Final filings ke liye certified patent "
                 "attorneys aur licensed Ayurvedic practitioners se consult karna zaroori hai."
             )
+        if in_hindi:
+            return (
+                "**नहीं, AYUR-INTEL किसी पेटेंट स्वीकृति या विनियामक मंजूरी की गारंटी नहीं देता है।**\n\n"
+                "AYUR-INTEL एक साक्ष्य-आधारित **निर्णय-समर्थन प्लेटफॉर्म** है, कानूनी या विनियामक प्रमाणीकरण संस्था नहीं। "
+                "अंतिम आवेदन के लिए अधिकृत पेटेंट वकीलों और पंजीकृत आयुर्वेदिक विशेषज्ञों से परामर्श अनिवार्य है।"
+            )
         return (
             "**No. AYUR-INTEL does not guarantee patent approval, patent grants, or regulatory compliance/licensing.**\n\n"
             "AYUR-INTEL is strictly an evidence-backed **decision-support platform**, not a legal or regulatory certifying body. "
@@ -450,6 +556,11 @@ def generate_fallback_answer(
                 "Aapke saare saved products left navigation sidebar ke **'Products'** section mein hain.\n\n"
                 "Waha aap apni sabhi Ayurvedic formulations ki list, unke dosage forms, aur lifecycle stages (Idea, R&D, Pilot, Commercial) dekh sakte hain. "
                 "Kisi bhi product card par click karke aap use active product case ke roop mein select kar sakte hain."
+            )
+        if in_hindi:
+            return (
+                "आप अपने सभी सुरक्षित फॉर्मूलेशन बाएं नेविगेशन साइडबार के **'Products'** सेक्शन में देख सकते हैं।\n\n"
+                "वहां आपके सभी उत्पाद और उनके वर्तमान लाइफसाइकल चरण सूचीबद्ध हैं।"
             )
         return (
             "You can find all your saved formulations in the **'Products'** section in the left navigation sidebar.\n\n"
@@ -471,6 +582,12 @@ def generate_fallback_answer(
                 "   • **Process & Claims**: Manufacturing process aur benefit claims likhein (Hindi ya English dono chalega).\n"
                 "   • **Review**: Confirm karke product save karein!"
             )
+        if in_hindi:
+            return (
+                "नया आयुर्वेदिक उत्पाद बनाने के लिए:\n\n"
+                "1. टॉपबार में **'+ New'** बटन पर क्लिक करें या साइडबार में **'Products' → 'Create Product'** चुनें।\n"
+                "2. यह 7-चरणीय **Product Passport Wizard** खोलेगा जहां आप उत्पाद का नाम, घटक जड़ी-बूटियाँ, डोसेज फॉर्म और स्वास्थ्य संकेत दर्ज कर सकते हैं।"
+            )
         return (
             "To create a new product formulation in AYUR-INTEL:\n\n"
             "1. Click the **'+ New'** button in the top navigation bar or navigate to **Products** and click **Create Product**.\n"
@@ -488,12 +605,19 @@ def generate_fallback_answer(
     if any(k in query_lower for k in ["what is product passport", "product passport kya", "product passport"]):
         if in_hinglish:
             return (
-                "**Product Passport** Ayurvedic formulation ka ek complete digital master dossier hai:\n\n"
-                "• **Botanical Identity**: Herbs, unke Latin binomials, parts used, aur classical dravya taxonomy.\n"
-                "• **Technical Specs**: Dosage form, manufacturing process, aur classical references (Charaka, Sushruta, API).\n"
-                "• **Regulatory & Claims**: Health indications, proposed benefit claims, aur target jurisdictions.\n"
-                "• **AI Normalization**: Multilingual input ko standardized English format mein translate aur structure karta hai.\n\n"
-                "Yeh Product Passport seedha Indian Patent prior-art matching aur Regulatory pathway analysis ko power karta hai."
+                "**Product Passport** Ayurvedic formulation ka ek complete digital master dossier hota hai:\n\n"
+                "• **Botanical Identity**: Herbal ingredients, unke scientific Latin binomials, plant parts used, aur classical Dravya taxonomy.\n"
+                "• **Technical Specifications**: Dosage form, manufacturing/extraction process, aur classical references (Charaka Samhita, Sushruta, API).\n"
+                "• **Commercial & Regulatory Specs**: Health indications, proposed benefit claims, aur target jurisdictions.\n"
+                "• **AI Normalization**: Multilingual descriptions ko standardized English mein translate aur structure karta hai.\n\n"
+                "Product Passport single source of truth ki tarah kaam karta hai jo seedha Indian Patent searches aur Regulatory classification ko feed karta hai."
+            )
+        if in_hindi:
+            return (
+                "**Product Passport** आयुर्वेदिक फॉर्मूलेशन का एक विस्तृत डिजिटल मास्टर डॉसियर है:\n\n"
+                "• **वानस्पतिक पहचान**: घटक जड़ी-बूटियाँ, वैज्ञानिक लैटिन नाम, प्रयुक्त भाग और शास्त्रीय द्रव्य वर्गीकरण।\n"
+                "• **तकनीकी विनिर्देश**: डोसेज फॉर्म, निर्माण प्रक्रियाएं और शास्त्रीय ग्रंथ संदर्भ (चरक, सुश्रुत, API)।\n"
+                "• **नियामक विनिर्देश**: स्वास्थ्य संकेत, लाभ दावे और लक्षित अधिकार क्षेत्र।"
             )
         return (
             "**Product Passport** is the comprehensive digital master dossier of an Ayurvedic formulation:\n\n"
@@ -515,6 +639,13 @@ def generate_fallback_answer(
                 "• **Mandatory Testing**: Ayurvedic Pharmacopoeia of India (API) ke mandatory tests (heavy metals, microbes, pesticides) flag karta hai.\n"
                 "• **Labeling & Claims Bounds**: Permissible health maintenance claims vs prohibited therapeutic disease claims identify karta hai."
             )
+        if in_hindi:
+            return (
+                f"**विनियामक विश्लेषण (Regulatory Intelligence):**\n\n"
+                f"यह मॉड्यूल वैधानिक अनुपालन और नियामक मार्गों का विश्लेषण करता है:\n"
+                "• **दोहरा वर्गीकरण**: जांच करता है कि उत्पाद ASU औषधि है या FSSAI खाद्य पूरक।\n"
+                "• **अनिवार्य परीक्षण**: API (आयुर्वेदिक फार्माकोपिया ऑफ इंडिया) के अनिवार्य परीक्षण निर्धारित करता है।"
+            )
         prod_ref_en = f"For your active product **{active_product_name}**, " if has_active else ""
         return (
             f"**Regulatory Pathways & Compliance Intelligence:**\n\n"
@@ -534,6 +665,13 @@ def generate_fallback_answer(
                 "• **Safety & Ban Alerts**: Restricted/endangered herbs aur contaminant threshold updates detect karta hai.\n"
                 "• **Competitor Patent Watch**: Indian Patent Office mein aapke herbs par hone waale new patent filings monitor karta hai."
             )
+        if in_hindi:
+            return (
+                "**सतत निगरानी केंद्र (Continuous Monitoring):**\n\n"
+                "यह केंद्र आपके उत्पाद के लिए वास्तविक समय में नियामक और पेटेंट निगरानी प्रदान करता है:\n"
+                "• **आयुष और FSSAI परिपत्र**: आधिकारिक अधिसूचनाएं ट्रैक करता है।\n"
+                "• **घटक सुरक्षा अलर्ट**: प्रतिबंधित पौधों और सुरक्षा सीमाओं की निगरानी।"
+            )
         return (
             "**Continuous Regulatory & Market Monitoring:**\n\n"
             "The Monitoring Center provides continuous intelligence surveillance tailored per product case:\n"
@@ -551,6 +689,13 @@ def generate_fallback_answer(
                 "2. **Risk Intelligence Synthesis**: Patent, regulatory, aur formulation evidence ko synthesize karke quantitative risk scores generate karta hai.\n"
                 "3. **In-App RAG Assistant**: Knowledge chunks retrieve karke natural answers aur navigation shortcuts provide karta hai.\n\n"
                 "Har AI feature ke peeche deterministic rule engine aur fallback hai, taaki offline rehne par bhi app 100% reliable rahe."
+            )
+        if in_hindi:
+            return (
+                "**AYUR-INTEL में AI का अनुप्रयोग:**\n\n"
+                "1. **बहुभाषी मानकीकरण**: विवरणों से लैटिन वानस्पतिक नाम पहचानना।\n"
+                "2. **जोखिम संश्लेषण**: पेटेंट और नियामक साक्ष्यों से जोखिम स्कोर तैयार करना।\n"
+                "3. **सहायक**: प्रासंगिक ज्ञान और नेविगेशन उपलब्ध कराना।"
             )
         return (
             "**How AYUR-INTEL Uses Artificial Intelligence:**\n\n"
@@ -570,6 +715,14 @@ def generate_fallback_answer(
                 "• **AI & LLM**: Google Gemini API (`gemini-flash-latest`) for multilingual AI normalization, multi-domain risk synthesis, aur in-app RAG assistant.\n"
                 "• **Frontend**: Vanilla JavaScript SPA, CSS3 Botanical Intelligence design system, D3.js (v7) interactive knowledge graphs, aur Material Symbols icons.\n"
                 "• **External APIs**: PlantNet API for botanical image recognition."
+            )
+        if in_hindi:
+            return (
+                "**AYUR-INTEL प्रौद्योगिकी स्टैक:**\n\n"
+                "• **बैकएंड**: FastAPI (Python 3.12) + Uvicorn + Pydantic v2।\n"
+                "• **डेटाबेस**: SQLite और PostgreSQL (Supabase)।\n"
+                "• **AI/LLM**: Google Gemini API (`gemini-flash-latest`)।\n"
+                "• **फ्रंटएंड**: Vanilla JavaScript SPA + CSS3 + D3.js (v7)।"
             )
         return (
             "**AYUR-INTEL Technology Stack:**\n\n"
@@ -591,6 +744,13 @@ def generate_fallback_answer(
                 "• **Novelty Signals**: Synergistic combinations aur extraction processes ki patentability check karta hai.\n"
                 "• **Freedom to Operate**: Published patent claims se compare karke potential infringement risks highlight karta hai."
             )
+        if in_hindi:
+            return (
+                f"**भारतीय पेटेंट इंटेलिजेंस (Indian Patent Intelligence):**\n\n"
+                f"यह मॉड्यूल भारतीय पेटेंट कार्यालय (IPO) और वैश्विक ASU साहित्य के विरुद्ध प्रायर-आर्ट खोज करता है:\n"
+                "• **धारा 3(p) विश्लेषण**: पारंपरिक ज्ञान के गैर-पेटेंट योग्यता की जांच।\n"
+                "• **नवीनता संकेत**: पेटेंट योग्यता की संभावनाओं का मूल्यांकन।"
+            )
         prod_ref_en = f"For your active product **{active_product_name}**, " if has_active else ""
         return (
             f"**Indian Patent Intelligence:**\n\n"
@@ -600,8 +760,22 @@ def generate_fallback_answer(
             "• **AI Claim Comparison**: Highlights overlapping claim elements and calculates an overall IP Readiness score."
         )
 
-    # 6. Default chunk synthesis
+    # 13. Default chunk synthesis
     top = retrieved_chunks[0] if retrieved_chunks else KNOWLEDGE_CHUNKS[0]
+    if in_hinglish:
+        prod_note_hi = f"\n\n*Aapka active product: **{active_product_name}**.*" if has_active else ""
+        return (
+            f"**{top['title']} (AYUR-INTEL Guidance):**\n\n"
+            f"AYUR-INTEL platform ke anusaar, **{top['title']}** ke main points yeh hain:\n\n"
+            f"{top['content']}{prod_note_hi}"
+        )
+    if in_hindi:
+        prod_note_hi = f"\n\n*सक्रिय उत्पाद: **{active_product_name}**.*" if has_active else ""
+        return (
+            f"**{top['title']}:**\n\n"
+            f"AYUR-INTEL प्लेटफॉर्म के अनुसार:\n\n"
+            f"{top['content']}{prod_note_hi}"
+        )
     prod_note = f"\n\n*Currently active product: **{active_product_name}**.*" if has_active else ""
     return f"**{top['title']}**\n\n{top['content']}{prod_note}"
 
@@ -612,12 +786,16 @@ def generate_gemini_answer(
     current_view: str,
     active_product_id: Optional[str],
     active_product_name: Optional[str],
+    detected_language: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Generate grounded answer using Google Gemini API with fallback safeguard.
 
     Returns:
         (answer_text, source_type) where source_type is "GEMINI" or "FALLBACK"
     """
+    if detected_language is None:
+        detected_language = detect_language(query)
+
     api_key = (
         os.getenv("GEMINI_API_KEY")
         or os.getenv("AYURINTEL_GEMINI_API_KEY")
@@ -627,7 +805,7 @@ def generate_gemini_answer(
 
     if not api_key:
         logger.info("ℹ️ Gemini API key not found — using deterministic fallback.")
-        return generate_fallback_answer(query, retrieved_chunks, active_product_id, active_product_name), "FALLBACK"
+        return generate_fallback_answer(query, retrieved_chunks, active_product_id, active_product_name, detected_language=detected_language), "FALLBACK"
 
     # Assemble bounded context from retrieved chunks
     context_chunks_text = "\n\n".join(
@@ -641,11 +819,36 @@ def generate_gemini_answer(
         else "No active product selected currently."
     )
 
+    if detected_language == DetectedLanguage.HINGLISH:
+        lang_directive = (
+            "2. LANGUAGE MIRRORING (CRITICAL — HINGLISH DETECTED):\n"
+            "   - The user asked in Roman-script Hinglish (conversational Hindi-English blend).\n"
+            "   - You MUST answer in natural, authentic Roman-script Hinglish (e.g., 'Product Passport aapki Ayurvedic formulation ka ek structured digital dossier hota hai...').\n"
+            "   - Keep established technical, platform, and scientific terms in clear English:\n"
+            "     'Product Passport', 'Patent Intelligence', 'Regulatory Intelligence', 'Risk Assessment', 'Monitoring', 'Dashboard', 'AI', 'RAG', 'FastAPI', 'Gemini', 'Charaka Samhita', etc.\n"
+            "   - Do NOT answer in pure formal English.\n"
+            "   - Do NOT use Devanagari script unless the user explicitly used Devanagari script."
+        )
+    elif detected_language == DetectedLanguage.HINDI:
+        lang_directive = (
+            "2. LANGUAGE MIRRORING (CRITICAL — HINDI DETECTED):\n"
+            "   - The user asked in Hindi (Devanagari script).\n"
+            "   - You MUST answer in natural, respectful Hindi in Devanagari script.\n"
+            "   - Standard technical terms may be kept in English or commonly accepted transliteration."
+        )
+    else:
+        lang_directive = (
+            "2. LANGUAGE MIRRORING (CRITICAL — ENGLISH DETECTED):\n"
+            "   - The user asked in English.\n"
+            "   - You MUST answer entirely in clean, fluent, professional English.\n"
+            "   - Do NOT inject unnecessary Hindi, Hinglish, or colloquial Indian phrases."
+        )
+
     system_prompt = f"""You are the official in-app AI Assistant for AYUR-INTEL, an India-first evidence-backed Ayurvedic product intelligence and decision-support platform.
 
 CRITICAL OPERATIONAL RULES:
 1. STRICT GROUNDING: Answer ONLY based on the supplied Knowledge Chunks and App Context below. Never invent features, claims, or routes that are not in the context.
-2. LANGUAGE MIRRORING: If the user asks in Hindi or Hinglish (e.g. "mere products kaha hai", "kaisa banau", "patent check karna hai"), answer in natural, professional Hinglish. If they ask in English, answer in clear English.
+{lang_directive}
 3. CONCISENESS: Keep answers direct, structured, and helpful. Use bullet points where appropriate.
 4. NO LEGAL/REGULATORY CERTAINTY: Explicitly clarify that AYUR-INTEL does NOT guarantee patent approval, patent grants, or regulatory licensing. It is strictly a decision-support platform.
 5. CONTEXT AWARENESS: If an active product is selected ({active_product_name or 'None'}), reference it naturally when discussing product-specific modules like Patent, Regulatory, or Risk.
@@ -662,7 +865,12 @@ Current UI View: {current_view}
 {product_context_text}
 """
 
-    full_prompt = f"{system_prompt}\n\nUser Question: {query}\n\nAssistant Response:"
+    full_prompt = (
+        f"{system_prompt}\n\n"
+        f"User Question: {query}\n"
+        f"Target Response Language: {detected_language}\n\n"
+        f"Assistant Response ({detected_language}):"
+    )
 
     try:
         import google.generativeai as genai
@@ -684,11 +892,11 @@ Current UI View: {current_view}
                 continue
 
         logger.warning("All candidate Gemini models failed. Switching to deterministic fallback.")
-        return generate_fallback_answer(query, retrieved_chunks, active_product_id, active_product_name), "FALLBACK"
+        return generate_fallback_answer(query, retrieved_chunks, active_product_id, active_product_name, detected_language=detected_language), "FALLBACK"
 
     except Exception as e:
         logger.error("Gemini Assistant call failed with exception: %s. Using fallback.", e)
-        return generate_fallback_answer(query, retrieved_chunks, active_product_id, active_product_name), "FALLBACK"
+        return generate_fallback_answer(query, retrieved_chunks, active_product_id, active_product_name, detected_language=detected_language), "FALLBACK"
 
 
 def verify_active_product(db: Session, product_id: Optional[str]) -> Tuple[Optional[str], Optional[str], bool]:
@@ -728,8 +936,9 @@ def process_assistant_chat(
     2. Verify active product context against DB
     3. Retrieve top-k relevant knowledge chunks
     4. Resolve safe navigation actions
-    5. Generate grounded response (Gemini with deterministic fallback)
-    6. Return structured response
+    5. Detect query language per message
+    6. Generate grounded response (Gemini with deterministic fallback)
+    7. Return structured response
     """
     clean_message = sanitize_input(message)
     if not clean_message:
@@ -762,6 +971,9 @@ def process_assistant_chat(
     # Map safe predefined navigation actions
     actions = resolve_actions(clean_message, retrieved_chunks, eff_prod_id, eff_prod_name)
 
+    # Detect language per message
+    detected_lang = detect_language(clean_message)
+
     # Generate grounded answer via Gemini or deterministic fallback
     answer, source_type = generate_gemini_answer(
         query=clean_message,
@@ -769,6 +981,7 @@ def process_assistant_chat(
         current_view=current_view,
         active_product_id=eff_prod_id,
         active_product_name=eff_prod_name,
+        detected_language=detected_lang,
     )
 
     return {
