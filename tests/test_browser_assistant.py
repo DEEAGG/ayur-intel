@@ -102,10 +102,10 @@ class TestBrowserAssistant(unittest.TestCase):
             if (overlay) overlay.style.display = 'none';
         }""")
 
-        # 1. Verify Floating Trigger Button
+        # 1. Verify Floating Trigger Button (AYUSH)
         trigger = page.locator("#ayur-assistant-trigger")
         self.assertTrue(trigger.is_visible(), "Trigger button must be visible")
-        self.assertIn("Ask AYUR-INTEL", trigger.inner_text())
+        self.assertIn("AYUSH", trigger.inner_text())
 
         # 2. Click to open Assistant Panel
         trigger.click()
@@ -113,24 +113,63 @@ class TestBrowserAssistant(unittest.TestCase):
         self.assertTrue(panel.is_visible(), "Assistant panel must be visible after click")
 
         header_title = page.locator("#ayur-assistant-title").inner_text()
-        self.assertEqual(header_title, "AYUR-INTEL Assistant")
+        self.assertEqual(header_title, "AYUSH")
         subtitle = page.locator(".assistant-subtitle").inner_text()
-        self.assertEqual(subtitle, "Product & Platform Guide")
+        self.assertEqual(subtitle, "AYUR-INTEL Guide")
 
-        # 3. Test Open -> Close -> Re-open
+        # 3. Test Close Control (Panel closes, AYUSH remains floating bottom-right)
         close_btn = page.locator("#assistant-btn-close")
         close_btn.click()
         self.assertFalse(panel.is_visible(), "Panel should be hidden after close click")
+        self.assertTrue(trigger.is_visible(), "Trigger must remain floating after Close")
 
+        # 4. Re-open and Test Hide Control (Smooth flight animation from bottom-right to topbar dock)
         trigger.click()
         self.assertTrue(panel.is_visible(), "Panel should be visible after re-opening")
 
-        # 4. Verify Suggested Chips
+        hide_btn = page.locator("#assistant-btn-hide")
+        self.assertTrue(hide_btn.is_visible(), "Hide button must exist in header")
+        hide_btn.click()
+
+        # Verify intermediate FLYING element appears during the flight
+        page.wait_for_selector(".ayush-flying-clone", state="visible", timeout=1200)
+        flying_clone = page.locator(".ayush-flying-clone")
+        self.assertTrue(flying_clone.is_visible(), "Intermediate flying AYUSH element must be physically visible during flight")
+        self.assertIn("AYUSH", flying_clone.inner_text())
+
+        # Wait for flight to complete (flying clone is removed, docked button settles)
+        page.wait_for_selector(".ayush-flying-clone", state="detached", timeout=3000)
+        dock_btn = page.locator("#topbar-ayush-dock")
+        page.wait_for_selector("#topbar-ayush-dock", state="visible", timeout=2000)
+        self.assertTrue(dock_btn.is_visible(), "Docked AYUSH pill must be visible in topbar")
+        self.assertIn("AYUSH", dock_btn.inner_text())
+        self.assertFalse(trigger.is_visible(), "Floating trigger must be hidden while docked")
+
+        # 5. Test Restore Control (Smooth flight animation from navbar back to bottom-right)
+        dock_btn.click()
+
+        # Verify intermediate FLYING element appears during restore flight
+        page.wait_for_selector(".ayush-flying-clone", state="visible", timeout=1200)
+        flying_back = page.locator(".ayush-flying-clone")
+        self.assertTrue(flying_back.is_visible(), "Intermediate flying AYUSH element must be visible during restore flight")
+        self.assertIn("AYUSH", flying_back.inner_text())
+
+        # Wait for restore flight to complete (flying clone removed, floating trigger back)
+        page.wait_for_selector(".ayush-flying-clone", state="detached", timeout=3000)
+        page.wait_for_selector("#ayur-assistant-trigger", state="visible", timeout=2000)
+        self.assertTrue(trigger.is_visible(), "Floating AYUSH button must be visible bottom-right after restore")
+        self.assertFalse(dock_btn.is_visible(), "Docked topbar button must be hidden after restore")
+
+        # Re-open chat panel
+        trigger.click()
+        self.assertTrue(panel.is_visible(), "Panel must open after clicking restored trigger")
+
+        # 6. Verify Suggested Chips
         chips = page.locator(".assistant-chip")
         chip_count = chips.count()
         self.assertGreaterEqual(chip_count, 4, "Should have at least 4 suggested chips")
 
-        # 5. Helper to send message and wait for completion
+        # 7. Helper to send message and wait for completion
         assistant_count = 1  # 1 initial welcome message
         input_el = page.locator("#assistant-input")
 

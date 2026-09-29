@@ -13,7 +13,7 @@
     messages: [
       {
         sender: "assistant",
-        text: "Namaste! I am your **AYUR-INTEL Assistant**. I can help you navigate the platform, understand how to create products, explore Patent & Regulatory Intelligence, and guide your Ayurvedic formulations.\n\nWhat would you like to know?",
+        text: "Namaste! I am **AYUSH**, your AYUR-INTEL intelligent guide. I can help you navigate the platform, understand how to create products, explore Patent & Regulatory Intelligence, and guide your Ayurvedic formulations.\n\nWhat would you like to know?",
         sources: ["AYUR-INTEL Platform & Mission"],
         actions: [
           { id: "OPEN_PRODUCTS", label: "View Products →", target: "product-cases" },
@@ -241,17 +241,29 @@
   window.handleAssistantAction = handleAssistantAction;
 
   // Render DOM: Trigger Button & Panel
+  // Lifecycle States
+  var Lifecycle = {
+    FLOATING_CLOSED: "FLOATING_CLOSED",
+    FLOATING_OPEN: "FLOATING_OPEN",
+    DOCKING: "DOCKING",
+    DOCKED: "DOCKED",
+    RESTORING: "RESTORING"
+  };
+  var lifecycleState = Lifecycle.FLOATING_CLOSED;
+
+  // Render DOM: Floating AYUSH Pill, Panel & Topbar Dock
   function injectAssistantDOM() {
     if (document.getElementById("ayur-assistant-trigger")) return;
 
-    // 1. Floating trigger button
+    // 1. Floating trigger button (AYUSH)
     var trigger = document.createElement("button");
     trigger.id = "ayur-assistant-trigger";
     trigger.className = "ayur-assistant-trigger";
-    trigger.setAttribute("aria-label", "Ask AYUR-INTEL Assistant");
+    trigger.setAttribute("aria-label", "Ask AYUSH Assistant");
     trigger.setAttribute("type", "button");
+    trigger.title = "Ask AYUSH";
     trigger.innerHTML = '<span class="assistant-trigger-leaf">🌿</span>'
-      + '<span class="assistant-trigger-text">Ask AYUR-INTEL</span>';
+      + '<span class="assistant-trigger-text">AYUSH</span>';
 
     // 2. Main assistant panel
     var panel = document.createElement("div");
@@ -267,15 +279,15 @@
       + '  <div class="assistant-header-info">'
       + '    <div class="assistant-title-row">'
       + '      <span class="assistant-header-leaf">🌿</span>'
-      + '      <h3 id="ayur-assistant-title">AYUR-INTEL Assistant</h3>'
+      + '      <h3 id="ayur-assistant-title">AYUSH</h3>'
       + '    </div>'
-      + '    <div class="assistant-subtitle">Product & Platform Guide</div>'
+      + '    <div class="assistant-subtitle">AYUR-INTEL Guide</div>'
       + '  </div>'
       + '  <div class="assistant-header-actions">'
-      + '    <button type="button" class="assistant-btn-icon" id="assistant-btn-minimize" title="Minimize">'
-      + '      <span class="material-symbols-outlined">remove</span>'
+      + '    <button type="button" class="assistant-btn-icon" id="assistant-btn-hide" title="Dock AYUSH to Topbar" aria-label="Dock to topbar">'
+      + '      <span class="material-symbols-outlined">north_east</span>'
       + '    </button>'
-      + '    <button type="button" class="assistant-btn-icon" id="assistant-btn-close" title="Close">'
+      + '    <button type="button" class="assistant-btn-icon" id="assistant-btn-close" title="Close Chat Panel" aria-label="Close Chat Panel">'
       + '      <span class="material-symbols-outlined">close</span>'
       + '    </button>'
       + '  </div>'
@@ -315,10 +327,52 @@
     document.body.appendChild(trigger);
     document.body.appendChild(panel);
 
+    // 3. Ensure topbar dock button exists
+    var dockBtn = document.getElementById("topbar-ayush-dock");
+    if (!dockBtn) {
+      dockBtn = document.createElement("button");
+      dockBtn.id = "topbar-ayush-dock";
+      dockBtn.className = "topbar-ayush-dock";
+      dockBtn.title = "Show AYUSH";
+      dockBtn.setAttribute("aria-label", "Show AYUSH");
+      dockBtn.style.display = "none";
+      dockBtn.innerHTML = '<span class="ayush-dock-icon">🌿</span><span class="ayush-dock-label">AYUSH</span>';
+      var topbarRight = document.querySelector(".topbar-right");
+      if (topbarRight) {
+        var settingsBtn = document.getElementById("topbar-settings-btn");
+        if (settingsBtn) {
+          topbarRight.insertBefore(dockBtn, settingsBtn);
+        } else {
+          topbarRight.appendChild(dockBtn);
+        }
+      }
+    }
+
+    // Restore docked state from localStorage if previously preferred
+    try {
+      var savedDock = localStorage.getItem("ayush_dock_state");
+      if (savedDock === "docked" && dockBtn) {
+        trigger.style.display = "none";
+        dockBtn.style.display = "inline-flex";
+        lifecycleState = Lifecycle.DOCKED;
+      } else {
+        trigger.style.display = "inline-flex";
+        if (dockBtn) dockBtn.style.display = "none";
+        lifecycleState = Lifecycle.FLOATING_CLOSED;
+      }
+    } catch (e) {
+      trigger.style.display = "inline-flex";
+      if (dockBtn) dockBtn.style.display = "none";
+      lifecycleState = Lifecycle.FLOATING_CLOSED;
+    }
+
     // Bind UI Events
     trigger.addEventListener("click", toggleAssistant);
     document.getElementById("assistant-btn-close").addEventListener("click", closeAssistant);
-    document.getElementById("assistant-btn-minimize").addEventListener("click", closeAssistant);
+    document.getElementById("assistant-btn-hide").addEventListener("click", hideToTopbar);
+    if (dockBtn) {
+      dockBtn.addEventListener("click", restoreFromTopbar);
+    }
 
     var form = document.getElementById("assistant-form");
     var input = document.getElementById("assistant-input");
@@ -343,6 +397,166 @@
     renderMessages();
   }
 
+  // Smooth Flight: Bottom-Right -> Navbar Dock
+  function hideToTopbar() {
+    if (lifecycleState === Lifecycle.DOCKING || lifecycleState === Lifecycle.RESTORING) return;
+    lifecycleState = Lifecycle.DOCKING;
+
+    var panel = document.getElementById("ayur-assistant-panel");
+    var trigger = document.getElementById("ayur-assistant-trigger");
+    var dockBtn = document.getElementById("topbar-ayush-dock");
+
+    var prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // 1. Collapse panel if open
+    if (panel && state.isOpen) {
+      state.isOpen = false;
+      panel.classList.add("collapsing");
+      setTimeout(function () {
+        panel.style.display = "none";
+        panel.classList.remove("collapsing");
+      }, 150);
+    }
+    if (trigger) trigger.classList.remove("active");
+
+    // Immediate transition for reduced motion or missing elements
+    if (prefersReducedMotion || !dockBtn || !trigger) {
+      if (trigger) trigger.style.display = "none";
+      if (dockBtn) dockBtn.style.display = "inline-flex";
+      lifecycleState = Lifecycle.DOCKED;
+      try { localStorage.setItem("ayush_dock_state", "docked"); } catch (e) {}
+      return;
+    }
+
+    // 2. Measure geometry
+    dockBtn.style.display = "inline-flex";
+    dockBtn.style.visibility = "hidden";
+
+    var startRect = trigger.getBoundingClientRect();
+    var destRect = dockBtn.getBoundingClientRect();
+
+    // 3. Create flying clone
+    var flying = document.createElement("div");
+    flying.className = "ayush-flying-clone";
+    flying.innerHTML = '<span class="assistant-trigger-leaf">🌿</span><span class="assistant-trigger-text">AYUSH</span>';
+    flying.style.left = startRect.left + "px";
+    flying.style.top = startRect.top + "px";
+    flying.style.width = startRect.width + "px";
+    flying.style.height = startRect.height + "px";
+    document.body.appendChild(flying);
+
+    // Hide original floating trigger
+    trigger.style.display = "none";
+
+    var dx = destRect.left - startRect.left;
+    var dy = destRect.top - startRect.top;
+    var targetScale = (destRect.height && startRect.height) ? (destRect.height / startRect.height) : 0.85;
+
+    // Curved flight keyframes (upward & inward arc)
+    var keyframes = [
+      { transform: "translate3d(0, 0, 0) scale(1) rotate(0deg)", opacity: 1 },
+      { transform: "translate3d(" + (dx * 0.32 - 25) + "px, " + (dy * 0.40) + "px, 0) scale(1) rotate(-3deg)", opacity: 1, offset: 0.35 },
+      { transform: "translate3d(" + (dx * 0.72 - 10) + "px, " + (dy * 0.78) + "px, 0) scale(" + ((1 + targetScale) / 2) + ") rotate(-1deg)", opacity: 1, offset: 0.72 },
+      { transform: "translate3d(" + dx + "px, " + dy + "px, 0) scale(" + targetScale + ") rotate(0deg)", opacity: 1 }
+    ];
+
+    function onDockFinish() {
+      dockBtn.style.visibility = "visible";
+      dockBtn.classList.add("ayush-landing-pulse");
+      setTimeout(function () {
+        dockBtn.classList.remove("ayush-landing-pulse");
+      }, 500);
+      flying.remove();
+      lifecycleState = Lifecycle.DOCKED;
+      try { localStorage.setItem("ayush_dock_state", "docked"); } catch (e) {}
+    }
+
+    if (typeof flying.animate === "function") {
+      var anim = flying.animate(keyframes, {
+        duration: 650,
+        easing: "cubic-bezier(0.25, 1, 0.4, 1)",
+        fill: "forwards"
+      });
+      anim.onfinish = onDockFinish;
+    } else {
+      setTimeout(onDockFinish, 650);
+    }
+  }
+
+  // Smooth Flight: Navbar Dock -> Bottom-Right Home
+  function restoreFromTopbar() {
+    if (lifecycleState === Lifecycle.DOCKING || lifecycleState === Lifecycle.RESTORING) return;
+    lifecycleState = Lifecycle.RESTORING;
+
+    var panel = document.getElementById("ayur-assistant-panel");
+    var trigger = document.getElementById("ayur-assistant-trigger");
+    var dockBtn = document.getElementById("topbar-ayush-dock");
+
+    var prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion || !dockBtn || !trigger) {
+      if (dockBtn) dockBtn.style.display = "none";
+      if (trigger) trigger.style.display = "inline-flex";
+      lifecycleState = Lifecycle.FLOATING_CLOSED;
+      try { localStorage.setItem("ayush_dock_state", "floating"); } catch (e) {}
+      return;
+    }
+
+    // Ensure trigger can be measured at bottom-right
+    trigger.style.display = "inline-flex";
+    trigger.style.visibility = "hidden";
+
+    var startRect = dockBtn.getBoundingClientRect();
+    var destRect = trigger.getBoundingClientRect();
+
+    dockBtn.style.display = "none";
+    dockBtn.style.visibility = "visible";
+
+    var flying = document.createElement("div");
+    flying.className = "ayush-flying-clone";
+    flying.innerHTML = '<span class="assistant-trigger-leaf">🌿</span><span class="assistant-trigger-text">AYUSH</span>';
+    flying.style.left = startRect.left + "px";
+    flying.style.top = startRect.top + "px";
+    flying.style.width = startRect.width + "px";
+    flying.style.height = startRect.height + "px";
+    document.body.appendChild(flying);
+
+    var dx = destRect.left - startRect.left;
+    var dy = destRect.top - startRect.top;
+    var startScale = (startRect.height && destRect.height) ? (startRect.height / destRect.height) : 0.85;
+
+    // Curved flight keyframes back down
+    var keyframes = [
+      { transform: "translate3d(0, 0, 0) scale(" + startScale + ") rotate(0deg)", opacity: 1 },
+      { transform: "translate3d(" + (dx * 0.35 + 25) + "px, " + (dy * 0.32) + "px, 0) scale(0.92) rotate(3deg)", opacity: 1, offset: 0.35 },
+      { transform: "translate3d(" + (dx * 0.72 + 10) + "px, " + (dy * 0.72) + "px, 0) scale(0.98) rotate(1deg)", opacity: 1, offset: 0.72 },
+      { transform: "translate3d(" + dx + "px, " + dy + "px, 0) scale(1) rotate(0deg)", opacity: 1 }
+    ];
+
+    function onRestoreFinish() {
+      trigger.style.visibility = "visible";
+      trigger.style.display = "inline-flex";
+      trigger.classList.add("ayush-landing-pulse");
+      setTimeout(function () {
+        trigger.classList.remove("ayush-landing-pulse");
+      }, 500);
+      flying.remove();
+      lifecycleState = Lifecycle.FLOATING_CLOSED;
+      try { localStorage.setItem("ayush_dock_state", "floating"); } catch (e) {}
+    }
+
+    if (typeof flying.animate === "function") {
+      var anim = flying.animate(keyframes, {
+        duration: 650,
+        easing: "cubic-bezier(0.25, 1, 0.4, 1)",
+        fill: "forwards"
+      });
+      anim.onfinish = onRestoreFinish;
+    } else {
+      setTimeout(onRestoreFinish, 650);
+    }
+  }
+
   // Toggle Assistant Panel
   function toggleAssistant() {
     if (state.isOpen) {
@@ -353,10 +567,15 @@
   }
 
   function openAssistant() {
+    if (lifecycleState === Lifecycle.DOCKED) {
+      restoreFromTopbar();
+    }
     state.isOpen = true;
+    lifecycleState = Lifecycle.FLOATING_OPEN;
     var panel = document.getElementById("ayur-assistant-panel");
     var trigger = document.getElementById("ayur-assistant-trigger");
     if (panel) {
+      panel.classList.remove("collapsing");
       panel.style.display = "flex";
       updateContextBar();
       scrollToBottom();
@@ -368,9 +587,13 @@
 
   function closeAssistant() {
     state.isOpen = false;
+    lifecycleState = Lifecycle.FLOATING_CLOSED;
     var panel = document.getElementById("ayur-assistant-panel");
     var trigger = document.getElementById("ayur-assistant-trigger");
-    if (panel) panel.style.display = "none";
+    if (panel) {
+      panel.classList.remove("collapsing");
+      panel.style.display = "none";
+    }
     if (trigger) trigger.classList.remove("active");
   }
 
@@ -561,7 +784,12 @@
   window.AYUR_ASSISTANT = {
     open: openAssistant,
     close: closeAssistant,
+    hide: hideToTopbar,
+    restore: restoreFromTopbar,
     toggle: toggleAssistant,
+    getLifecycleState: function () {
+      return lifecycleState;
+    },
     updateContext: updateContextBar,
     state: state,
     send: function (text) {

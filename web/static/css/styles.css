@@ -9595,7 +9595,7 @@ input:checked + .ios-slider:before {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 9990;
+  z-index: 10010;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -9608,22 +9608,44 @@ input:checked + .ios-slider:before {
   font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 16px rgba(71, 101, 88, 0.25);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 16px rgba(71, 101, 88, 0.25);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
+  animation: ayushIdlePulse 4.5s ease-in-out infinite;
+}
+
+@keyframes ayushIdlePulse {
+  0%, 100% {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 16px rgba(71, 101, 88, 0.25);
+    border-color: rgba(71, 101, 88, 0.55);
+  }
+  50% {
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), 0 0 22px rgba(125, 186, 154, 0.38);
+    border-color: rgba(125, 186, 154, 0.65);
+  }
 }
 
 .ayur-assistant-trigger:hover {
   transform: translateY(-2px);
   background: linear-gradient(135deg, #18281f 0%, #203629 100%);
-  border-color: rgba(201, 234, 217, 0.5);
+  border-color: rgba(201, 234, 217, 0.6);
   color: #ffffff;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 24px rgba(71, 101, 88, 0.4);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 24px rgba(125, 186, 154, 0.45);
 }
 
 .ayur-assistant-trigger.active {
   background: linear-gradient(135deg, #1b2f23 0%, #253f2f 100%);
   border-color: #476558;
+}
+
+.ayur-assistant-trigger.ayush-landing-pulse {
+  animation: ayushFloatLanding 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes ayushFloatLanding {
+  0% { transform: scale(0.85); }
+  50% { transform: scale(1.06); }
+  100% { transform: scale(1); }
 }
 
 .assistant-trigger-leaf {
@@ -9632,7 +9654,74 @@ input:checked + .ios-slider:before {
 }
 
 .assistant-trigger-text {
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
+}
+
+/* Docked Topbar AYUSH Pill */
+.topbar-ayush-dock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  background: linear-gradient(135deg, #132219 0%, #1a2f23 100%);
+  border: 1px solid rgba(71, 101, 88, 0.6);
+  color: #c9ead9;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.topbar-ayush-dock:hover {
+  background: linear-gradient(135deg, #182d22 0%, #223e2e 100%);
+  border-color: #7dba9a;
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 12px rgba(125, 186, 154, 0.3);
+  transform: translateY(-1px);
+}
+
+.ayush-dock-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.ayush-dock-label {
+  letter-spacing: 0.02em;
+}
+
+.topbar-ayush-dock.ayush-landing-pulse {
+  animation: ayushDockLanding 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes ayushDockLanding {
+  0% { transform: scale(0.85); box-shadow: 0 0 0 rgba(125, 186, 154, 0); }
+  50% { transform: scale(1.08); box-shadow: 0 0 16px rgba(125, 186, 154, 0.5); }
+  100% { transform: scale(1); box-shadow: none; }
+}
+
+/* Flying AYUSH Element During Flight Transitions */
+.ayush-flying-clone {
+  position: fixed;
+  z-index: 10025;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #131e17 0%, #1a2a20 100%);
+  color: #c9ead9;
+  border: 1px solid rgba(125, 186, 154, 0.65);
+  border-radius: 9999px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6), 0 0 24px rgba(125, 186, 154, 0.45);
+  will-change: transform, opacity;
+  user-select: none;
 }
 
 /* Main Panel */
@@ -9640,7 +9729,7 @@ input:checked + .ios-slider:before {
   position: fixed;
   bottom: 84px;
   right: 24px;
-  z-index: 9995;
+  z-index: 10015;
   width: 420px;
   max-width: calc(100vw - 32px);
   height: 580px;
@@ -9654,6 +9743,13 @@ input:checked + .ios-slider:before {
   overflow: hidden;
   font-family: inherit;
   animation: assistantPanelSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+.ayur-assistant-panel.collapsing {
+  opacity: 0;
+  transform: translateY(14px) scale(0.92);
+  pointer-events: none;
 }
 
 @keyframes assistantPanelSlideUp {
@@ -10068,6 +10164,22 @@ input:checked + .ios-slider:before {
     bottom: 16px;
     padding: 8px 14px;
     font-size: 12.5px;
+  }
+}
+
+/* Reduced Motion Safety */
+@media (prefers-reduced-motion: reduce) {
+  .ayur-assistant-trigger {
+    animation: none !important;
+    transition: none !important;
+  }
+  .ayur-assistant-panel {
+    animation: none !important;
+    transition: none !important;
+  }
+  .topbar-ayush-dock.ayush-landing-pulse,
+  .ayur-assistant-trigger.ayush-landing-pulse {
+    animation: none !important;
   }
 }
 
