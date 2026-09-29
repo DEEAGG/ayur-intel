@@ -1428,11 +1428,22 @@ def is_product_case_query(query: str, db: Session, active_product_id: Optional[s
     if any(k in q_lower for k in ["ke baare mein batao", "ke bare me batao", "ke baare mein"]):
         return True
 
-    # Check 4: Query mentions an accessible product's exact name
+    # Check 4: Query mentions an accessible product's exact name or significant product tokens
     all_cases = get_accessible_product_cases(db)
+    q_words = set(re.findall(r"\w+", q_lower)) - STOP_WORDS
     for c in all_cases:
         c_name = c.name.strip().lower()
         if len(c_name) >= 3 and c_name in q_lower:
+            return True
+        c_words = set(re.findall(r"\w+", c_name)) - STOP_WORDS - {
+            "capsules", "capsule", "tablet", "tablets", "syrup", "complex", "formula", "product", "extract",
+            "ayur", "intel", "ayush"
+        }
+        if c_words and c_words.issubset(q_words):
+            return True
+        if len(c_words & q_words) >= 2:
+            return True
+        if any(w in c_words for w in q_words if len(w) >= 6) and any(a in q_lower for a in attr_markers):
             return True
 
     # Check 5: Query contains attribute questions when active_product_id is set
