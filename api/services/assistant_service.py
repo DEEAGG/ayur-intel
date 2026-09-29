@@ -1494,12 +1494,12 @@ def resolve_product_for_query(
 
     # 2. Candidate pattern extraction from query
     candidate_patterns = [
-        re.compile(r"(?:tell me about|info(?:rmation)? about|details of|details for|about)\s+([A-Za-z0-9\s&'-]+?)(?:\s+(?:product|formula|ingredients?|capsules?)|[?.!,]|$)", re.IGNORECASE),
+        re.compile(r"\b(?:tell me about|info(?:rmation)? about|details of|details for|about)\s+([A-Za-z0-9\s&'-]+?)(?:\s+(?:product|formula|ingredients?|capsules?)|[?.!,]|$)", re.IGNORECASE),
         re.compile(r"^\s*([A-Za-z0-9\s&'-]+?)\s+(?:product\s+)?(?:mein|ka|ke|ki|me)\s+(?:kya|kitn[ai]|intended|process|description|ingredients?)", re.IGNORECASE),
-        re.compile(r"(?:mere|mera|apne)\s+([A-Za-z0-9\s&'-]+?)\s+(?:product|case)", re.IGNORECASE),
-        re.compile(r"(?:generate|create|write|give me)(?:\s+a)?\s+(?:short\s+)?(?:product\s+)?description\s+for\s+([A-Za-z0-9\s&'-]+)", re.IGNORECASE),
+        re.compile(r"\b(?:mere|mera|apne)\s+([A-Za-z0-9\s&'-]+?)\s+(?:product|case)", re.IGNORECASE),
+        re.compile(r"\b(?:generate|create|write|give me)(?:\s+a)?\s+(?:short\s+)?(?:product\s+)?description\s+for\s+([A-Za-z0-9\s&'-]+)", re.IGNORECASE),
         re.compile(r"([A-Za-z0-9\s&'-]+?)\s+(?:ki\s+)?description\s+bana", re.IGNORECASE),
-        re.compile(r"(?:for|in)\s+([A-Za-z0-9\s&'-]+?)(?:\s+(?:product|formula)|[?.!,]|$)", re.IGNORECASE),
+        re.compile(r"\b(?:for|in)\s+([A-Za-z0-9\s&'-]+?)\s+(?:product|formula)\b", re.IGNORECASE),
     ]
 
     extracted_candidate = None
@@ -1508,7 +1508,11 @@ def resolve_product_for_query(
         if m:
             cand = m.group(1).strip()
             cand_tokens = set(re.findall(r"\w+", cand.lower())) - STOP_WORDS
-            generic_words = {"this", "is", "selected", "my", "current", "active", "yeh", "mera", "mere", "apne", "ye", "it", "iski", "iska", "isme", "product", "case"}
+            generic_words = {
+                "this", "is", "selected", "my", "current", "active", "yeh", "mera", "mere", "apne",
+                "ye", "it", "iski", "iska", "isme", "product", "case", "formula", "ingredients",
+                "ingredient", "description", "process", "use", "kya", "hain", "hai", "kitna", "kitni"
+            }
             meaningful_tokens = cand_tokens - generic_words
             if meaningful_tokens:
                 extracted_candidate = cand
