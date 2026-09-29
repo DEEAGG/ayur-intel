@@ -395,6 +395,26 @@
       }
     });
 
+    // Scroll Isolation: Prevent wheel scroll propagation to parent page at boundaries
+    var conversationEl = document.getElementById("assistant-conversation");
+    if (conversationEl) {
+      conversationEl.addEventListener("wheel", function (e) {
+        var scrollTop = conversationEl.scrollTop;
+        var scrollHeight = conversationEl.scrollHeight;
+        var clientHeight = conversationEl.clientHeight;
+        var delta = e.deltaY;
+
+        // At top and scrolling up: prevent leaking scroll to main page
+        if (delta < 0 && scrollTop <= 0) {
+          e.preventDefault();
+        }
+        // At bottom and scrolling down: prevent leaking scroll to main page
+        else if (delta > 0 && (scrollTop + clientHeight >= scrollHeight - 1)) {
+          e.preventDefault();
+        }
+      }, { passive: false });
+    }
+
     renderSuggestedChips();
     renderMessages();
   }

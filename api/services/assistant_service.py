@@ -7,6 +7,7 @@ bounded Gemini synthesis (last layer with 4.0s timeout), and resilient fallbacks
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -16,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from api.core.config import settings
-from api.models.models import ProductCase
+from api.models.models import ProductCase, User
 from api.schemas.assistant import AssistantAction, ProductContextInfo
 from api.services.assistant_knowledge import KNOWLEDGE_CHUNKS
 
@@ -109,6 +110,7 @@ class MessageIntent:
     CASUAL = "CASUAL"
     SELF_KNOWLEDGE = "SELF_KNOWLEDGE"
     PRODUCT_CONTEXT = "PRODUCT_CONTEXT"
+    PRODUCT_QUERY = "PRODUCT_QUERY"
     FOLLOW_UP = "FOLLOW_UP"
     NAVIGATION = "NAVIGATION"
     DOMAIN_KNOWLEDGE = "DOMAIN_KNOWLEDGE"
@@ -129,20 +131,22 @@ class SourceType:
 HINGLISH_TOKENS = {
     # Question words / Pronouns
     "kya", "kyu", "kyun", "kaise", "kaha", "kahan", "kidhar", "kab", "kaun", "kitna", "kitne", "kitni",
-    "mere", "meri", "mera", "apna", "apni", "apne", "hum", "humare", "hamara", "hamare", "tum", "tumhara",
+    "mere", "meri", "mera", "apna", "apni", "apne", "hum", "humare", "hamara", "tum", "tumhara",
     "aap", "aapka", "aapke", "aapki", "mujhe", "mujhko", "hume", "humein", "tujhe", "isse", "usse", "jisse",
+    "isme", "iski", "iska", "inke", "inka", "yeh", "woh",
     # Verbs / Auxiliaries / Tense markers
     "hai", "hain", "hoon", "hu", "tha", "thi", "the", "raha", "rahi", "rahe",
-    "hoga", "hogi", "hoge", "honge", "hota", "hoti", "hote",
+    "hoga", "hogi", "hoge", "honge", "hota", "hoti", "hote", "hui", "hua", "huye",
     "kare", "karein", "karo", "karna", "karta", "karti", "karte",
     "batao", "bataiye", "bata", "dikhao", "dikhaye", "kholo", "khola",
     "chahiye", "sakte", "sakta", "sakti", "sakenge",
-    "banau", "banaun", "banana", "banaye", "banayein", "banega", "banegi",
-    "samjhao", "dekhna", "dekho", "dekhein", "sikhao", "bhejo",
+    "bana", "banao", "banau", "banaun", "banana", "banaye", "banayein", "banega", "banegi",
+    "samjhao", "dekhna", "dekho", "dekhein", "sikhao", "bhejo", "dijiye",
     # Prepositions / Conjunctions / Particles
     "mein", "aur", "toh", "bhi", "matlab", "nahi", "nahin", "sirf", "bas",
     "zyada", "jyada", "kam", "achha", "accha", "theek", "thik", "pakka",
-    "khatra", "kanoon", "nirdesh", "praman", "saboot", "dikhana", "lagta", "lagti"
+    "khatra", "kanoon", "nirdesh", "praman", "saboot", "dikhana", "lagta", "lagti",
+    "ki", "ka", "ke"
 }
 
 # Multi-word Hinglish phrase markers (handles multi-word colloquial combinations)
@@ -150,7 +154,8 @@ HINGLISH_PHRASES = [
     "kya hai", "kya hota", "kaise kare", "kaise karein", "kaise banaye", "kaise banayein",
     "kaha hai", "kaha pe", "pe bana", "kis tech", "kaise kaam", "kya karta", "kya karti",
     "nahi deta", "nahi hai", "karna hai", "banani hai", "banana hai", "kuch jan na hai",
-    "kuch janna hai", "kuch puchna hai", "kuch poochna hai", "help chahiye"
+    "kuch janna hai", "kuch puchna hai", "kuch poochna hai", "help chahiye",
+    "bana do", "de do", "bata do", "batao na", "ke baare", "ke bare", "kya ingredients", "use hui"
 ]
 
 
@@ -1335,6 +1340,665 @@ def verify_active_product(db: Session, product_id: Optional[str]) -> Tuple[Optio
     return None, None, False
 
 
+def get_accessible_product_cases(db: Session) -> List[ProductCase]:
+    """Retrieve all accessible ProductCase records for the current user/demo session."""
+    from api.services.product_case_service import get_or_create_demo_user
+    demo_user = get_or_create_demo_user(db)
+    cases = (
+        db.query(ProductCase)
+        .filter(
+            (ProductCase.owner_id == demo_user.id)
+            | (ProductCase.is_demo == True)
+            | (ProductCase.public_id == "demo-001")
+        )
+        .all()
+    )
+    if not cases:
+        # In test environments or when custom owner was pre-seeded
+        first_user = db.query(User).order_by(User.id.asc()).first()
+        if first_user:
+            cases = db.query(ProductCase).filter(ProductCase.owner_id == first_user.id).all()
+    return cases
+
+
+def parse_case_ingredients(case: ProductCase) -> List[dict]:
+    """Safely parse ingredients JSON or list into standardized list of dicts."""
+    if not case or not case.ingredients:
+        return []
+    if isinstance(case.ingredients, list):
+        raw_list = case.ingredients
+    else:
+        try:
+            raw_list = json.loads(case.ingredients)
+        except Exception:
+            return []
+
+    if not isinstance(raw_list, list):
+        return []
+
+    clean = []
+    for item in raw_list:
+        if isinstance(item, dict):
+            clean.append(item)
+        elif isinstance(item, str) and item.strip():
+            clean.append({"name": item.strip()})
+    return clean
+
+
+def is_product_case_query(query: str, db: Session, active_product_id: Optional[str] = None) -> bool:
+    """Determine whether the message is querying a specific product case or product attribute."""
+    if not query:
+        return False
+    q_lower = query.lower().strip()
+
+    # Rule out general platform feature questions
+    if any(q_lower.startswith(p) for p in [
+        "what is product passport", "product passport kya", "product passport is",
+        "how do i create a product", "product kaise banaye", "product kaise banau",
+        "where are my products", "mere products kaha", "where is product passport"
+    ]):
+        return False
+
+    # Check 1: Explicit description generation request
+    if any(k in q_lower for k in [
+        "description bana", "generate a description", "generate description",
+        "short product description", "give me a short product description",
+        "achhi description", "write a description", "create a description",
+        "short description"
+    ]):
+        return True
+
+    # Check 2: Attribute inquiry with product markers or anaphora
+    attr_markers = [
+        "ingredient", "ingredients", "ghatak", "samagri",
+        "intended use", "intended_use", "purpose", "upayog", "kiske liye",
+        "preparation", "process", "kaise banta", "kaise banate", "how is this product prepared",
+        "manufacturing", "quantity", "kitni quantity", "kitna", "amount", "dose", "mg"
+    ]
+    ref_markers = [
+        "this product", "is product", "isme", "iski", "iska", "selected product",
+        "my product", "mere product", "current product", "active product"
+    ]
+    if any(a in q_lower for a in attr_markers) and any(r in q_lower for r in ref_markers):
+        return True
+
+    # Check 3: Overview inquiry ("tell me about X", "describe my selected product", "mere X product ke baare mein")
+    if any(q_lower.startswith(p) for p in ["tell me about", "describe my", "describe selected", "describe this"]):
+        return True
+    if any(k in q_lower for k in ["ke baare mein batao", "ke bare me batao", "ke baare mein"]):
+        return True
+
+    # Check 4: Query mentions an accessible product's exact name
+    all_cases = get_accessible_product_cases(db)
+    for c in all_cases:
+        c_name = c.name.strip().lower()
+        if len(c_name) >= 3 and c_name in q_lower:
+            return True
+
+    # Check 5: Query contains attribute questions when active_product_id is set
+    if active_product_id and any(a in q_lower for a in attr_markers):
+        return True
+
+    return False
+
+
+class ProductResolutionStatus:
+    EXACT_MATCH = "EXACT_MATCH"
+    ACTIVE_PRODUCT = "ACTIVE_PRODUCT"
+    HISTORY_REFERENCE = "HISTORY_REFERENCE"
+    AMBIGUOUS = "AMBIGUOUS"
+    NOT_FOUND = "NOT_FOUND"
+    NO_PRODUCT_SPECIFIED = "NO_PRODUCT_SPECIFIED"
+
+
+def resolve_product_for_query(
+    db: Session,
+    query: str,
+    history: Optional[List[Any]] = None,
+    active_product_id: Optional[str] = None,
+    active_product_name: Optional[str] = None,
+) -> Tuple[str, Optional[ProductCase], List[ProductCase], Optional[str]]:
+    """Resolve which product case the user is inquiring about.
+
+    Resolution hierarchy:
+      A. Explicit product name mentioned in current message
+      B. Current active product
+      C. Reliable recent conversational product reference
+      D. If ambiguous -> ask user which product
+      Never silently use another product.
+    """
+    all_cases = get_accessible_product_cases(db)
+    if not all_cases:
+        return (ProductResolutionStatus.NOT_FOUND, None, [], query.strip())
+
+    q_clean = query.strip()
+    q_lower = q_clean.lower()
+
+    # -------------------------------------------------------------------------
+    # A. Explicit product name mentioned in current message
+    # -------------------------------------------------------------------------
+    # 1. Full case name substring match in query
+    exact_name_matches = []
+    for c in all_cases:
+        c_clean_name = c.name.strip().lower()
+        if len(c_clean_name) >= 3 and c_clean_name in q_lower:
+            exact_name_matches.append(c)
+
+    if exact_name_matches:
+        if len(exact_name_matches) == 1:
+            return (ProductResolutionStatus.EXACT_MATCH, exact_name_matches[0], [], None)
+        exact_name_matches.sort(key=lambda x: len(x.name.strip()), reverse=True)
+        if len(exact_name_matches[0].name.strip()) > len(exact_name_matches[1].name.strip()):
+            return (ProductResolutionStatus.EXACT_MATCH, exact_name_matches[0], [], None)
+        return (ProductResolutionStatus.AMBIGUOUS, None, exact_name_matches, None)
+
+    # 2. Candidate pattern extraction from query
+    candidate_patterns = [
+        re.compile(r"(?:tell me about|info(?:rmation)? about|details of|details for|about)\s+([A-Za-z0-9\s&'-]+?)(?:\s+(?:product|formula|ingredients?|capsules?)|[?.!,]|$)", re.IGNORECASE),
+        re.compile(r"^\s*([A-Za-z0-9\s&'-]+?)\s+(?:product\s+)?(?:mein|ka|ke|ki|me)\s+(?:kya|kitn[ai]|intended|process|description|ingredients?)", re.IGNORECASE),
+        re.compile(r"(?:mere|mera|apne)\s+([A-Za-z0-9\s&'-]+?)\s+(?:product|case)", re.IGNORECASE),
+        re.compile(r"(?:generate|create|write|give me)(?:\s+a)?\s+(?:short\s+)?(?:product\s+)?description\s+for\s+([A-Za-z0-9\s&'-]+)", re.IGNORECASE),
+        re.compile(r"([A-Za-z0-9\s&'-]+?)\s+(?:ki\s+)?description\s+bana", re.IGNORECASE),
+        re.compile(r"(?:for|in)\s+([A-Za-z0-9\s&'-]+?)(?:\s+(?:product|formula)|[?.!,]|$)", re.IGNORECASE),
+    ]
+
+    extracted_candidate = None
+    for pattern in candidate_patterns:
+        m = pattern.search(q_clean)
+        if m:
+            cand = m.group(1).strip()
+            cand_tokens = set(re.findall(r"\w+", cand.lower())) - STOP_WORDS
+            generic_words = {"this", "is", "selected", "my", "current", "active", "yeh", "mera", "mere", "apne", "ye", "it", "iski", "iska", "isme", "product", "case"}
+            meaningful_tokens = cand_tokens - generic_words
+            if meaningful_tokens:
+                extracted_candidate = cand
+                break
+
+    if extracted_candidate:
+        cand_lower = extracted_candidate.lower()
+        cand_tokens = set(re.findall(r"\w+", cand_lower)) - STOP_WORDS - {"product", "case"}
+        token_matches = []
+        for c in all_cases:
+            c_name_lower = c.name.strip().lower()
+            c_tokens = set(re.findall(r"\w+", c_name_lower))
+            if cand_lower in c_name_lower or (cand_tokens and cand_tokens.issubset(c_tokens)):
+                token_matches.append(c)
+            elif cand_tokens and any(t in c_tokens for t in cand_tokens if len(t) > 3):
+                token_matches.append(c)
+
+        if len(token_matches) == 1:
+            return (ProductResolutionStatus.EXACT_MATCH, token_matches[0], [], None)
+        elif len(token_matches) > 1:
+            return (ProductResolutionStatus.AMBIGUOUS, None, token_matches, None)
+        else:
+            return (ProductResolutionStatus.NOT_FOUND, None, [], extracted_candidate)
+
+    # -------------------------------------------------------------------------
+    # B. Current active product
+    # -------------------------------------------------------------------------
+    if active_product_id:
+        pid_str = str(active_product_id).strip()
+        for c in all_cases:
+            if str(c.public_id) == pid_str or str(c.id) == pid_str:
+                return (ProductResolutionStatus.ACTIVE_PRODUCT, c, [], None)
+    if active_product_name:
+        pname_str = active_product_name.strip().lower()
+        for c in all_cases:
+            if c.name.strip().lower() == pname_str:
+                return (ProductResolutionStatus.ACTIVE_PRODUCT, c, [], None)
+
+    # -------------------------------------------------------------------------
+    # C. Reliable recent conversational product reference
+    # -------------------------------------------------------------------------
+    if history:
+        for turn in reversed(history):
+            turn_text = ""
+            if isinstance(turn, dict):
+                turn_text = turn.get("text") or turn.get("message") or ""
+            elif hasattr(turn, "text"):
+                turn_text = getattr(turn, "text", "")
+            elif hasattr(turn, "message"):
+                turn_text = getattr(turn, "message", "")
+            if turn_text:
+                t_lower = turn_text.lower()
+                for c in all_cases:
+                    if c.name.strip().lower() in t_lower:
+                        return (ProductResolutionStatus.HISTORY_REFERENCE, c, [], None)
+
+    # -------------------------------------------------------------------------
+    # D. No product specified
+    # -------------------------------------------------------------------------
+    return (ProductResolutionStatus.NO_PRODUCT_SPECIFIED, None, [], None)
+
+
+def generate_local_product_description(case: ProductCase, detected_lang: str) -> str:
+    """Generate a clean, grounded 2-4 sentence product description using only stored facts."""
+    name = case.name
+    form = case.form or "botanical formulation"
+    intended_use = (case.intended_use or "").strip()
+    process = (case.process or "").strip()
+
+    ingredients = parse_case_ingredients(case)
+    ing_names = [i.get("name", "").strip() for i in ingredients if i.get("name")]
+
+    in_hinglish = detected_lang == DetectedLanguage.HINGLISH
+    in_hindi = detected_lang == DetectedLanguage.HINDI
+
+    if in_hinglish:
+        if intended_use:
+            s1 = f"**{name}** ek Ayurvedic {form} hai jo mukhya rup se {intended_use} ke liye formulate kiya gaya hai."
+        else:
+            s1 = f"**{name}** ek structured Ayurvedic {form} hai jo Product Passport standard ke anuroop darj hai."
+        if ing_names:
+            s2 = f"Isme pramukh pramanit botanical extracts shamil hain jaise ki {', '.join(ing_names[:4])}{' ityadi' if len(ing_names) > 4 else ''}."
+        else:
+            s2 = "Iska botanical profile standardized Ayurvedic parameters ke sath configured hai."
+        if process:
+            proc_first = process.split(".")[0].strip()
+            if len(proc_first) > 80:
+                proc_first = proc_first[:77] + "..."
+            s3 = f"Yeh formulation {proc_first} vidhi ke anuroop batch consistency banaye rakhne ke liye taiyar ki gayi hai."
+        else:
+            s3 = "Yeh classical Ayurvedic guidelines ke anuroop quality aur purity standard maintain karne ke liye structured hai."
+        return f"{s1} {s2} {s3}"
+
+    elif in_hindi:
+        if intended_use:
+            s1 = f"**{name}** एक आयुर्वेदिक {form} है जिसे मुख्य रूप से {intended_use} के लिए तैयार किया गया है।"
+        else:
+            s1 = f"**{name}** एक संरचित आयुर्वेदिक {form} है जो प्रोडक्ट पासपोर्ट के तहत पंजीकृत है।"
+        if ing_names:
+            s2 = f"इसमें मुख्य रूप से {', '.join(ing_names[:4])} जैसे मानकीकृत वनस्पति अर्क शामिल हैं।"
+        else:
+            s2 = "इसका बॉटनिकल प्रोफाइल मानकीकृत आयुर्वेदिक मानकों के अनुसार संरचित है।"
+        if process:
+            proc_first = process.split(".")[0].strip()
+            if len(proc_first) > 80:
+                proc_first = proc_first[:77] + "..."
+            s3 = f"यह {proc_first} विधि द्वारा गुणवत्ता और शुद्धता बनाए रखने के लिए निर्मित किया गया है।"
+        else:
+            s3 = "यह शास्त्रीय आयुर्वेदिक मानकों के अनुसार सख्त बैच निरंतरता बनाए रखने के लिए संरचित है।"
+        return f"{s1} {s2} {s3}"
+
+    else:
+        if intended_use:
+            s1 = f"**{name}** is an Ayurvedic {form} developed specifically for {intended_use}."
+        else:
+            s1 = f"**{name}** is a structured Ayurvedic {form} documented under the AYUR-INTEL Product Passport."
+        if ing_names:
+            s2 = f"The formulation incorporates standardized botanical extracts including {', '.join(ing_names[:4])}{' among other verified actives' if len(ing_names) > 4 else ''}."
+        else:
+            s2 = "The ingredient profile is configured for standardized botanical composition and traceability."
+        if process:
+            proc_first = process.split(".")[0].strip()
+            if len(proc_first) > 90:
+                proc_first = proc_first[:87] + "..."
+            s3 = f"It is manufactured utilizing {proc_first.lower() if not proc_first.startswith(('Standard', 'Hydro')) else proc_first} to ensure optimal phytochemical standardization."
+        else:
+            s3 = "It adheres to controlled processing parameters to ensure therapeutic consistency and batch reproducibility."
+        return f"{s1} {s2} {s3}"
+
+
+def handle_product_query(
+    db: Session,
+    query: str,
+    history: Optional[List[Any]],
+    active_product_id: Optional[str],
+    active_product_name: Optional[str],
+    detected_lang: str,
+    t0: float,
+) -> Dict[str, Any]:
+    """Execute product-aware Q&A, attribute lookup, and description generation."""
+    q_lower = query.lower().strip()
+    in_hinglish = detected_lang == DetectedLanguage.HINGLISH
+    in_hindi = detected_lang == DetectedLanguage.HINDI
+
+    status, case, ambiguous_cases, searched_name = resolve_product_for_query(
+        db=db,
+        query=query,
+        history=history,
+        active_product_id=active_product_id,
+        active_product_name=active_product_name,
+    )
+
+    # Branch 1: Not Found
+    if status == ProductResolutionStatus.NOT_FOUND:
+        target_name = searched_name or "specified product"
+        if in_hinglish:
+            answer = (
+                f"Aapke AYUR-INTEL database mein '**{target_name}**' naam ka koi saved product nahi mila.\n\n"
+                "Aap **Product Passport Wizard** ka upyog karke naya product add kar sakte hain, ya apne existing products dekh sakte hain."
+            )
+        elif in_hindi:
+            answer = (
+                f"आपके AYUR-INTEL डेटाबेस में '**{target_name}**' नाम का कोई उत्पाद नहीं मिला।\n\n"
+                "आप नया प्रोडक्ट पासपोर्ट बना सकते हैं या मौजूदा उत्पादों की सूची देख सकते हैं।"
+            )
+        else:
+            answer = (
+                f"I couldn't find a saved product named '**{target_name}**' in your AYUR-INTEL database.\n\n"
+                "You can create this product in the **Product Passport Wizard** to start tracking its ingredients, prior-art patents, and regulatory requirements."
+            )
+        actions = [
+            AssistantAction(id="CREATE_PRODUCT", label="Create Product →", target="passport-wizard"),
+            AssistantAction(id="OPEN_PRODUCTS", label="View Products →", target="product-cases"),
+        ]
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": [],
+            "source_type": SourceType.FAST_LOCAL,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(active_product_id=None, active_product_name=None, verified=False),
+        }
+
+    # Branch 2: Ambiguous
+    if status == ProductResolutionStatus.AMBIGUOUS:
+        bullets = "\n".join([f"• **{c.name}**" for c in ambiguous_cases])
+        if in_hinglish:
+            answer = (
+                f"Aapki query se milte-julte multiple products mile hain:\n\n{bullets}\n\n"
+                "Aap kis product ke baare mein janna chahte hain? Kripya pura naam batayein."
+            )
+        elif in_hindi:
+            answer = (
+                f"आपकी खोज से मिलते-जुलते कई उत्पाद मिले हैं:\n\n{bullets}\n\n"
+                "आप किस उत्पाद के बारे में जानना चाहते हैं? कृपया पूरा नाम बताएं।"
+            )
+        else:
+            answer = (
+                f"Found multiple products matching your query:\n\n{bullets}\n\n"
+                "Which product would you like to know about? Please specify the exact name."
+            )
+        actions = [
+            AssistantAction(
+                id="SELECT_PRODUCT",
+                label=f"Tell me about {c.name} →",
+                target="product-cases",
+                product_id=str(c.public_id or c.id),
+            )
+            for c in ambiguous_cases[:3]
+        ]
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": [],
+            "source_type": SourceType.FAST_LOCAL,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(active_product_id=None, active_product_name=None, verified=False),
+        }
+
+    # Branch 3: No Product Specified / No active product
+    if status == ProductResolutionStatus.NO_PRODUCT_SPECIFIED:
+        if in_hinglish:
+            answer = (
+                "Aapka koi active product currently selected nahi hai.\n\n"
+                "Kripya inventory se product select karein ya product ka naam batayein (jaise: *'Tell me about Ashwagandha Calm & Restore Capsules'*)."
+            )
+        elif in_hindi:
+            answer = (
+                "वर्तमान में कोई सक्रिय उत्पाद चयनित नहीं है।\n\n"
+                "कृपया इन्वेंटरी से एक उत्पाद चुनें या उसका नाम बताएं।"
+            )
+        else:
+            answer = (
+                "You don't have an active product selected currently.\n\n"
+                "Please select a product from your inventory or mention its name (for example: *'Tell me about Ashwagandha Calm & Restore Capsules'*)."
+            )
+        actions = [
+            AssistantAction(id="OPEN_PRODUCTS", label="View Products →", target="product-cases"),
+            AssistantAction(id="CREATE_PRODUCT", label="Create Product →", target="passport-wizard"),
+        ]
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": [],
+            "source_type": SourceType.FAST_LOCAL,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(active_product_id=None, active_product_name=None, verified=False),
+        }
+
+    # Branch 4: Product Case is Resolved!
+    prod_id = str(case.public_id or case.id)
+    prod_name = case.name
+    ingredients = parse_case_ingredients(case)
+    sources = [f"Product: {prod_name}"]
+
+    actions = [
+        AssistantAction(id="OPEN_PRODUCT", label=f"Open {prod_name} →", target="product-cases", product_id=prod_id),
+        AssistantAction(id="OPEN_PATENT", label=f"Patent Intelligence for {prod_name} →", target="patent-intelligence", product_id=prod_id),
+        AssistantAction(id="OPEN_REGULATORY", label=f"Regulatory Intelligence for {prod_name} →", target="regulatory-intelligence", product_id=prod_id),
+    ]
+
+    # Inquiry 4A: Description Generation
+    if any(k in q_lower for k in ["description", "vivaran"]):
+        is_elaborate = any(k in q_lower for k in ["more professional", "detailed and professional", "elaborate", "refine with ai", "richer"])
+        if is_elaborate and os.getenv("GEMINI_API_KEY"):
+            prompt = (
+                f"You are AYUSH, the botanical intelligence assistant for AYUR-INTEL. "
+                f"Write a polished 3-4 sentence professional product profile for '{prod_name}' using ONLY the following facts:\n"
+                f"- Name: {prod_name}\n"
+                f"- Form: {case.form or 'botanical formulation'}\n"
+                f"- Ingredients: {', '.join([i.get('name', '') for i in ingredients if i.get('name')])}\n"
+                f"- Intended Use: {case.intended_use or 'wellness'}\n"
+                f"- Process: {case.process or 'standardized extraction'}\n"
+                f"Rules: Do NOT invent medicinal claims, efficacy guarantees, or unseen ingredients. "
+                f"Respond in {'Hinglish (Roman Hindi)' if in_hinglish else 'English'}."
+            )
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+                model = genai.GenerativeModel("gemini-flash-latest")
+                resp = model.generate_content(prompt, request_options={"timeout": 4.0})
+                answer = sanitize_output(resp.text.strip())
+                source_type = SourceType.GEMINI
+            except Exception:
+                answer = generate_local_product_description(case, detected_lang)
+                source_type = SourceType.FAST_LOCAL
+        else:
+            answer = generate_local_product_description(case, detected_lang)
+            source_type = SourceType.FAST_LOCAL
+
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": sources,
+            "source_type": source_type,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(active_product_id=prod_id, active_product_name=prod_name, verified=True),
+        }
+
+    # Inquiry 4B: Specific Ingredient Quantity
+    qty_tokens = ["quantity", "kitni quantity", "kitna", "amount", "dose", "mg", "how much", "matra"]
+    if any(q in q_lower for q in qty_tokens):
+        matched_ing = None
+        for ing in ingredients:
+            ing_n = ing.get("name", "").lower()
+            ing_b = ing.get("botanical", "").lower()
+            if (ing_n and ing_n in q_lower) or (ing_b and ing_b in q_lower):
+                matched_ing = ing
+                break
+
+        if matched_ing:
+            i_name = matched_ing.get("name", "Unknown")
+            i_bot = matched_ing.get("botanical")
+            i_qty = matched_ing.get("quantity")
+            i_std = matched_ing.get("standardization")
+            if i_qty:
+                if in_hinglish:
+                    answer = f"**{prod_name}** mein **{i_name}**{f' (*{i_bot}*)' if i_bot else ''} ki quantity **{i_qty}**{f' ({i_std})' if i_std else ''} darj hai."
+                elif in_hindi:
+                    answer = f"**{prod_name}** में **{i_name}**{f' (*{i_bot}*)' if i_bot else ''} की मात्रा **{i_qty}**{f' ({i_std})' if i_std else ''} दर्ज है।"
+                else:
+                    answer = f"In **{prod_name}**, the recorded quantity of **{i_name}**{f' (*{i_bot}*)' if i_bot else ''} is **{i_qty}**{f' ({i_std})' if i_std else ''}."
+            else:
+                if in_hinglish:
+                    answer = f"**{i_name}** is product mein darj hai, lekin is product mein ye information abhi add nahi ki gayi hai (quantity darj nahi hai)."
+                elif in_hindi:
+                    answer = f"**{i_name}** इस उत्पाद में दर्ज है, लेकिन इस उत्पाद में मात्रा की जानकारी अभी जोड़ी नहीं गई है।"
+                else:
+                    answer = f"**{i_name}** is listed as an ingredient in **{prod_name}**, but this information has not been added to this product yet (quantity is unrecorded)."
+            return {
+                "answer": answer,
+                "actions": actions,
+                "sources": sources,
+                "source_type": SourceType.FAST_LOCAL,
+                "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+                "product_context": ProductContextInfo(active_product_id=prod_id, active_product_name=prod_name, verified=True),
+            }
+        else:
+            herb_words = [w for w in re.findall(r"\w+", q_lower) if len(w) > 4 and w not in STOP_WORDS and w not in qty_tokens and w not in ["product", "isme", "kitni", "quantity", "used", "plus"]]
+            if herb_words:
+                unlisted_herb = herb_words[0].capitalize()
+                if in_hinglish:
+                    answer = f"**{prod_name}** ke ingredients mein **{unlisted_herb}** shamil nahi hai."
+                elif in_hindi:
+                    answer = f"**{prod_name}** के घटकों में **{unlisted_herb}** शामिल नहीं है।"
+                else:
+                    answer = f"**{unlisted_herb}** is not listed in the ingredients for **{prod_name}**."
+                return {
+                    "answer": answer,
+                    "actions": actions,
+                    "sources": sources,
+                    "source_type": SourceType.FAST_LOCAL,
+                    "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+                    "product_context": ProductContextInfo(active_product_id=prod_id, active_product_name=prod_name, verified=True),
+                }
+
+    # Inquiry 4C: All Ingredients
+    if any(k in q_lower for k in ["ingredient", "ghatak", "samagri", "what did i use", "what is in", "kya dala", "kya use", "composition"]):
+        if ingredients:
+            bullets = []
+            for item in ingredients:
+                n = item.get("name", "Unknown")
+                b = item.get("botanical")
+                q = item.get("quantity")
+                s = item.get("standardization")
+                line = f"• **{n}**"
+                if b:
+                    line += f" (*{b}*)"
+                if q:
+                    line += f": {q}"
+                if s:
+                    line += f" — {s}"
+                bullets.append(line)
+            bullet_text = "\n".join(bullets)
+            if in_hinglish:
+                answer = f"**{prod_name}** mein yeh ingredients ({len(ingredients)} dravya) darj hain:\n\n{bullet_text}"
+            elif in_hindi:
+                answer = f"**{prod_name}** में निम्नलिखित घटक ({len(ingredients)} द्रव्य) दर्ज हैं:\n\n{bullet_text}"
+            else:
+                answer = f"The ingredients recorded for **{prod_name}** ({len(ingredients)} items) are:\n\n{bullet_text}"
+        else:
+            if in_hinglish:
+                answer = f"Is product mein ye information abhi add nahi ki gayi hai. **{prod_name}** mein abhi koi ingredients darj nahi hain."
+            elif in_hindi:
+                answer = f"इस उत्पाद में यह जानकारी अभी जोड़ी नहीं गई है। **{prod_name}** में अभी कोई घटक दर्ज नहीं हैं।"
+            else:
+                answer = f"This information has not been added to this product yet. No ingredients are currently recorded for **{prod_name}**."
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": sources,
+            "source_type": SourceType.FAST_LOCAL,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(active_product_id=prod_id, active_product_name=prod_name, verified=True),
+        }
+
+    # Inquiry 4D: Intended Use
+    if any(k in q_lower for k in ["intended use", "intended_use", "purpose", "upayog", "kiske liye", "kya use", "kis kaam"]):
+        if case.intended_use and case.intended_use.strip():
+            u = case.intended_use.strip()
+            if in_hinglish:
+                answer = f"**{prod_name}** ka intended use yeh darj hai:\n\n> {u}"
+            elif in_hindi:
+                answer = f"**{prod_name}** का अभिप्रेत उपयोग यह दर्ज है:\n\n> {u}"
+            else:
+                answer = f"The recorded intended use for **{prod_name}** is:\n\n> {u}"
+        else:
+            if in_hinglish:
+                answer = f"Is product mein ye information abhi add nahi ki gayi hai. **{prod_name}** ka intended use abhi add nahi kiya gaya hai."
+            elif in_hindi:
+                answer = f"इस उत्पाद में यह जानकारी अभी जोड़ी नहीं गई है।"
+            else:
+                answer = f"This information has not been added to this product yet. The intended use has not been specified for **{prod_name}**."
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": sources,
+            "source_type": SourceType.FAST_LOCAL,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(active_product_id=prod_id, active_product_name=prod_name, verified=True),
+        }
+
+    # Inquiry 4E: Preparation Method / Process
+    if any(k in q_lower for k in ["preparation", "process", "kaise banta", "kaise banate", "how is this product prepared", "how is it made", "manufacturing", "method", "vidhi"]):
+        if case.process and case.process.strip():
+            p = case.process.strip()
+            if in_hinglish:
+                answer = f"**{prod_name}** ka preparation method aur manufacturing process yeh darj hai:\n\n{p}"
+            elif in_hindi:
+                answer = f"**{prod_name}** की निर्माण विधि और प्रक्रिया यह दर्ज है:\n\n{p}"
+            else:
+                answer = f"The recorded preparation method and manufacturing process for **{prod_name}** is:\n\n{p}"
+        else:
+            if in_hinglish:
+                answer = f"Is product mein ye information abhi add nahi ki gayi hai. **{prod_name}** ka preparation method abhi darj nahi kiya gaya hai."
+            elif in_hindi:
+                answer = f"इस उत्पाद में यह जानकारी अभी जोड़ी नहीं गई है।"
+            else:
+                answer = f"This information has not been added to this product yet. The preparation method has not been recorded for **{prod_name}**."
+        return {
+            "answer": answer,
+            "actions": actions,
+            "sources": sources,
+            "source_type": SourceType.FAST_LOCAL,
+            "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "product_context": ProductContextInfo(active_product_id=prod_id, active_product_name=prod_name, verified=True),
+        }
+
+    # Inquiry 4F: General Overview / Default Product Summary
+    ings_summary = f"{len(ingredients)} recorded" if ingredients else "None recorded yet"
+    use_summary = case.intended_use.strip() if case.intended_use else "Not added yet"
+    proc_summary = (case.process.strip()[:100] + "...") if case.process else "Not added yet"
+
+    if in_hinglish:
+        answer = (
+            f"**{prod_name}** ka stored Product Passport overview yeh hai:\n\n"
+            f"• **Form / Stage**: {case.form or 'Botanic'} | {case.stage or 'IDEA'}\n"
+            f"• **Intended Use**: {use_summary}\n"
+            f"• **Ingredients**: {ings_summary}\n"
+            f"• **Manufacturing**: {proc_summary}\n\n"
+            "Aap mujhse iske ingredients, quantities, ya *'Is product ki description bana do'* puch sakte hain."
+        )
+    elif in_hindi:
+        answer = (
+            f"**{prod_name}** का प्रोडक्ट पासपोर्ट विवरण:\n\n"
+            f"• **श्रेणी / चरण**: {case.form or 'Botanic'} | {case.stage or 'IDEA'}\n"
+            f"• **उपयोग**: {use_summary}\n"
+            f"• **घटक**: {ings_summary}\n"
+            f"• **प्रक्रिया**: {proc_summary}"
+        )
+    else:
+        answer = (
+            f"Here is the stored Product Passport profile for **{prod_name}**:\n\n"
+            f"• **Form / Stage**: {case.form or 'Botanical formulation'} | Stage: {case.stage or 'IDEA'}\n"
+            f"• **Intended Use**: {use_summary}\n"
+            f"• **Ingredients**: {ings_summary}\n"
+            f"• **Preparation Process**: {proc_summary}\n\n"
+            "You can ask me about specific ingredient quantities, manufacturing details, or say *'Give me a short product description'*."
+        )
+
+    return {
+        "answer": answer,
+        "actions": actions,
+        "sources": sources,
+        "source_type": SourceType.FAST_LOCAL,
+        "server_processing_ms": round((time.perf_counter() - t0) * 1000, 2),
+        "product_context": ProductContextInfo(active_product_id=prod_id, active_product_name=prod_name, verified=True),
+    }
+
+
 def process_assistant_chat(
     db: Session,
     message: str,
@@ -1349,11 +2013,12 @@ def process_assistant_chat(
     2. Verify active product context against DB
     3. Detect query language per message
     4. Classify intent and resolve follow-ups
-    5. Check FAST LOCAL path (casual, self-knowledge, identity, boundaries, product context, navigation)
+    5. Check PRODUCT-AWARE FAST PATH (<25ms, NO Gemini)
+    6. Check FAST LOCAL path (casual, self-knowledge, identity, boundaries, product context, navigation)
        -> If YES: return instant response immediately (<50ms, NO Gemini, NO external network)
-    6. Check FAST RAG path (high-confidence direct canonical factual questions)
+    7. Check FAST RAG path (high-confidence direct canonical factual questions)
        -> If YES: return grounded deterministic response immediately (<50ms, NO Gemini)
-    7. GEMINI (LAST reasoning layer for complex multi-feature synthesis with 4.0s timeout)
+    8. GEMINI (LAST reasoning layer for complex multi-feature synthesis with 4.0s timeout)
     """
     t0 = time.perf_counter()
 
@@ -1394,6 +2059,20 @@ def process_assistant_chat(
         intent = classify_intent(effective_query, None)
         if intent == MessageIntent.FOLLOW_UP:
             intent = MessageIntent.DOMAIN_KNOWLEDGE
+
+    # -------------------------------------------------------------------------
+    # 0. PRODUCT-AWARE FAST PATH
+    # -------------------------------------------------------------------------
+    if is_product_case_query(effective_query, db, eff_prod_id):
+        return handle_product_query(
+            db=db,
+            query=effective_query,
+            history=history,
+            active_product_id=eff_prod_id,
+            active_product_name=eff_prod_name,
+            detected_lang=detected_lang,
+            t0=t0,
+        )
 
     # -------------------------------------------------------------------------
     # 1. FAST LOCAL PATH

@@ -330,7 +330,60 @@ class TestBrowserAssistant(unittest.TestCase):
         }""")
         self.assertTrue(is_scrollable, "Conversation container must be scrollable after multiple messages")
 
-        # 21. Verify zero console errors
+        # 22. Scroll Isolation Verification: CSS Containment & Wheel Guard
+        scroll_containment = page.evaluate("""() => {
+            const el = document.getElementById('assistant-conversation');
+            const style = window.getComputedStyle(el);
+            return {
+                overscrollBehaviorY: style.overscrollBehaviorY,
+                overscrollBehavior: style.overscrollBehavior
+            };
+        }""")
+        self.assertTrue(
+            "contain" in scroll_containment["overscrollBehaviorY"] or "contain" in scroll_containment["overscrollBehavior"],
+            f"Expected overscroll-behavior: contain on assistant-conversation, got {scroll_containment}"
+        )
+
+        # Verify wheel boundary guard: Scrolling at top or bottom does NOT scroll the main page
+        initial_body_scroll = page.evaluate("() => window.scrollY")
+        page.evaluate("""() => {
+            const el = document.getElementById('assistant-conversation');
+            el.scrollTop = 0;
+            // Dispatch upward wheel event at top
+            const evt = new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true });
+            el.dispatchEvent(evt);
+        }""")
+        body_scroll_after_top = page.evaluate("() => window.scrollY")
+        self.assertEqual(initial_body_scroll, body_scroll_after_top, "Upward wheel at top of assistant must not scroll page")
+
+        # Scroll assistant to bottom and dispatch downward wheel event
+        page.evaluate("""() => {
+            const el = document.getElementById('assistant-conversation');
+            el.scrollTop = el.scrollHeight;
+            const evt = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true });
+            el.dispatchEvent(evt);
+        }""")
+        body_scroll_after_bottom = page.evaluate("() => window.scrollY")
+        self.assertEqual(initial_body_scroll, body_scroll_after_bottom, "Downward wheel at bottom of assistant must not scroll page")
+
+        # 23. Browser Product-Aware Q&A: Ingredients and Short Description
+        # Ask for ingredients of active/demo product
+        assistant_count += 1
+        input_el.fill("Is product mein kya ingredients hain?")
+        input_el.press("Enter")
+        page.wait_for_function(f"() => document.querySelectorAll('.assistant-message-row.assistant').length >= {assistant_count}", timeout=4000)
+        prod_ings_ans = page.locator(".assistant-message-row.assistant").last.inner_text().lower()
+        self.assertTrue("ashwagandha" in prod_ings_ans or "ingredients" in prod_ings_ans or "selected" in prod_ings_ans)
+
+        # Ask for short description of active/demo product
+        assistant_count += 1
+        input_el.fill("Iski short description bana do")
+        input_el.press("Enter")
+        page.wait_for_function(f"() => document.querySelectorAll('.assistant-message-row.assistant').length >= {assistant_count}", timeout=4000)
+        prod_desc_ans = page.locator(".assistant-message-row.assistant").last.inner_text()
+        self.assertTrue(len(prod_desc_ans) > 30, "Expected a grounded short description response")
+
+        # 24. Verify zero console errors
         critical_errors = [e for e in self.console_errors if "favicon" not in e.lower() and "404" not in e.lower()]
         self.assertEqual(len(critical_errors), 0, f"Encountered browser console errors: {critical_errors}")
 

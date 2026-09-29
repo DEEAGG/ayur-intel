@@ -62,6 +62,10 @@ class TestAssistantRAG(unittest.IsolatedAsyncioTestCase):
             name="Brahmi Mind Syrup",
             stage="RND",
             status="DRAFT",
+            form="Syrup",
+            intended_use="Cognitive wellness & memory support",
+            process="Traditional decoction method with controlled cooling",
+            ingredients='[{"name": "Brahmi", "botanical": "Bacopa monnieri", "quantity": "250 mg", "standardization": "20% Bacosides"}, {"name": "Shankhpushpi", "botanical": "Convolvulus pluricaulis", "quantity": "100 mg"}]'
         )
         self.case_b = ProductCase(
             id=102,
@@ -70,6 +74,10 @@ class TestAssistantRAG(unittest.IsolatedAsyncioTestCase):
             name="Ashwagandha Stress Relief Capsule",
             stage="COMMERCIAL",
             status="COMPLETED",
+            form="Capsule",
+            intended_use="Stress relief and restorative vitality",
+            process="Hydro-ethanolic extraction followed by encapsulation",
+            ingredients='[{"name": "Ashwagandha", "botanical": "Withania somnifera", "quantity": "500 mg", "standardization": "5% Withanolides"}]'
         )
         self.db.add_all([self.case_a, self.case_b])
         self.db.commit()
@@ -581,6 +589,215 @@ class TestAssistantRAG(unittest.IsolatedAsyncioTestCase):
                 res["server_processing_ms"], 100.0,
                 f"Fast path for query '{q}' took {res['server_processing_ms']}ms, expected <100ms"
             )
+
+    # -------------------------------------------------------------------------
+    # 7. Product-Aware Q&A, Grounded Attributes & Description Tests
+    # -------------------------------------------------------------------------
+    def test_48_query_product_explicit_name(self):
+        # Explicit product name mentioned in message
+        res = process_assistant_chat(self.db, "Tell me about Brahmi Mind Syrup", current_view="dashboard")
+        self.assertEqual(res["source_type"], "FAST_LOCAL")
+        self.assertIn("Brahmi Mind Syrup", res["answer"])
+        self.assertIn("Syrup", res["answer"])
+        self.assertEqual(res["product_context"].active_product_name, "Brahmi Mind Syrup")
+
+    def test_49_query_active_product_intended_use_and_process(self):
+        # Queries using active product context
+        res_use = process_assistant_chat(
+            self.db,
+            "Is product ka intended use kya hai?",
+            active_product_id="case-brahmi-101",
+            active_product_name="Brahmi Mind Syrup",
+        )
+        self.assertEqual(res_use["source_type"], "FAST_LOCAL")
+        self.assertIn("Cognitive wellness & memory support", res_use["answer"])
+
+        res_proc = process_assistant_chat(
+            self.db,
+            "How is this product prepared?",
+            active_product_id="case-brahmi-101",
+            active_product_name="Brahmi Mind Syrup",
+        )
+        self.assertEqual(res_proc["source_type"], "FAST_LOCAL")
+        self.assertIn("Traditional decoction method", res_proc["answer"])
+
+    def test_50_product_ingredients_and_quantities(self):
+        # Ingredients list
+        res_ings = process_assistant_chat(
+            self.db,
+            "Brahmi Mind Syrup mein kya ingredients hain?",
+            current_view="dashboard",
+        )
+        self.assertEqual(res_ings["source_type"], "FAST_LOCAL")
+        self.assertIn("Brahmi", res_ings["answer"])
+        self.assertIn("Shankhpushpi", res_ings["answer"])
+        self.assertIn("250 mg", res_ings["answer"])
+
+        # Specific quantity inquiry
+        res_qty = process_assistant_chat(
+            self.db,
+            "Isme kitni quantity Brahmi use hui hai?",
+            active_product_id="case-brahmi-101",
+            active_product_name="Brahmi Mind Syrup",
+        )
+        self.assertEqual(res_qty["source_type"], "FAST_LOCAL")
+        self.assertIn("250 mg", res_qty["answer"])
+        self.assertIn("Brahmi", res_qty["answer"])
+
+    def test_51_product_missing_field_message(self):
+        # Create case without intended use or process
+        sparse_case = ProductCase(
+            id=103,
+            public_id="case-sparse-103",
+            owner_id=1,
+            name="Neem Purifying Oil",
+            stage="IDEA",
+            status="DRAFT",
+            intended_use=None,
+            process=None,
+        )
+        self.db.add(sparse_case)
+        self.db.commit()
+
+        res = process_assistant_chat(
+            self.db,
+            "Is product ka intended use kya hai?",
+            active_product_id="case-sparse-103",
+            active_product_name="Neem Purifying Oil",
+        )
+        self.assertIn("ye information abhi add nahi ki gayi hai", res["answer"].lower())
+
+    def test_52_nonexistent_product_handled_cleanly(self):
+        # Explicit search for a product that does not exist in DB
+        res = process_assistant_chat(
+            self.db,
+            "Tell me about Chyawanprash Deluxe",
+            current_view="dashboard",
+        )
+        self.assertEqual(res["source_type"], "FAST_LOCAL")
+        self.assertIn("Chyawanprash Deluxe", res["answer"])
+        self.assertTrue(
+            "nahi mila" in res["answer"].lower() or "couldn't find" in res["answer"].lower(),
+            "Nonexistent product must be clearly stated as not found",
+        )
+        # Verify action to create product in wizard is offered
+        action_ids = [a.id for a in res["actions"]]
+        self.assertIn("CREATE_PRODUCT", action_ids)
+
+    def test_53_ambiguous_product_names(self):
+        # Add a second case sharing name token 'Ashwagandha'
+        ashwa_two = ProductCase(
+            id=104,
+            public_id="case-ashwa-gold-104",
+            owner_id=1,
+            name="Ashwagandha Gold Tablet",
+            stage="IDEA",
+            status="DRAFT",
+        )
+        self.db.add(ashwa_two)
+        self.db.commit()
+
+        # Asking generally for Ashwagandha when two exist
+        res = process_assistant_chat(
+            self.db,
+            "Tell me about Ashwagandha",
+            current_view="dashboard",
+        )
+        self.assertEqual(res["source_type"], "FAST_LOCAL")
+        self.assertTrue(
+            "multiple products" in res["answer"].lower() or "multiple" in res["answer"].lower(),
+            "Ambiguous products should ask user for clarification",
+        )
+        self.assertIn("Ashwagandha Stress Relief Capsule", res["answer"])
+        self.assertIn("Ashwagandha Gold Tablet", res["answer"])
+
+    def test_54_product_isolation_security(self):
+        # Product belonging to another user (not demo) must never be accessible
+        foreign_user = User(
+            id=999,
+            email="other@company.com",
+            username="other_researcher",
+            hashed_password="pw",
+            display_name="Other",
+        )
+        self.db.add(foreign_user)
+        self.db.commit()
+
+        secret_case = ProductCase(
+            id=999,
+            public_id="case-secret-999",
+            owner_id=999,
+            name="Secret Proprietary Elixir",
+            stage="RND",
+            status="DRAFT",
+            is_demo=False,
+            ingredients='[{"name": "Rare Herb", "quantity": "10 mg"}]',
+        )
+        self.db.add(secret_case)
+        self.db.commit()
+
+        # Querying the secret product should report NOT_FOUND
+        res = process_assistant_chat(
+            self.db,
+            "Tell me about Secret Proprietary Elixir",
+            current_view="dashboard",
+        )
+        self.assertNotIn("Rare Herb", res["answer"])
+        self.assertTrue(
+            "nahi mila" in res["answer"].lower() or "couldn't find" in res["answer"].lower(),
+            "Foreign private case must never be revealed",
+        )
+
+    def test_55_short_description_generation_grounded(self):
+        # Test short description generation from stored structured data
+        res = process_assistant_chat(
+            self.db,
+            "Is product ki description bana do",
+            active_product_id="case-brahmi-101",
+            active_product_name="Brahmi Mind Syrup",
+        )
+        self.assertEqual(res["source_type"], "FAST_LOCAL")
+        ans = res["answer"]
+        # Grounded facts
+        self.assertIn("Brahmi Mind Syrup", ans)
+        self.assertIn("Syrup", ans)
+        self.assertIn("Cognitive wellness & memory support", ans)
+        self.assertIn("Brahmi", ans)
+        # Must not hallucinate unseen herbs
+        self.assertNotIn("Turmeric", ans)
+        self.assertNotIn("Ashwagandha", ans)
+        self.assertNotIn("100% cure", ans)
+        # Must be concise: approximately 2-4 sentences
+        sentences = [s.strip() for s in ans.split(".") if s.strip()]
+        self.assertGreaterEqual(len(sentences), 2)
+        self.assertLessEqual(len(sentences), 5)
+
+    def test_56_product_fast_path_latency_and_zero_gemini(self):
+        # Product factual queries must run in FAST_LOCAL without invoking Gemini
+        with patch("api.services.assistant_service.generate_gemini_answer") as mock_gemini:
+            res = process_assistant_chat(
+                self.db,
+                "What ingredients did I use in Brahmi Mind Syrup?",
+                current_view="dashboard",
+            )
+            self.assertEqual(mock_gemini.call_count, 0, "Factual product queries must not invoke Gemini")
+            self.assertEqual(res["source_type"], "FAST_LOCAL")
+            self.assertIn("server_processing_ms", res)
+            self.assertLess(res["server_processing_ms"], 100.0)
+
+    def test_57_no_active_product_handles_anaphora_gracefully(self):
+        # Query referring to 'is product' when no product is active
+        res = process_assistant_chat(
+            self.db,
+            "Is product ka intended use kya hai?",
+            active_product_id=None,
+            active_product_name=None,
+        )
+        self.assertEqual(res["source_type"], "FAST_LOCAL")
+        self.assertTrue(
+            "active product" in res["answer"].lower() or "selected nahi hai" in res["answer"].lower(),
+            "Should inform user to select or name a product",
+        )
 
 
 if __name__ == "__main__":
