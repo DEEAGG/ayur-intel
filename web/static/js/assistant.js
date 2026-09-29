@@ -261,9 +261,11 @@
     trigger.className = "ayur-assistant-trigger";
     trigger.setAttribute("aria-label", "Ask AYUSH Assistant");
     trigger.setAttribute("type", "button");
-    trigger.title = "Ask AYUSH";
     trigger.innerHTML = '<span class="assistant-trigger-leaf">🌿</span>'
-      + '<span class="assistant-trigger-text">AYUSH</span>';
+      + '<span class="assistant-trigger-content">'
+      + '<span class="assistant-trigger-title">AYUSH</span>'
+      + '<span class="assistant-trigger-sub">(Assistant)</span>'
+      + '</span>';
 
     // 2. Main assistant panel
     var panel = document.createElement("div");
@@ -438,7 +440,11 @@
     // 3. Create flying clone
     var flying = document.createElement("div");
     flying.className = "ayush-flying-clone";
-    flying.innerHTML = '<span class="assistant-trigger-leaf">🌿</span><span class="assistant-trigger-text">AYUSH</span>';
+    flying.innerHTML = '<span class="assistant-trigger-leaf">🌿</span>'
+      + '<span class="assistant-trigger-content">'
+      + '<span class="assistant-trigger-title">AYUSH</span>'
+      + '<span class="assistant-trigger-sub">(Assistant)</span>'
+      + '</span>';
     flying.style.left = startRect.left + "px";
     flying.style.top = startRect.top + "px";
     flying.style.width = startRect.width + "px";
@@ -514,7 +520,11 @@
 
     var flying = document.createElement("div");
     flying.className = "ayush-flying-clone";
-    flying.innerHTML = '<span class="assistant-trigger-leaf">🌿</span><span class="assistant-trigger-text">AYUSH</span>';
+    flying.innerHTML = '<span class="assistant-trigger-leaf">🌿</span>'
+      + '<span class="assistant-trigger-content">'
+      + '<span class="assistant-trigger-title">AYUSH</span>'
+      + '<span class="assistant-trigger-sub">(Assistant)</span>'
+      + '</span>';
     flying.style.left = startRect.left + "px";
     flying.style.top = startRect.top + "px";
     flying.style.width = startRect.width + "px";

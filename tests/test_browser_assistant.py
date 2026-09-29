@@ -102,10 +102,11 @@ class TestBrowserAssistant(unittest.TestCase):
             if (overlay) overlay.style.display = 'none';
         }""")
 
-        # 1. Verify Floating Trigger Button (AYUSH)
+        # 1. Verify Floating Trigger Button (AYUSH with subtle (Assistant) subtitle)
         trigger = page.locator("#ayur-assistant-trigger")
         self.assertTrue(trigger.is_visible(), "Trigger button must be visible")
         self.assertIn("AYUSH", trigger.inner_text())
+        self.assertIn("(Assistant)", trigger.inner_text())
 
         # 2. Click to open Assistant Panel
         trigger.click()
@@ -131,11 +132,12 @@ class TestBrowserAssistant(unittest.TestCase):
         self.assertTrue(hide_btn.is_visible(), "Hide button must exist in header")
         hide_btn.click()
 
-        # Verify intermediate FLYING element appears during the flight
+        # Verify intermediate FLYING element appears during the flight and preserves identity
         page.wait_for_selector(".ayush-flying-clone", state="visible", timeout=1200)
         flying_clone = page.locator(".ayush-flying-clone")
         self.assertTrue(flying_clone.is_visible(), "Intermediate flying AYUSH element must be physically visible during flight")
         self.assertIn("AYUSH", flying_clone.inner_text())
+        self.assertIn("(Assistant)", flying_clone.inner_text())
 
         # Wait for flight to complete (flying clone is removed, docked button settles)
         page.wait_for_selector(".ayush-flying-clone", state="detached", timeout=3000)
@@ -148,16 +150,18 @@ class TestBrowserAssistant(unittest.TestCase):
         # 5. Test Restore Control (Smooth flight animation from navbar back to bottom-right)
         dock_btn.click()
 
-        # Verify intermediate FLYING element appears during restore flight
+        # Verify intermediate FLYING element appears during restore flight and preserves identity
         page.wait_for_selector(".ayush-flying-clone", state="visible", timeout=1200)
         flying_back = page.locator(".ayush-flying-clone")
         self.assertTrue(flying_back.is_visible(), "Intermediate flying AYUSH element must be visible during restore flight")
         self.assertIn("AYUSH", flying_back.inner_text())
+        self.assertIn("(Assistant)", flying_back.inner_text())
 
         # Wait for restore flight to complete (flying clone removed, floating trigger back)
         page.wait_for_selector(".ayush-flying-clone", state="detached", timeout=3000)
         page.wait_for_selector("#ayur-assistant-trigger", state="visible", timeout=2000)
         self.assertTrue(trigger.is_visible(), "Floating AYUSH button must be visible bottom-right after restore")
+        self.assertIn("(Assistant)", trigger.inner_text())
         self.assertFalse(dock_btn.is_visible(), "Docked topbar button must be hidden after restore")
 
         # Re-open chat panel
