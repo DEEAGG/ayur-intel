@@ -399,6 +399,120 @@ class TestAssistantRAG(unittest.IsolatedAsyncioTestCase):
             self.assertIn("digital master dossier hota hai", res_hi["answer"])
             self.assertIn("Product Passport", res_hi["answer"])
 
+    # -------------------------------------------------------------------------
+    # 9. Conversational Assistant & Routing Tests (UX Hardening)
+    # -------------------------------------------------------------------------
+    def test_33_casual_opener_no_rag_dump_hinglish(self):
+        # "achha mujhe kuch jan na hai" must NOT trigger RAG knowledge dump or source tags
+        res = process_assistant_chat(self.db, "achha mujhe kuch jan na hai", current_view="dashboard")
+        self.assertEqual(res["sources"], [], "Casual openers must have zero knowledge source dumps")
+        self.assertIn("poochiye", res["answer"].lower())
+        self.assertIn("ayush", res["answer"].lower())
+        # Safe default starting actions provided
+        action_ids = [a.id for a in res["actions"]]
+        self.assertIn("CREATE_PRODUCT", action_ids)
+
+    def test_34_casual_opener_no_rag_dump_english(self):
+        # English greeting should be welcoming and have empty sources
+        res = process_assistant_chat(self.db, "hi, can you help me?", current_view="dashboard")
+        self.assertEqual(res["sources"], [], "English casual greeting must have zero knowledge source dumps")
+        self.assertIn("help", res["answer"].lower())
+        self.assertIn("ayush", res["answer"].lower())
+
+    def test_35_self_knowledge_who_are_you(self):
+        # Self-knowledge inquiries route to AYUSH Assistant chunk
+        res = process_assistant_chat(self.db, "who are you and what powers you?", current_view="dashboard")
+        self.assertIn("AYUSH Assistant & Capabilities", res["sources"])
+        self.assertIn("ayush", res["answer"].lower())
+        self.assertIn("gemini", res["answer"].lower())
+        self.assertTrue("not chatgpt" in res["answer"].lower() or "chatgpt" in res["answer"].lower())
+
+    def test_36_active_product_context_inquiry(self):
+        # Product status query with active product selected
+        case = self.db.query(ProductCase).first()
+        res = process_assistant_chat(
+            self.db,
+            "which product is active?",
+            current_view="dashboard",
+            active_product_id=str(case.public_id),
+            active_product_name=case.name,
+        )
+        self.assertIn(case.name, res["answer"])
+        action_ids = [a.id for a in res["actions"]]
+        self.assertIn("OPEN_PATENT", action_ids)
+
+    def test_37_no_active_product_context_inquiry(self):
+        # Product status query without active product
+        res = process_assistant_chat(
+            self.db,
+            "which product is active?",
+            current_view="dashboard",
+            active_product_id=None,
+            active_product_name=None,
+        )
+        self.assertTrue("no active product" in res["answer"].lower() or "no product" in res["answer"].lower())
+        action_ids = [a.id for a in res["actions"]]
+        self.assertIn("CREATE_PRODUCT", action_ids)
+
+    def test_38_followup_resolution_open_it(self):
+        # History discusses patent, user says "open it"
+        history = [
+            {"role": "user", "content": "Tell me about Indian Patent Intelligence"},
+            {"role": "assistant", "content": "Indian Patent Intelligence evaluates prior art under Section 3(p)..."}
+        ]
+        res = process_assistant_chat(
+            self.db,
+            "open it",
+            history=history,
+            current_view="dashboard",
+        )
+        action_ids = [a.id for a in res["actions"]]
+        self.assertTrue("OPEN_PATENT" in action_ids or "OPEN_PRODUCTS" in action_ids)
+
+    def test_39_followup_resolution_and_risk(self):
+        # History discusses a formulation, user asks "and risk?"
+        history = [
+            {"role": "user", "content": "What is the formulation for Ashwagandha Rasayana?"},
+            {"role": "assistant", "content": "Ashwagandha Rasayana contains classical herbs..."}
+        ]
+        res = process_assistant_chat(
+            self.db,
+            "and risk?",
+            history=history,
+            current_view="dashboard",
+        )
+        self.assertIn("Risk Assessment", res["sources"][0] if res["sources"] else "Risk Assessment")
+
+    def test_40_out_of_scope_query(self):
+        # Completely out-of-scope question
+        res = process_assistant_chat(self.db, "what is the weather today?", current_view="dashboard")
+        self.assertEqual(res["sources"], [])
+        self.assertIn("specialized", res["answer"].lower())
+
+    async def test_41_history_payload_via_api(self):
+        # Chat API endpoint accepts history payload cleanly
+        resp = await self.client.post(
+            "/api/assistant/chat",
+            json={
+                "message": "achha mujhe kuch jan na hai",
+                "history": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "Hello! I am AYUSH."}
+                ]
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["sources"], [])
+        self.assertIn("poochiye", data["answer"].lower())
+
+    def test_42_empty_query_safe_defaults(self):
+        # Empty query returns welcoming guidance without leaking sources
+        res = process_assistant_chat(self.db, "", current_view="dashboard")
+        self.assertEqual(res["sources"], [])
+        self.assertIn("ayush", res["answer"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()
+

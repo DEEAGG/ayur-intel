@@ -11,6 +11,65 @@ from typing import Any, Dict, List, Optional
 
 KNOWLEDGE_CHUNKS: List[Dict[str, Any]] = [
     {
+        "id": "kb_ayush_assistant",
+        "title": "AYUSH Assistant & Capabilities",
+        "content": (
+            "AYUSH is the official in-app AI assistant and guide for the AYUR-INTEL platform.\n"
+            "• Core Role: Helps formulation scientists, brand founders, and teams navigate the application, understand product creation, analyze Indian Patent prior-art, evaluate statutory regulatory pathways (ASU vs FSSAI), assess multi-domain risks, and monitor regulatory gazettes.\n"
+            "• Intelligence System: Uses Google Gemini for grounded conversational synthesis alongside AYUR-INTEL's verified platform knowledge base and statutory rule engines.\n"
+            "• Context Awareness: Automatically detects whichever active product case is selected in your session and scopes advice to it.\n"
+            "• In-App Actions: Provides direct clickable navigation action pills (e.g. View Products, Create Product, Open Patent Intelligence).\n"
+            "• Language Support: Naturally mirrors English, Roman Hinglish, and Hindi (Devanagari).\n"
+            "• Reliability & Boundaries: Backed by deterministic offline fallbacks. AYUSH is not ChatGPT and does not provide formal legal advice or guarantee patent approval."
+        ),
+        "tags": [
+            "ayush", "who are you", "what are you", "tum kaun ho", "tum kya ho", "tum kya karte ho",
+            "what do you do", "how can you help me", "tum meri kya help kar sakte ho", "what can i ask you",
+            "main tumse kya puch sakta hun", "are you ai", "are you a chatbot", "are you gemini", "are you chatgpt",
+            "who made you", "what powers you", "how do you work", "do you use rag", "what is your knowledge based on",
+            "can you access my product", "do you know which product i selected", "can you navigate the app",
+            "can you open my products", "can you explain patents", "can you give regulatory guidance",
+            "can you assess risk", "can you speak hindi", "can you speak hinglish", "can you speak english",
+            "what are your capabilities", "assistant", "guide", "who is ayush", "ayush identity"
+        ],
+        "related_feature": "AYUSH Assistant",
+        "default_action": "OPEN_DASHBOARD",
+    },
+    {
+        "id": "kb_platform_workflow",
+        "title": "AYUR-INTEL Formulation Workflow",
+        "content": (
+            "AYUR-INTEL guides Ayurvedic products through a structured 5-stage lifecycle:\n"
+            "1. Ideation & Discovery: Botanical identification, Dravya properties, and traditional Samhita literature.\n"
+            "2. Product Passport Creation: 7-step wizard specifying formulation, ingredients, dosage forms, and proposed claims.\n"
+            "3. Prior-Art & Patent Clearance: Searches Indian Patent Office (IPO) records for Section 3(p) objections and novelty signals.\n"
+            "4. Statutory Regulatory Classification: Determines ASU Drug (Classical vs Proprietary) or FSSAI Nutraceutical pathways and API test mandates.\n"
+            "5. Multi-Domain Risk & Decision Dashboard: Quantifies cross-domain readiness into a commercial Go/No-Go score with milestone checklists."
+        ),
+        "tags": [
+            "workflow", "how does ayur-intel work", "lifecycle", "stages", "steps",
+            "process", "platform workflow", "formulation workflow", "how to use ayur-intel", "what problem does it solve"
+        ],
+        "related_feature": "Formulation Lifecycle",
+        "default_action": "OPEN_DASHBOARD",
+    },
+    {
+        "id": "kb_plant_discovery",
+        "title": "Plant Discovery & Botanical Identification",
+        "content": (
+            "The Plant Discovery module enables botanical research and identification:\n"
+            "• Visual Identification: Integrates with PlantNet API to recognize medicinal herbs from botanical photos.\n"
+            "• Dravya Guna Taxonomy: Displays classical properties including Rasa (taste), Virya (potency), Vipaka (post-digestive effect), and Prabhava (specific action).\n"
+            "• Species Standardization: Maps vernacular Hindi and regional names to authoritative botanical Latin binomials."
+        ),
+        "tags": [
+            "plant discovery", "botanical identification", "plantnet", "herbs",
+            "medicinal plants", "dravya guna", "rasa", "virya", "latin names", "plants", "discovery"
+        ],
+        "related_feature": "Plant Discovery",
+        "default_action": "OPEN_DASHBOARD",
+    },
+    {
         "id": "kb_platform_overview",
         "title": "AYUR-INTEL Platform & Mission",
         "content": (

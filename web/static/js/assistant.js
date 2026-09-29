@@ -14,7 +14,7 @@
       {
         sender: "assistant",
         text: "Namaste! I am **AYUSH**, your AYUR-INTEL intelligent guide. I can help you navigate the platform, understand how to create products, explore Patent & Regulatory Intelligence, and guide your Ayurvedic formulations.\n\nWhat would you like to know?",
-        sources: ["AYUR-INTEL Platform & Mission"],
+        sources: [],
         actions: [
           { id: "OPEN_PRODUCTS", label: "View Products →", target: "product-cases" },
           { id: "CREATE_PRODUCT", label: "Create Product →", target: "passport-wizard" }
@@ -306,7 +306,7 @@
       + '  <div id="assistant-messages-list"></div>'
       + '  <div class="assistant-loading-indicator" id="assistant-loading-indicator" style="display:none;">'
       + '    <div class="assistant-typing-dots"><span></span><span></span><span></span></div>'
-      + '    <span class="assistant-typing-text">Grounded retrieval in progress...</span>'
+      + '    <span class="assistant-typing-text">AYUSH is thinking...</span>'
       + '  </div>'
       + '</div>'
 
@@ -652,7 +652,7 @@
   };
 
   // Render Conversation Messages
-  function renderMessages() {
+  function renderMessages(isNewAssistantMsg) {
     var list = document.getElementById("assistant-messages-list");
     if (!list) return;
 
@@ -680,12 +680,18 @@
         html += '</div>';
       }
 
-      // Source Labels
+      // Collapsible Sources Disclosure (omitted when empty)
       if (!isUser && msg.sources && msg.sources.length > 0) {
-        html += '<div class="assistant-sources-row">'
-          + '<span class="assistant-source-icon material-symbols-outlined">menu_book</span>'
-          + '<span>Knowledge: ' + escapeHtml(msg.sources.join(" • ")) + '</span>'
-          + '</div>';
+        html += '<details class="assistant-sources-disclosure">'
+          + '<summary class="assistant-sources-summary">'
+          + '<span class="material-symbols-outlined assistant-summary-icon">menu_book</span>'
+          + '<span>Sources (' + msg.sources.length + ')</span>'
+          + '</summary>'
+          + '<ul class="assistant-sources-list">';
+        msg.sources.forEach(function (src) {
+          html += '<li>' + escapeHtml(src) + '</li>';
+        });
+        html += '</ul></details>';
       }
 
       html += '  </div>'
@@ -693,14 +699,43 @@
     });
 
     list.innerHTML = html;
-    scrollToBottom();
+    scrollForNewMessage(Boolean(isNewAssistantMsg));
+  }
+
+  function scrollForNewMessage(isAssistant) {
+    var conv = document.getElementById("assistant-conversation");
+    var list = document.getElementById("assistant-messages-list");
+    if (!conv || !list) return;
+
+    setTimeout(function () {
+      if (isAssistant) {
+        var rows = list.querySelectorAll(".assistant-message-row.assistant");
+        if (rows.length > 0) {
+          var lastRow = rows[rows.length - 1];
+          var targetTop = lastRow.offsetTop - conv.offsetTop - 8;
+          if (targetTop < 0) targetTop = 0;
+          conv.scrollTo({
+            top: targetTop,
+            behavior: "smooth"
+          });
+          return;
+        }
+      }
+      conv.scrollTo({
+        top: conv.scrollHeight,
+        behavior: "smooth"
+      });
+    }, 60);
   }
 
   function scrollToBottom() {
     var conv = document.getElementById("assistant-conversation");
     if (conv) {
       setTimeout(function () {
-        conv.scrollTop = conv.scrollHeight;
+        conv.scrollTo({
+          top: conv.scrollHeight,
+          behavior: "smooth"
+        });
       }, 50);
     }
   }
@@ -721,7 +756,7 @@
     input.value = "";
     state.loading = true;
 
-    renderMessages();
+    renderMessages(false);
 
     var loadingIndicator = document.getElementById("assistant-loading-indicator");
     if (loadingIndicator) loadingIndicator.style.display = "flex";
@@ -731,8 +766,16 @@
     var ctx = getAppContext();
 
     try {
+      var recentHistory = state.messages.slice(-6).map(function (m) {
+        return {
+          role: m.sender === "user" ? "user" : "assistant",
+          content: m.text.substring(0, 500)
+        };
+      });
+
       var payload = {
         message: text,
+        history: recentHistory,
         current_view: ctx.current_view,
         active_product_id: ctx.active_product_id,
         active_product_name: ctx.active_product_name
@@ -778,7 +821,7 @@
       if (currentSeq === state.requestId) {
         state.loading = false;
         if (loadingIndicator) loadingIndicator.style.display = "none";
-        renderMessages();
+        renderMessages(true);
       }
     }
   }

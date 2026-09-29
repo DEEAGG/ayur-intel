@@ -26,10 +26,18 @@ class ProductContextInfo(BaseModel):
     verified: bool = False
 
 
+class ChatMessageHistoryItem(BaseModel):
+    """Single historical message turn for context and follow-up resolution."""
+
+    role: str = Field(..., description="'user' or 'assistant'")
+    content: str = Field(..., max_length=2000, description="Message text")
+
+
 class AssistantChatRequest(BaseModel):
     """User message payload for the AYUR-INTEL assistant."""
 
     message: str = Field(..., min_length=1, max_length=2000, description="User question or prompt")
+    history: Optional[List[ChatMessageHistoryItem]] = Field(default=None, description="Recent conversation turns for follow-ups")
     current_view: Optional[str] = Field("dashboard", description="Current frontend view identifier")
     active_product_id: Optional[str] = Field(None, description="Current active product case ID if selected")
     active_product_name: Optional[str] = Field(None, description="Current active product name from frontend state")

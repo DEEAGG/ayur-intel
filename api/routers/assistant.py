@@ -36,6 +36,7 @@ def chat_with_assistant(
         result = process_assistant_chat(
             db=db,
             message=request.message,
+            history=request.history,
             current_view=request.current_view or "dashboard",
             active_product_id=request.active_product_id,
             active_product_name=request.active_product_name,

@@ -260,14 +260,38 @@ class TestBrowserAssistant(unittest.TestCase):
         self.assertNotIn("AQ.", sec_reply)
         self.assertNotIn("dev-session-secret", sec_reply)
 
-        # 13. Verify scrolling works with many messages
+        # 13. Question 8: Casual Opener "achha mujhe kuch jan na hai" (UX Hardening check)
+        ans8 = ask_assistant("achha mujhe kuch jan na hai")
+        casual_reply = ans8.inner_text().lower()
+        self.assertTrue("poochiye" in casual_reply or "ayush" in casual_reply or "explore" in casual_reply)
+        # Verify no sources disclosure on casual message
+        last_row = page.locator(".assistant-message-row.assistant").last
+        sources_count = last_row.locator(".assistant-sources-disclosure").count()
+        self.assertEqual(sources_count, 0, "Casual message must have zero sources disclosures")
+
+        # 14. Question 9: Self-Knowledge "who are you?"
+        ans9 = ask_assistant("who are you?")
+        self_reply = ans9.inner_text().lower()
+        self.assertTrue("ayush" in self_reply and ("gemini" in self_reply or "botanical" in self_reply))
+        last_self_row = page.locator(".assistant-message-row.assistant").last
+        self_sources_count = last_self_row.locator(".assistant-sources-disclosure").count()
+        self.assertEqual(self_sources_count, 1, "Self-knowledge response must display collapsible sources disclosure")
+
+        # 15. Verify message row margin spacing in computed styles
+        row_margin = page.evaluate("""() => {
+            const row = document.querySelector('.assistant-message-row.assistant');
+            return row ? window.getComputedStyle(row).marginBottom : '0px';
+        }""")
+        self.assertTrue(int(row_margin.replace('px', '')) >= 18, f"Row margin must be >= 18px for clear spacing, got {row_margin}")
+
+        # 16. Verify scrolling works with many messages
         is_scrollable = page.evaluate("""() => {
             const el = document.getElementById('assistant-conversation');
             return el.scrollHeight > el.clientHeight;
         }""")
         self.assertTrue(is_scrollable, "Conversation container must be scrollable after multiple messages")
 
-        # 14. Verify zero console errors
+        # 17. Verify zero console errors
         critical_errors = [e for e in self.console_errors if "favicon" not in e.lower() and "404" not in e.lower()]
         self.assertEqual(len(critical_errors), 0, f"Encountered browser console errors: {critical_errors}")
 
