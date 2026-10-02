@@ -22,9 +22,7 @@ ENV/
 *.sqlite
 *.sqlite3
 *.db
-!data/ayur_intel.db
 !data/dravya.db
-!data/*.db
 
 # Scratch, QA, and temporary outputs
 scratch/
