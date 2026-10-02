@@ -318,7 +318,7 @@ ayur-intel/
 │       ├── gemini_risk_service.py   # Grounded risk synthesis with Gemini
 │       └── monitoring_service.py    # Lifecycle signals & alert workflow
 ├── data/                            # Persistent application data
-│   ├── ayur_intel.db                # SQLite application database (development)
+│   ├── ayur_intel.db                # Local SQLite app database (generated locally; not committed)
 │   ├── dravya.db                    # CCRAS DRAVYA offline plant database
 │   └── uploads/plant_images/        # Validated uploaded plant discovery images
 ├── docs/                            # Project documentation and assets
@@ -598,6 +598,12 @@ Developed for the **Smart India Hackathon (SIH)**.
 
 ---
 
-## License
+## Source Use & Rights
 
-This repository and its contents are currently maintained for demonstration, academic review, and evaluation purposes. All rights reserved. Formal open-source licensing terms will be declared prior to general distribution.
+Copyright © 2026 Deepansh Aggarwal. All rights reserved.
+
+This public repository is provided for portfolio demonstration, academic review, and evaluation. Public visibility does **not** grant permission to copy, redistribute, rebrand, publish, submit, or commercially use the source code or AYUR-INTEL project as another person's work. No open-source license is granted at this time.
+
+You may view the repository and evaluate the project through the documented demo. For reuse, collaboration, or licensing requests, contact the repository owner.
+
+> Security note: production credentials, API keys, user data, and the local application database are not intended to be committed to this repository.

@@ -19,11 +19,13 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from api.models.models import User
+from api.core.config import settings
 
 logger = logging.getLogger("ayur_intel.auth_service")
 
 # Secret key for token signature
-SECRET_KEY = "ayur-intel-secret-key-signature-token-vault-2026"
+# Token signing secret must come from environment/configuration; never hard-code it in source.
+SECRET_KEY = settings.AYURINTEL_SESSION_SECRET
 TOKEN_EXPIRE_SECONDS = 7 * 24 * 3600  # 7 days
 
 
