@@ -1,7 +1,8 @@
 /**
  * AYUR-INTEL — Unified Authentication & Profile Management Handler
  *
- * Provides authentication (Sign In / Create Account), post-signup login redirect,
+ * Provides premium botanical SaaS authentication (Sign In / Create Account / Reset Request),
+ * session vs local storage token persistence, password show/hide micro-interactions,
  * email validation, deterministic avatar styling, profile updating, password changes,
  * account switching, and account deletion.
  */
@@ -9,7 +10,8 @@
 (function () {
   'use strict';
 
-  var CURRENT_MODE = 'signin'; // 'signin' | 'signup'
+  var CURRENT_MODE = 'signin'; // 'signin' | 'signup' | 'forgot'
+  var isSubmitting = false;
 
   var AVATAR_COLORS = [
     '#7dba9a', '#4ecdc4', '#45b7d1', '#6c5ce7',
@@ -17,34 +19,84 @@
   ];
 
   // ---------------------------------------------------------------------------
-  // Local Storage & Token Helpers
+  // Local & Session Storage Token Helpers
   // ---------------------------------------------------------------------------
-  function getToken() {
-    return localStorage.getItem('ayur_auth_token') || '';
+  function isRememberMePreferred() {
+    try {
+      return localStorage.getItem('ayur_remember_me') === 'true';
+    } catch (e) {
+      return false;
+    }
   }
 
-  function setToken(token) {
-    if (token) {
-      localStorage.setItem('ayur_auth_token', token);
-    } else {
-      localStorage.removeItem('ayur_auth_token');
+  function getRememberedEmail() {
+    try {
+      return localStorage.getItem('ayur_remembered_email') || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function getToken() {
+    try {
+      // Prioritize sessionStorage for tab-bounded sessions, fall back to localStorage
+      return sessionStorage.getItem('ayur_auth_token') || localStorage.getItem('ayur_auth_token') || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function setToken(token, rememberMe) {
+    try {
+      if (token) {
+        if (rememberMe) {
+          localStorage.setItem('ayur_auth_token', token);
+          sessionStorage.removeItem('ayur_auth_token');
+        } else {
+          sessionStorage.setItem('ayur_auth_token', token);
+          localStorage.removeItem('ayur_auth_token');
+        }
+      } else {
+        localStorage.removeItem('ayur_auth_token');
+        sessionStorage.removeItem('ayur_auth_token');
+      }
+    } catch (e) {
+      console.warn('Storage setToken error:', e);
     }
   }
 
   function getUser() {
     try {
-      var u = localStorage.getItem('ayur_user');
+      var u = sessionStorage.getItem('ayur_user') || localStorage.getItem('ayur_user');
       return u ? JSON.parse(u) : null;
     } catch (e) {
       return null;
     }
   }
 
-  function setUser(user) {
-    if (user) {
-      localStorage.setItem('ayur_user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('ayur_user');
+  function setUser(user, rememberMe) {
+    try {
+      if (user) {
+        var str = JSON.stringify(user);
+        if (rememberMe === true) {
+          localStorage.setItem('ayur_user', str);
+          sessionStorage.removeItem('ayur_user');
+        } else if (rememberMe === false) {
+          sessionStorage.setItem('ayur_user', str);
+          localStorage.removeItem('ayur_user');
+        } else {
+          if (sessionStorage.getItem('ayur_auth_token')) {
+            sessionStorage.setItem('ayur_user', str);
+          } else {
+            localStorage.setItem('ayur_user', str);
+          }
+        }
+      } else {
+        localStorage.removeItem('ayur_user');
+        sessionStorage.removeItem('ayur_user');
+      }
+    } catch (e) {
+      console.warn('Storage setUser error:', e);
     }
   }
 
@@ -87,8 +139,44 @@
     return source.substring(0, 2).toUpperCase();
   }
 
+  function setAlert(message, type) {
+    var alertEl = document.getElementById('auth-alert');
+    if (!alertEl) return;
+    if (!message) {
+      alertEl.style.display = 'none';
+      alertEl.textContent = '';
+      alertEl.className = 'auth-alert';
+      return;
+    }
+    var iconName = type === 'success' ? 'check_circle' : (type === 'info' ? 'info' : 'error');
+    alertEl.className = 'auth-alert auth-alert--' + (type || 'error');
+    alertEl.innerHTML = '<span class="material-symbols-outlined auth-alert-icon" aria-hidden="true">' + iconName + '</span>'
+      + '<span class="auth-alert-text">' + message + '</span>';
+    alertEl.style.display = 'flex';
+  }
+
   // ---------------------------------------------------------------------------
-  // Auth Modal & Card Renderer
+  // Password Visibility Toggle Handler
+  // ---------------------------------------------------------------------------
+  function togglePassword(inputId, btnElem) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+
+    var isPassword = input.type === 'password';
+    input.type = isPassword ? 'text' : 'password';
+
+    if (btnElem) {
+      btnElem.setAttribute('aria-pressed', isPassword ? 'true' : 'false');
+      btnElem.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+      var icon = btnElem.querySelector('.material-symbols-outlined');
+      if (icon) {
+        icon.textContent = isPassword ? 'visibility_off' : 'visibility';
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auth Modal & Shell Renderer
   // ---------------------------------------------------------------------------
   function ensureAuthOverlay() {
     var overlay = document.getElementById('auth-overlay');
@@ -107,66 +195,188 @@
     overlay.style.display = 'flex';
 
     var isSignIn = CURRENT_MODE === 'signin';
+    var isSignUp = CURRENT_MODE === 'signup';
+    var isForgot = CURRENT_MODE === 'forgot';
+
+    var emailVal = defaultEmail || (isRememberMePreferred() ? getRememberedEmail() : '');
+    var rememberChecked = isRememberMePreferred();
 
     var html = ''
-      + '<div class="auth-card">'
-      // Brand Header
-      + '<div class="auth-brand">'
-      + '<div class="auth-brand-icon">'
-      + '<span class="material-symbols-outlined">spa</span>'
-      + '</div>'
-      + '<h1 class="auth-brand-title">AYUR-INTEL</h1>'
-      + '<p class="auth-brand-subtitle">Product Intelligence</p>'
-      + '</div>'
+      + '<div class="auth-shell">'
+      // Brand Pane (Left)
+      + '  <div class="auth-brand-pane">'
+      + '    <div>'
+      + '      <div class="auth-brand-header">'
+      + '        <div class="auth-brand-badge">'
+      + '          <span class="material-symbols-outlined" aria-hidden="true">spa</span>'
+      + '        </div>'
+      + '        <div class="auth-brand-titles">'
+      + '          <h1 class="auth-brand-title">AYUR-INTEL</h1>'
+      + '          <div class="auth-brand-tagline">Evidence · Intelligence · Innovation</div>'
+      + '        </div>'
+      + '      </div>'
+      + '      <p class="auth-brand-desc">'
+      + '        The institutional-grade intelligence platform translating classical Ayurvedic pharmacology and botanical taxonomy into validated biomedical evidence.'
+      + '      </p>'
+      + '      <div class="auth-brand-pillars">'
+      + '        <div class="auth-pillar-item">'
+      + '          <span class="material-symbols-outlined auth-pillar-icon" aria-hidden="true">auto_stories</span>'
+      + '          <div class="auth-pillar-content">'
+      + '            <strong>Classical Lexicons &amp; Dravyas</strong>'
+      + '            <small>Standardized Sanskrit shlokas and Rasa-Guna profiles</small>'
+      + '          </div>'
+      + '        </div>'
+      + '        <div class="auth-pillar-item">'
+      + '          <span class="material-symbols-outlined auth-pillar-icon" aria-hidden="true">biotech</span>'
+      + '          <div class="auth-pillar-content">'
+      + '            <strong>Phytochemical Validation</strong>'
+      + '            <small>Bioactive constituents, modern assays, and molecular targets</small>'
+      + '          </div>'
+      + '        </div>'
+      + '        <div class="auth-pillar-item">'
+      + '          <span class="material-symbols-outlined auth-pillar-icon" aria-hidden="true">verified_user</span>'
+      + '          <div class="auth-pillar-content">'
+      + '            <strong>Safety &amp; Regulatory Intelligence</strong>'
+      + '            <small>IP readiness, heavy metal limits, and AYUSH-aligned data</small>'
+      + '          </div>'
+      + '        </div>'
+      + '      </div>'
+      + '    </div>'
+      + '    <div class="auth-brand-footer">'
+      + '      <svg class="auth-botanical-motif" width="104" height="20" viewBox="0 0 104 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+      + '        <path d="M0 10H42M62 10H104" stroke="#c5a869" stroke-width="1" stroke-opacity="0.4"/>'
+      + '        <circle cx="52" cy="10" r="3" fill="#c5a869"/>'
+      + '        <path d="M48 6C50 8 52 10 52 10C52 10 54 8 56 6" stroke="#c5a869" stroke-width="1"/>'
+      + '      </svg>'
+      + '      <span class="auth-brand-footnote">ENTERPRISE EDITION</span>'
+      + '    </div>'
+      + '  </div>'
 
+      // Authentication Card Pane (Right)
+      + '  <div class="auth-card-pane">';
+
+    if (!isForgot) {
       // Mode Navigation Tabs
-      + '<div class="auth-tabs">'
-      + '<button class="auth-tab ' + (isSignIn ? 'active' : '') + '" onclick="window.AYUR_AUTH.switchMode(\'signin\')">Sign In</button>'
-      + '<button class="auth-tab ' + (!isSignIn ? 'active' : '') + '" onclick="window.AYUR_AUTH.switchMode(\'signup\')">Create Account</button>'
-      + '</div>'
-
-      // Auth Form
-      + '<form class="auth-form" id="auth-form" onsubmit="window.AYUR_AUTH.handleSubmit(event)">';
-
-    if (!isSignIn) {
-      html += '<div class="auth-field">'
-        + '<label for="auth-fullname">Full Name</label>'
-        + '<input type="text" id="auth-fullname" placeholder="e.g. Deepansh Aggarwal" required autocomplete="name">'
-        + '</div>';
+      html += '    <div class="auth-tabs" role="tablist" aria-label="Authentication Type">'
+        + '      <button type="button" role="tab" aria-selected="' + (isSignIn ? 'true' : 'false') + '" class="auth-tab ' + (isSignIn ? 'active' : '') + '" onclick="window.AYUR_AUTH.switchMode(\'signin\')">Sign In</button>'
+        + '      <button type="button" role="tab" aria-selected="' + (isSignUp ? 'true' : 'false') + '" class="auth-tab ' + (isSignUp ? 'active' : '') + '" onclick="window.AYUR_AUTH.switchMode(\'signup\')">Create Account</button>'
+        + '    </div>';
     }
 
-    html += '<div class="auth-field">'
-      + '<label for="auth-email">Email Address</label>'
-      + '<input type="email" id="auth-email" placeholder="name@company.com" value="' + (defaultEmail || '') + '" required autocomplete="email">'
-      + '</div>'
+    // Header title & subtitle
+    html += '    <div class="auth-form-head">';
+    if (isSignIn) {
+      html += '      <h2 class="auth-form-title">Welcome back</h2>'
+        + '      <p class="auth-form-subtitle">Enter your institutional credentials to access your research cases.</p>';
+    } else if (isSignUp) {
+      html += '      <h2 class="auth-form-title">Create your account</h2>'
+        + '      <p class="auth-form-subtitle">Join the evidence-backed Ayurvedic product intelligence network.</p>';
+    } else {
+      html += '      <h2 class="auth-form-title">Reset your password</h2>'
+        + '      <p class="auth-form-subtitle">Enter your registered email address to request account recovery.</p>';
+    }
+    html += '    </div>'
 
-      + '<div class="auth-field">'
-      + '<label for="auth-password">Password</label>'
-      + '<input type="password" id="auth-password" placeholder="••••••••" required minlength="8" autocomplete="' + (isSignIn ? 'current-password' : 'new-password') + '">'
-      + '<small class="auth-hint">Must be at least 8 characters</small>'
-      + '</div>';
+      // Alert container
+      + '    <div class="auth-alert" id="auth-alert" role="alert" style="display:none;"></div>';
 
-    if (!isSignIn) {
-      html += '<div class="auth-field">'
-        + '<label for="auth-confirm-password">Confirm Password</label>'
-        + '<input type="password" id="auth-confirm-password" placeholder="••••••••" required minlength="8" autocomplete="new-password">'
-        + '</div>';
+    if (isForgot) {
+      // Forgot Password UI (Ready for subsequent email verification backend implementation)
+      html += '    <div class="auth-notice-box">'
+        + '      <span class="material-symbols-outlined auth-notice-icon" aria-hidden="true">info</span>'
+        + '      <div class="auth-notice-content">'
+        + '        <strong>Password Self-Service Notice</strong>'
+        + '        <p>Automated password reset email delivery requires the pending SMTP/email verification backend service. Please contact your organization administrator or return to Sign In.</p>'
+        + '      </div>'
+        + '    </div>'
+        + '    <form class="auth-form" id="auth-form" onsubmit="window.AYUR_AUTH.handleForgotSubmit(event)" novalidate>'
+        + '      <div class="auth-field">'
+        + '        <label for="auth-email">Institutional Email</label>'
+        + '        <div class="auth-input-wrap">'
+        + '          <span class="material-symbols-outlined auth-input-icon" aria-hidden="true">mail</span>'
+        + '          <input type="email" id="auth-email" placeholder="name@institution.org" value="' + (emailVal || '') + '" required autocomplete="email" spellcheck="false">'
+        + '        </div>'
+        + '      </div>'
+        + '      <button type="submit" class="auth-submit-btn" id="auth-submit-btn">'
+        + '        <span class="auth-submit-text">Request Reset Link</span>'
+        + '      </button>'
+        + '      <button type="button" class="auth-back-btn" onclick="window.AYUR_AUTH.switchMode(\'signin\', document.getElementById(\'auth-email\')?.value)">'
+        + '        <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span> Return to Sign In'
+        + '      </button>'
+        + '    </form>';
+    } else {
+      // Sign In / Sign Up Form
+      html += '    <form class="auth-form" id="auth-form" onsubmit="window.AYUR_AUTH.handleSubmit(event)" novalidate>';
+
+      if (isSignUp) {
+        html += '      <div class="auth-field">'
+          + '        <label for="auth-fullname">Full Name</label>'
+          + '        <div class="auth-input-wrap">'
+          + '          <span class="material-symbols-outlined auth-input-icon" aria-hidden="true">person</span>'
+          + '          <input type="text" id="auth-fullname" placeholder="Dr. Deepansh Aggarwal" required autocomplete="name">'
+          + '        </div>'
+          + '      </div>';
+      }
+
+      html += '      <div class="auth-field">'
+        + '        <label for="auth-email">Institutional Email</label>'
+        + '        <div class="auth-input-wrap">'
+        + '          <span class="material-symbols-outlined auth-input-icon" aria-hidden="true">mail</span>'
+        + '          <input type="email" id="auth-email" placeholder="name@institution.org" value="' + (emailVal || '') + '" required autocomplete="email" spellcheck="false">'
+        + '        </div>'
+        + '      </div>'
+
+        + '      <div class="auth-field">'
+        + '        <label for="auth-password">Password</label>'
+        + '        <div class="auth-input-wrap">'
+        + '          <span class="material-symbols-outlined auth-input-icon" aria-hidden="true">lock</span>'
+        + '          <input type="password" id="auth-password" placeholder="••••••••" required minlength="8" autocomplete="' + (isSignIn ? 'current-password' : 'new-password') + '">'
+        + '          <button type="button" class="auth-pw-toggle" id="auth-pw-toggle-main" aria-label="Show password" aria-pressed="false" onclick="window.AYUR_AUTH.togglePassword(\'auth-password\', this)">'
+        + '            <span class="material-symbols-outlined" aria-hidden="true">visibility</span>'
+        + '          </button>'
+        + '        </div>'
+        + '        <small class="auth-hint">Must be at least 8 characters</small>'
+        + '      </div>';
+
+      if (isSignUp) {
+        html += '      <div class="auth-field">'
+          + '        <label for="auth-confirm-password">Confirm Password</label>'
+          + '        <div class="auth-input-wrap">'
+          + '          <span class="material-symbols-outlined auth-input-icon" aria-hidden="true">lock_reset</span>'
+          + '          <input type="password" id="auth-confirm-password" placeholder="••••••••" required minlength="8" autocomplete="new-password">'
+          + '          <button type="button" class="auth-pw-toggle" id="auth-pw-toggle-confirm" aria-label="Show password" aria-pressed="false" onclick="window.AYUR_AUTH.togglePassword(\'auth-confirm-password\', this)">'
+          + '            <span class="material-symbols-outlined" aria-hidden="true">visibility</span>'
+          + '          </button>'
+        + '        </div>'
+        + '      </div>';
+      } else {
+        // Aux Row for Sign In: Remember Me & Forgot Password
+        html += '      <div class="auth-aux-row">'
+          + '        <label class="auth-remember-wrap" for="auth-remember-me">'
+          + '          <input type="checkbox" id="auth-remember-me" ' + (rememberChecked ? 'checked' : '') + '>'
+          + '          <span class="auth-checkbox-custom" aria-hidden="true"></span>'
+          + '          <span class="auth-remember-label">Remember me</span>'
+          + '        </label>'
+          + '        <button type="button" class="auth-forgot-link" onclick="window.AYUR_AUTH.switchMode(\'forgot\', document.getElementById(\'auth-email\')?.value)">Forgot password?</button>'
+          + '      </div>';
+      }
+
+      html += '      <button type="submit" class="auth-submit-btn" id="auth-submit-btn">'
+        + '        <span class="auth-submit-text">' + (isSignIn ? 'Sign In' : 'Create Account') + '</span>'
+        + '      </button>'
+        + '    </form>'
+
+        // Mode Toggle Footer
+        + '    <div class="auth-toggle-footer">'
+        + (isSignIn
+          ? 'Don\'t have an account? <a href="#" onclick="event.preventDefault(); window.AYUR_AUTH.switchMode(\'signup\', document.getElementById(\'auth-email\')?.value)">Create an account</a>'
+          : 'Already have an account? <a href="#" onclick="event.preventDefault(); window.AYUR_AUTH.switchMode(\'signin\', document.getElementById(\'auth-email\')?.value)">Sign in</a>'
+        )
+        + '    </div>';
     }
 
-    html += '<button type="submit" class="auth-submit-btn" id="auth-submit-btn">'
-      + (isSignIn ? 'Sign In' : 'Create Account')
-      + '</button>'
-      + '</form>'
-
-      // Toggle Link Footer
-      + '<div class="auth-toggle-footer">'
-      + (isSignIn
-        ? 'Don\'t have an account? <a href="#" onclick="event.preventDefault(); window.AYUR_AUTH.switchMode(\'signup\')">Create one</a>'
-        : 'Already have an account? <a href="#" onclick="event.preventDefault(); window.AYUR_AUTH.switchMode(\'signin\')">Sign in</a>'
-      )
-      + '</div>'
-
-      + '</div>'; // End auth-card
+    html += '  </div>' // End auth-card-pane
+      + '</div>'; // End auth-shell
 
     overlay.innerHTML = html;
   }
@@ -179,48 +389,88 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Form Submission Handler
+  // Forgot Password Interaction Handler
+  // ---------------------------------------------------------------------------
+  function handleForgotSubmit(event) {
+    if (event) event.preventDefault();
+    var email = (document.getElementById('auth-email')?.value || '').trim();
+
+    if (!email) {
+      setAlert('Please enter your email address.', 'error');
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setAlert('Please enter a valid email format.', 'error');
+      return;
+    }
+
+    // Do NOT invent endpoints, simulate fake email delivery, or display false success message
+    setAlert(
+      'Password reset endpoint is not configured in this deployment environment. Direct self-service email recovery will be activated upon SMTP service integration. Please contact admin@ayur-intel.local or return to Sign In.',
+      'info'
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Form Submission Handler (Login & Signup)
   // ---------------------------------------------------------------------------
   async function handleSubmit(event) {
     if (event) event.preventDefault();
+    if (isSubmitting) return;
+
+    setAlert('');
 
     var email = (document.getElementById('auth-email')?.value || '').trim();
     var password = (document.getElementById('auth-password')?.value || '').trim();
     var submitBtn = document.getElementById('auth-submit-btn');
 
     if (!email || !password) {
+      setAlert('Please fill in all required fields.', 'error');
       showToastMsg('⚠️ Please fill in all required fields', 'error');
       return;
     }
 
     if (!isValidEmail(email)) {
+      setAlert('Please enter a valid institutional email address.', 'error');
       showToastMsg('⚠️ Please enter a valid email address format', 'error');
       return;
     }
 
     if (password.length < 8) {
+      setAlert('Password must be at least 8 characters long.', 'error');
       showToastMsg('⚠️ Password must be at least 8 characters long', 'error');
       return;
     }
 
+    var fullName = '';
     if (CURRENT_MODE === 'signup') {
-      var fullName = (document.getElementById('auth-fullname')?.value || '').trim();
+      fullName = (document.getElementById('auth-fullname')?.value || '').trim();
       var confirmPassword = (document.getElementById('auth-confirm-password')?.value || '').trim();
 
       if (!fullName) {
+        setAlert('Please enter your full name.', 'error');
         showToastMsg('⚠️ Please enter your full name', 'error');
         return;
       }
 
       if (password !== confirmPassword) {
+        setAlert('Passwords do not match. Please verify.', 'error');
         showToastMsg('⚠️ Passwords do not match', 'error');
         return;
       }
     }
 
+    var rememberMe = false;
+    var rememberMeCheckbox = document.getElementById('auth-remember-me');
+    if (rememberMeCheckbox) {
+      rememberMe = rememberMeCheckbox.checked;
+    }
+
+    isSubmitting = true;
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.innerHTML = '⏳ Processing...';
+      submitBtn.innerHTML = '<span class="auth-btn-spinner" aria-hidden="true"></span> '
+        + (CURRENT_MODE === 'signup' ? 'Creating Account...' : 'Authenticating...');
     }
 
     try {
@@ -240,12 +490,27 @@
       if (response.ok && data.user) {
         if (CURRENT_MODE === 'signup') {
           // POST-SIGNUP REDIRECT TO LOGIN: Do NOT store token, redirect to Login form
-          showToastMsg('✅ Account created! Please login to continue.', 'success');
+          showToastMsg('✅ Account created! Please sign in to continue.', 'success');
           renderAuthCard('signin', email);
+          setAlert('Account created successfully. Please sign in with your password.', 'success');
         } else {
-          // LOGIN SUCCESS: Save token, update UI, hide overlay
-          setToken(data.token);
-          setUser(data.user);
+          // LOGIN SUCCESS: Apply Remember Me strategy, save token, update UI, hide overlay
+          if (rememberMe) {
+            try {
+              localStorage.setItem('ayur_remember_me', 'true');
+              localStorage.setItem('ayur_remembered_email', email);
+            } catch (e) {}
+            setToken(data.token, true);
+            setUser(data.user, true);
+          } else {
+            try {
+              localStorage.removeItem('ayur_remember_me');
+              localStorage.removeItem('ayur_remembered_email');
+            } catch (e) {}
+            setToken(data.token, false);
+            setUser(data.user, false);
+          }
+
           hideAuthOverlay();
           updateUIWithUser(data.user);
           showToastMsg('✅ Welcome back, ' + (data.user.display_name || data.user.username) + '!', 'success');
@@ -255,16 +520,19 @@
           }
         }
       } else {
-        var errorDetail = data.detail || (CURRENT_MODE === 'signup' ? 'Registration failed' : 'Invalid email or password');
+        var errorDetail = data.detail || (CURRENT_MODE === 'signup' ? 'Registration failed. Please check your information.' : 'Invalid email or password.');
+        setAlert(errorDetail, 'error');
         showToastMsg('❌ ' + errorDetail, 'error');
       }
     } catch (err) {
       console.error('Auth request exception:', err);
+      setAlert('Network error occurred. Please check your connection and try again.', 'error');
       showToastMsg('❌ Network error. Please try again.', 'error');
     } finally {
+      isSubmitting = false;
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.innerHTML = CURRENT_MODE === 'signup' ? 'Create Account' : 'Sign In';
+        submitBtn.innerHTML = '<span class="auth-submit-text">' + (CURRENT_MODE === 'signup' ? 'Create Account' : 'Sign In') + '</span>';
       }
     }
   }
@@ -511,6 +779,8 @@
     render: renderAuthCard,
     switchMode: renderAuthCard,
     handleSubmit: handleSubmit,
+    handleForgotSubmit: handleForgotSubmit,
+    togglePassword: togglePassword,
     updateProfile: updateProfile,
     changePassword: changePassword,
     updateAvatar: updateAvatar,
