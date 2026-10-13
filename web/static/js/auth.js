@@ -202,6 +202,13 @@
     var rememberChecked = isRememberMePreferred();
 
     var html = ''
+      + '<div class="auth-forest-scene" aria-hidden="true">'
+      + '  <div class="auth-forest-glow"></div>'
+      + '  <div class="auth-forest-layer auth-forest-far"><svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice"><g fill="#153d2b"><path d="M0 900V450l55 95 30-130 40 80 42-190 55 180 42-100 35 140 48-230 55 250 43-130 38 160 40-90 42 150 48-250 55 240 40-130 50 180 38-100 48 160 52-220 48 230 42-140 45 170 55-270 50 250 45-130 45 170 55-200 48 230 48-110 55 180 42-240 58 250 50-130 48 170 52-200 58 220 40-110 45 150 0 300Z"/></g></svg></div>'
+      + '  <div class="auth-forest-layer auth-forest-mid"><svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice"><g fill="#0b281c"><path d="M0 900V600l45-90 42 90 20-160 48 160 38-115 43 115 25-205 55 205 40-125 45 125 20-170 55 170 38-95 45 95 32-220 58 220 42-135 48 135 30-190 55 190 42-110 50 110 25-230 60 230 42-145 48 145 30-170 52 170 44-120 48 120 34-205 60 205 45-130 50 130 32-180 55 180 40-100 50 100 0 300Z"/></g></svg></div>'
+      + '  <div class="auth-forest-layer auth-forest-near"><svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice"><g fill="#06170f"><path d="M0 900V720l35-70 38 70 25-150 48 150 32-85 38 85 25-125 45 125 28-90 45 90 25-165 50 165 30-85 45 85 32-130 48 130 30-75 45 75 25-155 50 155 38-90 45 90 25-125 50 125 32-85 48 85 30-155 50 155 35-80 48 80 25-140 50 140 30-85 50 85 0 180Z"/></g></svg></div>'
+      + '  <div class="auth-forest-haze"></div>'
+      + '</div>'
       + '<div class="auth-shell">'
       // Brand Pane (Left)
       + '  <div class="auth-brand-pane">'
