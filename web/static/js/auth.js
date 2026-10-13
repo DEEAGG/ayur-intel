@@ -216,39 +216,34 @@
       + '        </div>'
       + '      </div>'
       + '      <p class="auth-brand-desc">'
-      + '        The institutional-grade intelligence platform translating classical Ayurvedic pharmacology and botanical taxonomy into validated biomedical evidence.'
+      + '        Evidence-led Ayurvedic research, botanical intelligence, and IP insights — in one workspace.'
       + '      </p>'
       + '      <div class="auth-brand-pillars">'
       + '        <div class="auth-pillar-item">'
       + '          <span class="material-symbols-outlined auth-pillar-icon" aria-hidden="true">auto_stories</span>'
       + '          <div class="auth-pillar-content">'
-      + '            <strong>Classical Lexicons &amp; Dravyas</strong>'
-      + '            <small>Standardized Sanskrit shlokas and Rasa-Guna profiles</small>'
+      + '            <strong>Classical Knowledge</strong>'
+      + '            <small>Sanskrit sources and Dravya profiles</small>'
       + '          </div>'
       + '        </div>'
       + '        <div class="auth-pillar-item">'
       + '          <span class="material-symbols-outlined auth-pillar-icon" aria-hidden="true">biotech</span>'
       + '          <div class="auth-pillar-content">'
-      + '            <strong>Phytochemical Validation</strong>'
-      + '            <small>Bioactive constituents, modern assays, and molecular targets</small>'
+      + '            <strong>Evidence &amp; Phytochemistry</strong>'
+      + '            <small>Bioactive compounds and research findings</small>'
       + '          </div>'
       + '        </div>'
       + '        <div class="auth-pillar-item">'
       + '          <span class="material-symbols-outlined auth-pillar-icon" aria-hidden="true">verified_user</span>'
       + '          <div class="auth-pillar-content">'
-      + '            <strong>Safety &amp; Regulatory Intelligence</strong>'
-      + '            <small>IP readiness, heavy metal limits, and AYUSH-aligned data</small>'
+      + '            <strong>Safety &amp; IP Intelligence</strong>'
+      + '            <small>Regulatory signals and patent readiness</small>'
       + '          </div>'
       + '        </div>'
       + '      </div>'
       + '    </div>'
       + '    <div class="auth-brand-footer">'
-      + '      <svg class="auth-botanical-motif" width="104" height="20" viewBox="0 0 104 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
-      + '        <path d="M0 10H42M62 10H104" stroke="#c5a869" stroke-width="1" stroke-opacity="0.4"/>'
-      + '        <circle cx="52" cy="10" r="3" fill="#c5a869"/>'
-      + '        <path d="M48 6C50 8 52 10 52 10C52 10 54 8 56 6" stroke="#c5a869" stroke-width="1"/>'
-      + '      </svg>'
-      + '      <span class="auth-brand-footnote">ENTERPRISE EDITION</span>'
+      + '      <span class="auth-live-mark"><span></span> EVIDENCE-LED INTELLIGENCE</span>'
       + '    </div>'
       + '  </div>'
 
@@ -267,7 +262,7 @@
     html += '    <div class="auth-form-head">';
     if (isSignIn) {
       html += '      <h2 class="auth-form-title">Welcome back</h2>'
-        + '      <p class="auth-form-subtitle">Enter your institutional credentials to access your research cases.</p>';
+        + '      <p class="auth-form-subtitle">Sign in to your research workspace.</p>';
     } else if (isSignUp) {
       html += '      <h2 class="auth-form-title">Create your account</h2>'
         + '      <p class="auth-form-subtitle">Join the evidence-backed Ayurvedic product intelligence network.</p>';
@@ -291,7 +286,7 @@
         + '    </div>'
         + '    <form class="auth-form" id="auth-form" onsubmit="window.AYUR_AUTH.handleForgotSubmit(event)" novalidate>'
         + '      <div class="auth-field">'
-        + '        <label for="auth-email">Institutional Email</label>'
+        + '        <label for="auth-email">Email address</label>'
         + '        <div class="auth-input-wrap">'
         + '          <span class="material-symbols-outlined auth-input-icon" aria-hidden="true">mail</span>'
         + '          <input type="email" id="auth-email" placeholder="name@institution.org" value="' + (emailVal || '') + '" required autocomplete="email" spellcheck="false">'
@@ -335,7 +330,7 @@
         + '            <span class="material-symbols-outlined" aria-hidden="true">visibility</span>'
         + '          </button>'
         + '        </div>'
-        + '        <small class="auth-hint">Must be at least 8 characters</small>'
+        + (isSignUp ? '        <small class="auth-hint">At least 8 characters</small>' : '')
         + '      </div>';
 
       if (isSignUp) {
