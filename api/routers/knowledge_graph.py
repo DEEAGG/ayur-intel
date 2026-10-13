@@ -20,14 +20,7 @@ logger = logging.getLogger("ayur_intel.routers.knowledge_graph")
 router = APIRouter(prefix="/api", tags=["Knowledge Graph"])
 
 
-def get_current_user(db: Session = Depends(get_db)) -> User:
-    user = db.query(User).filter(User.username == "demo").first()
-    if not user:
-        user = User(username="demo", display_name="Demo User")
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return user
+from api.core.security import get_current_user
 
 
 @router.get("/cases/{case_id}/knowledge-graph")

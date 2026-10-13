@@ -36,7 +36,7 @@ from api.routers import (
 # ---------------------------------------------------------------------------
 
 logging.basicConfig(
-    level=logging.DEBUG if settings.AYURINTEL_DEBUG else logging.INFO,
+    level=logging.DEBUG if getattr(settings, "effective_debug", settings.AYURINTEL_DEBUG) else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -172,8 +172,15 @@ async def spa_fallback(full_path: str):
 async def startup():
     """Initialize database on application startup."""
     logger.info("AYUR-INTEL starting up...")
+    logger.info("Environment: %s", getattr(settings, "AYURINTEL_ENV", "development"))
+    logger.info("Production mode: %s", getattr(settings, "is_production", False))
+    logger.info("Debug mode: %s", getattr(settings, "effective_debug", settings.AYURINTEL_DEBUG))
     logger.info("Database: %s", settings.AYURINTEL_DB_PATH)
     logger.info("Demo mode: %s", settings.AYURINTEL_DEMO_MODE)
+
+    # Validate session secret strength and configuration
+    from api.services.auth_service import validate_session_secret
+    validate_session_secret()
 
     # Initialize database tables & perform canonical demo migration if needed
     init_db()
@@ -210,5 +217,5 @@ if __name__ == "__main__":
         "api.main:app",
         host=settings.AYURINTEL_HOST,
         port=settings.AYURINTEL_PORT,
-        reload=settings.AYURINTEL_DEBUG,
+        reload=getattr(settings, "effective_debug", settings.AYURINTEL_DEBUG),
     )

@@ -42,16 +42,7 @@ router = APIRouter(prefix="/api/cases", tags=["Product Cases"])
 # Dependency: get current user
 # ---------------------------------------------------------------------------
 
-def get_current_user(db: Session = Depends(get_db)) -> User:
-    """Get the current authenticated user.
-
-    Phase 1: returns the demo user in demo mode.
-    Phase 19: will implement full auth with session cookies.
-    """
-    if settings.AYURINTEL_DEMO_MODE:
-        return get_or_create_demo_user(db)
-    # TODO (Phase 19): implement real session-based auth
-    raise HTTPException(status_code=401, detail="Authentication required")
+from api.core.security import get_current_user
 
 
 # ---------------------------------------------------------------------------

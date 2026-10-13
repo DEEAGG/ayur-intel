@@ -21,10 +21,7 @@ logger = logging.getLogger("ayur_intel.routers.security")
 router = APIRouter(prefix="/api/security", tags=["Security"])
 
 
-def get_current_user(db: Session = Depends(get_db)) -> User:
-    if settings.AYURINTEL_DEMO_MODE:
-        return get_or_create_demo_user(db)
-    raise HTTPException(status_code=401, detail="Authentication required")
+from api.core.security import get_current_user
 
 
 @router.get("/audit-logs")

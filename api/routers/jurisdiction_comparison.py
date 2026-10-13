@@ -28,15 +28,7 @@ logger = logging.getLogger("ayur_intel.routers.jurisdiction_comparison")
 router = APIRouter(prefix="/api", tags=["Jurisdiction Comparison"])
 
 
-def get_current_user(db: Session = Depends(get_db)) -> User:
-    """Get or create demo user. Phase 1: minimal auth."""
-    user = db.query(User).filter(User.username == "demo").first()
-    if not user:
-        user = User(username="demo", display_name="Demo User")
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return user
+from api.core.security import get_current_user
 
 
 @router.post("/cases/{case_id}/jurisdiction-comparison")

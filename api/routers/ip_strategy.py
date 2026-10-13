@@ -25,15 +25,7 @@ logger = logging.getLogger("ayur_intel.routers.ip_strategy")
 router = APIRouter(prefix="/api", tags=["IP Strategy"])
 
 
-def get_current_user(db: Session = Depends(get_db)) -> User:
-    """Get or create demo user. Phase 1: minimal auth."""
-    user = db.query(User).filter(User.username == "demo").first()
-    if not user:
-        user = User(username="demo", display_name="Demo User")
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return user
+from api.core.security import get_current_user
 
 
 @router.post("/ip-strategy/cases/{case_id}/roadmap")

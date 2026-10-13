@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -21,10 +22,20 @@ class Settings(BaseSettings):
     # Database
     AYURINTEL_DB_PATH: str = str(PROJECT_ROOT / "data" / "ayur_intel.db")
 
-    # Application
+    # Application Environment
+    # Options: 'development', 'production', 'staging', 'test'
+    AYURINTEL_ENV: str = "development"
+    AYURINTEL_DEBUG: Optional[bool] = None
+
+    # Application Host & Port
     AYURINTEL_HOST: str = "127.0.0.1"
     AYURINTEL_PORT: int = 8000
-    AYURINTEL_DEBUG: bool = True
+
+    # Reverse Proxy & Client-IP Trust Policy
+    # Only trust X-Forwarded-For/X-Real-IP if explicitly enabled behind a known reverse proxy
+    AYURINTEL_TRUST_PROXY_HEADERS: bool = False
+    AYURINTEL_BEHIND_PROXY: bool = False
+    AYURINTEL_TRUSTED_PROXIES: str = "127.0.0.1,::1"
 
     # Authentication
     AYURINTEL_SESSION_SECRET: str = "change-me-in-production"
@@ -39,6 +50,66 @@ class Settings(BaseSettings):
     AYURINTEL_PLANTNET_API_KEY: str = ""  # Get free key at https://my.plantnet.org/
     PLANTNET_API_KEY: Optional[str] = None
     AYURINTEL_PLANTNET_PROJECT: str = "all"  # 'all', 'weurope', 'canada', etc.
+
+    @property
+    def is_production(self) -> bool:
+        """Return True if running in production mode.
+
+        Fail-closed rules:
+        1. Explicit AYURINTEL_ENV or ENVIRONMENT is 'production' / 'prod'.
+        2. Render cloud deployment detected via RENDER / RENDER_SERVICE_ID.
+        3. AYURINTEL_ENV model attribute set to 'production' / 'prod'.
+        4. If AYURINTEL_DEBUG is explicitly False, treat as production unless
+           an explicit development/test environment is declared.
+        """
+        explicit_env = os.getenv("AYURINTEL_ENV") or os.getenv("ENVIRONMENT")
+        if explicit_env:
+            clean_env = explicit_env.strip().lower()
+            if clean_env in ("production", "prod"):
+                return True
+            if clean_env in ("development", "dev", "test", "testing"):
+                return False
+
+        if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
+            return True
+
+        if getattr(self, "AYURINTEL_ENV", "").strip().lower() in ("production", "prod"):
+            return True
+
+        if self.AYURINTEL_DEBUG is False:
+            if not explicit_env or explicit_env.strip().lower() not in ("development", "dev", "test", "testing"):
+                return True
+
+        return False
+
+    @property
+    def effective_debug(self) -> bool:
+        """Effective debug setting.
+
+        Guarantees that production will NOT silently run with debug=True.
+        """
+        if self.AYURINTEL_DEBUG is not None:
+            return self.AYURINTEL_DEBUG
+        return not self.is_production
+
+    @property
+    def should_trust_proxy_headers(self) -> bool:
+        """Return True if reverse proxy headers (X-Forwarded-For) should be trusted."""
+        return bool(self.AYURINTEL_TRUST_PROXY_HEADERS or self.AYURINTEL_BEHIND_PROXY)
+
+    @property
+    def trusted_proxy_hosts(self) -> set[str]:
+        """Return set of normalized trusted proxy IP strings."""
+        raw = self.AYURINTEL_TRUSTED_PROXIES or ""
+        return {ip.strip() for ip in raw.split(",") if ip.strip()}
+
+    @model_validator(mode="after")
+    def resolve_defaults(self) -> "Settings":
+        """Resolve defaults based on environment mode when omitted."""
+        if self.AYURINTEL_DEBUG is None:
+            # Production cannot silently run with AYURINTEL_DEBUG=True
+            self.AYURINTEL_DEBUG = not self.is_production
+        return self
 
     @property
     def effective_plantnet_api_key(self) -> str:

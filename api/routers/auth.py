@@ -11,11 +11,16 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.core.database import get_db
+from api.core.security import (
+    check_auth_rate_limit,
+    get_authenticated_user as _get_authenticated_user,
+    get_client_ip,
+)
 from api.services.auth_service import (
     signup_user,
     login_user,
@@ -61,30 +66,20 @@ class UpdateAvatarRequest(BaseModel):
     avatar_url: str = Field(..., description="Avatar Image URL or Base64 or Preset Color")
 
 
-def _get_authenticated_user(
-    authorization: Optional[str] = Header(None),
-    token: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    authToken = None
-    if authorization and authorization.startswith("Bearer "):
-        authToken = authorization[7:].strip()
-    elif token:
-        authToken = token.strip()
-
-    if not authToken:
-        raise HTTPException(status_code=401, detail="Authentication token required")
-
-    return get_user_from_token(db, authToken)
-
-
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @router.post("/signup", summary="Register new user account")
-def signup(req: SignUpRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def signup(
+    req: SignUpRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
     """Register a new user with full name, email, and password."""
+    client_ip = get_client_ip(request)
+    check_auth_rate_limit(ip=client_ip, action="signup")
+
     return signup_user(
         db=db,
         full_name=req.full_name,
@@ -94,8 +89,15 @@ def signup(req: SignUpRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.post("/login", summary="Sign in existing user")
-def login(req: LoginRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+def login(
+    req: LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
     """Authenticate user credentials and return access token."""
+    client_ip = get_client_ip(request)
+    check_auth_rate_limit(ip=client_ip, identifier=req.email, action="login")
+
     return login_user(
         db=db,
         email_or_username=req.email,
@@ -105,24 +107,9 @@ def login(req: LoginRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 @router.get("/me", summary="Get current authenticated user profile")
 def get_me(
-    authorization: Optional[str] = Header(None),
-    token: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
+    user: Any = Depends(_get_authenticated_user),
 ) -> Dict[str, Any]:
     """Return currently authenticated user profile."""
-    authToken = None
-    if authorization and authorization.startswith("Bearer "):
-        authToken = authorization[7:].strip()
-    elif token:
-        authToken = token.strip()
-
-    if not authToken:
-        # Fallback to demo user if no token provided
-        from api.core.security import get_current_user
-        user = get_current_user(db)
-        return {"user": user_to_dict(user), "authenticated": True, "mode": "demo"}
-
-    user = get_user_from_token(db, authToken)
     return {"user": user_to_dict(user), "authenticated": True, "mode": "user"}
 
 

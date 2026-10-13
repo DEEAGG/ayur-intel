@@ -170,11 +170,7 @@ def enrich_plant_get(
 # Dependency: get current user
 # ---------------------------------------------------------------------------
 
-def get_current_user(db: Session = Depends(get_db)) -> User:
-    """Get the current user. Phase 1 demo mode."""
-    if settings.AYURINTEL_DEMO_MODE:
-        return get_or_create_demo_user(db)
-    raise HTTPException(status_code=401, detail="Authentication required")
+from api.core.security import get_current_user
 
 
 # ---------------------------------------------------------------------------
