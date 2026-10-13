@@ -304,28 +304,45 @@
     var method = (opts && opts.method ? opts.method : "GET").toUpperCase();
     var isGet = method === "GET";
 
+    // All protected API calls must carry the current signed-in user's bearer token.
+    // Keep caller-provided headers/options intact, while safely adding Authorization.
+    var requestOpts = Object.assign({}, opts || {});
+    var requestHeaders = new Headers((opts && opts.headers) || {});
+    var authToken = (window.AYUR_AUTH && typeof window.AYUR_AUTH.getToken === "function")
+      ? window.AYUR_AUTH.getToken()
+      : "";
+    if (authToken && !requestHeaders.has("Authorization")) {
+      requestHeaders.set("Authorization", "Bearer " + authToken);
+    }
+    requestOpts.headers = requestHeaders;
+
+    // Scope cached responses and in-flight deduplication to the active session so
+    // switching accounts cannot reuse another user's previously loaded case data.
+    var cacheKey = url + "::session:" + (authToken || "anonymous");
+
     if (!isGet) {
       // Invalidate relevant cache on mutation
       invalidateClientApiCache("/api/cases");
     } else {
-      // Check client memory cache
-      var cached = _clientApiCache.get(url);
+      var cached = _clientApiCache.get(cacheKey);
       if (cached && (Date.now() - cached.ts < CLIENT_CACHE_TTL)) {
         return cached.data;
       }
-      // Deduplicate concurrent in-flight requests for identical GET url
-      if (_inFlightApiRequests.has(url)) {
-        return _inFlightApiRequests.get(url);
+      if (_inFlightApiRequests.has(cacheKey)) {
+        return _inFlightApiRequests.get(cacheKey);
       }
     }
 
     var requestPromise = (async function () {
       try {
-        var resp = await fetch(url, opts || {});
-        if (!resp.ok) { var err = await resp.text(); throw new Error(err); }
+        var resp = await fetch(url, requestOpts);
+        if (!resp.ok) {
+          var err = await resp.text();
+          throw new Error("HTTP " + resp.status + " " + url + ": " + err);
+        }
         var json = await resp.json();
         if (isGet) {
-          _clientApiCache.set(url, { ts: Date.now(), data: json });
+          _clientApiCache.set(cacheKey, { ts: Date.now(), data: json });
         }
         return json;
       } catch (e) {
@@ -333,13 +350,13 @@
         throw e;
       } finally {
         if (isGet) {
-          _inFlightApiRequests.delete(url);
+          _inFlightApiRequests.delete(cacheKey);
         }
       }
     })();
 
     if (isGet) {
-      _inFlightApiRequests.set(url, requestPromise);
+      _inFlightApiRequests.set(cacheKey, requestPromise);
     }
 
     return await requestPromise;
