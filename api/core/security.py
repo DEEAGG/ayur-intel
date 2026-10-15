@@ -112,6 +112,7 @@ def validate_search_query(value: str) -> str:
 
 
 def get_authenticated_user(
+    request: Request = None,
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ) -> User:
@@ -132,10 +133,41 @@ def get_authenticated_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return get_user_from_token(db, authToken)
+    is_bg = False
+    if request:
+        try:
+            if request.headers.get("X-Background-Request", "").lower() in ("true", "1"):
+                is_bg = True
+            elif request.url.path.endswith("/api/auth/me"):
+                is_bg = True
+        except Exception:
+            pass
+
+    return get_user_from_token(db, authToken, request=request, is_background_request=is_bg)
+
+
+def require_admin(
+    user: User = Depends(get_authenticated_user),
+) -> User:
+    """Strict authorization dependency for administrative endpoints.
+
+    Security Policies:
+    - Strictly relies on get_authenticated_user (requires valid Bearer token, no demo fallback).
+    - Checks the authenticated user's current database role (user.role == 'admin').
+    - Returns 401 if unauthenticated (handled by get_authenticated_user).
+    - Returns 403 Forbidden if authenticated user is not an admin.
+    - Never trusts client-supplied headers, request bodies, or JWT claims alone.
+    """
+    if getattr(user, "role", "user") != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin privileges required",
+        )
+    return user
 
 
 def get_current_user(
+    request: Request = None,
     authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ) -> User:
@@ -163,7 +195,16 @@ def get_current_user(
         authToken = authorization[7:].strip()
 
     if authToken:
-        return get_user_from_token(db, authToken)
+        is_bg = False
+        if request:
+            try:
+                if request.headers.get("X-Background-Request", "").lower() in ("true", "1"):
+                    is_bg = True
+                elif request.url.path.endswith("/api/auth/me"):
+                    is_bg = True
+            except Exception:
+                pass
+        return get_user_from_token(db, authToken, request=request, is_background_request=is_bg)
 
     # In production, demo mode is strictly disallowed as an authentication bypass.
     if settings.is_production:

@@ -62,11 +62,14 @@ class User(Base):
     email = Column(String(200), nullable=True)
     hashed_password = Column(String(300), nullable=True)
     avatar_url = Column(String(500), nullable=True)
+    role = Column(String(20), nullable=False, default="user")
+    token_version = Column(Integer, nullable=False, default=1)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=_now_utc)
     updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)
 
     # Relationships
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan", lazy="select")
     product_cases = relationship("ProductCase", back_populates="owner", lazy="select")
     plant_discoveries = relationship("PlantDiscovery", back_populates="owner", lazy="select")
     knowledge_findings = relationship("KnowledgeFinding", back_populates="owner", lazy="select")

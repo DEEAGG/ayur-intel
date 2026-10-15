@@ -477,9 +477,18 @@
 
     try {
       var endpoint = CURRENT_MODE === 'signup' ? '/api/auth/signup' : '/api/auth/login';
+      var settingsState = {};
+      try {
+        var s = localStorage.getItem('ayur_intel_settings');
+        if (s) settingsState = JSON.parse(s);
+      } catch (_) {}
+
+      var sessTimeout = settingsState.sessionTimeout || '30m';
+      var maxLifetime = settingsState.maxSessionLifetime || '12h';
+
       var payload = CURRENT_MODE === 'signup'
         ? { full_name: fullName, email: email, password: password }
-        : { email: email, password: password };
+        : { email: email, password: password, session_timeout: sessTimeout, max_lifetime: maxLifetime };
 
       var response = await fetch(endpoint, {
         method: 'POST',
@@ -497,6 +506,9 @@
           setAlert('Account created successfully. Please sign in with your password.', 'success');
         } else {
           // LOGIN SUCCESS: Apply Remember Me strategy, save token, update UI, hide overlay
+          sessionStartTimestamp = Date.now();
+          lastUserActivityTimestamp = Date.now();
+
           if (rememberMe) {
             try {
               localStorage.setItem('ayur_remember_me', 'true');
@@ -515,6 +527,7 @@
 
           hideAuthOverlay();
           updateUIWithUser(data.user);
+          startSessionInactivityMonitor();
           showToastMsg('✅ Welcome back, ' + (data.user.display_name || data.user.username) + '!', 'success');
 
           if (window.AYUR && typeof window.AYUR.init === 'function') {
@@ -557,8 +570,13 @@
     var userPill = document.getElementById('sidebar-user-pill');
 
     if (avatarElem) {
-      if (avatarUrl && avatarUrl.startsWith('data:image')) {
-        avatarElem.innerHTML = '<img src="' + avatarUrl + '" alt="Avatar" style="width:100%;height:100%;aspect-ratio:1/1;object-fit:cover;border-radius:50%;display:block;">';
+      if (avatarUrl && avatarUrl.startsWith('data:image/')) {
+        avatarElem.textContent = '';
+        var img = document.createElement('img');
+        img.src = avatarUrl;
+        img.alt = 'Avatar';
+        img.style.cssText = 'width:100%;height:100%;aspect-ratio:1/1;object-fit:cover;border-radius:50%;display:block;';
+        avatarElem.appendChild(img);
         avatarElem.style.background = 'transparent';
       } else {
         avatarElem.textContent = initials;
@@ -566,7 +584,18 @@
       }
     }
     if (nameElem) nameElem.textContent = name;
-    if (roleElem) roleElem.textContent = email || 'Researcher';
+    if (roleElem) roleElem.textContent = (user && user.role === 'admin') ? 'Admin' : 'Researcher';
+
+    // Private Admin Console entry — revealed only when server-verified role is 'admin'
+    var adminNav = document.getElementById('nav-item-admin');
+    if (adminNav) {
+      if (user && user.role === 'admin') {
+        adminNav.style.display = 'flex';
+      } else {
+        adminNav.style.display = 'none';
+      }
+    }
+
     if (userPill) {
       userPill.onclick = function() {
         if (window.AYUR && typeof window.AYUR.navigateTo === 'function') {
@@ -579,8 +608,13 @@
     // Topbar right avatar icon
     var topbarAvatar = document.getElementById('topbar-avatar-btn');
     if (topbarAvatar) {
-      if (avatarUrl && avatarUrl.startsWith('data:image')) {
-        topbarAvatar.innerHTML = '<img src="' + avatarUrl + '" alt="Avatar" style="width:100%;height:100%;aspect-ratio:1/1;object-fit:cover;border-radius:50%;display:block;">';
+      if (avatarUrl && avatarUrl.startsWith('data:image/')) {
+        topbarAvatar.textContent = '';
+        var img2 = document.createElement('img');
+        img2.src = avatarUrl;
+        img2.alt = 'Avatar';
+        img2.style.cssText = 'width:100%;height:100%;aspect-ratio:1/1;object-fit:cover;border-radius:50%;display:block;';
+        topbarAvatar.appendChild(img2);
         topbarAvatar.style.backgroundColor = 'transparent';
       } else {
         topbarAvatar.textContent = initials[0] || 'U';
@@ -695,9 +729,31 @@
     }
   }
 
-  function logout() {
+  async function logout() {
+    var token = getToken();
+    if (token) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          }
+        });
+      } catch (e) {
+        console.warn('Backend logout notification note:', e);
+      }
+    }
     setToken('');
     setUser(null);
+    var adminNav = document.getElementById('nav-item-admin');
+    if (adminNav) adminNav.style.display = 'none';
+    if (window.AYUR && window.AYUR.state && window.AYUR.state.view === 'admin-console') {
+      window.AYUR.state.view = 'dashboard';
+    }
+    if (window.AYUR_ADMIN && typeof window.AYUR_ADMIN.clearData === 'function') {
+      window.AYUR_ADMIN.clearData();
+    }
     showToastMsg('👋 Logged out successfully', 'info');
     renderAuthCard('signin');
   }
@@ -740,28 +796,129 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Inactivity & Session Lifetime Tracking
+  // ---------------------------------------------------------------------------
+  var lastUserActivityTimestamp = Date.now();
+  var sessionStartTimestamp = Date.now();
+  var _sessionCheckInterval = null;
+  var _isHandlingExpiry = false;
+
+  function recordUserActivity() {
+    lastUserActivityTimestamp = Date.now();
+  }
+
+  ['pointerdown', 'keydown', 'scroll', 'touchstart'].forEach(function (evt) {
+    window.addEventListener(evt, recordUserActivity, { passive: true });
+  });
+
+  function parseDurationToMs(durStr, defaultSec) {
+    if (!durStr) return (defaultSec || 1800) * 1000;
+    var str = String(durStr).trim().toLowerCase();
+    if (str.endsWith('m')) return parseInt(str, 10) * 60 * 1000;
+    if (str.endsWith('h')) return parseInt(str, 10) * 3600 * 1000;
+    var num = parseInt(str, 10);
+    return isNaN(num) ? (defaultSec || 1800) * 1000 : num * 1000;
+  }
+
+  function handleSessionExpired(reason) {
+    if (_isHandlingExpiry) return;
+    _isHandlingExpiry = true;
+
+    var tok = getToken();
+    setToken('');
+    setUser(null);
+
+    var adminNav = document.getElementById('nav-item-admin');
+    if (adminNav) adminNav.style.display = 'none';
+
+    if (window.AYUR && window.AYUR.state && window.AYUR.state.view === 'admin-console') {
+      window.AYUR.state.view = 'dashboard';
+    }
+    if (window.AYUR_ADMIN && typeof window.AYUR_ADMIN.clearData === 'function') {
+      window.AYUR_ADMIN.clearData();
+    }
+
+    if (tok) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + tok,
+          'Content-Type': 'application/json'
+        }
+      }).catch(function () {});
+    }
+
+    showToastMsg('⚠️ ' + (reason || 'Session expired. Please sign in again.'), 'info');
+    renderAuthCard('signin');
+    setAlert(reason || 'Session expired. Please sign in again.', 'info');
+
+    setTimeout(function () {
+      _isHandlingExpiry = false;
+    }, 1500);
+  }
+
+  function startSessionInactivityMonitor() {
+    if (_sessionCheckInterval) clearInterval(_sessionCheckInterval);
+    _sessionCheckInterval = setInterval(function () {
+      var token = getToken();
+      if (!token) return;
+
+      var s = {};
+      try {
+        var saved = localStorage.getItem('ayur_intel_settings');
+        if (saved) s = JSON.parse(saved);
+      } catch (_) {}
+
+      var idleTimeoutMs = parseDurationToMs(s.sessionTimeout || '30m', 1800);
+      var maxLifetimeMs = parseDurationToMs(s.maxSessionLifetime || '12h', 43200);
+
+      var now = Date.now();
+
+      // Check Inactivity Expiry
+      if (now - lastUserActivityTimestamp >= idleTimeoutMs) {
+        handleSessionExpired('Session expired due to inactivity. Please sign in again.');
+        return;
+      }
+
+      // Check Maximum Session Lifetime Expiry
+      if (now - sessionStartTimestamp >= maxLifetimeMs) {
+        handleSessionExpired('Maximum session lifetime reached. Please sign in again.');
+        return;
+      }
+    }, 10000);
+  }
+
+  // ---------------------------------------------------------------------------
   // Auto Authentication Check on Page Load
   // ---------------------------------------------------------------------------
   async function checkAuthOnLoad() {
     var token = getToken();
     if (!token) {
+      var adminNav = document.getElementById('nav-item-admin');
+      if (adminNav) adminNav.style.display = 'none';
       renderAuthCard('signin');
       return;
     }
 
     try {
       var res = await fetch('/api/auth/me', {
-        headers: { 'Authorization': 'Bearer ' + token }
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'X-Background-Request': 'true'
+        }
       });
       var data = await res.json();
       if (res.ok && data.user) {
+        if (data.session && data.session.created_at) {
+          sessionStartTimestamp = new Date(data.session.created_at).getTime();
+        }
+        lastUserActivityTimestamp = Date.now();
         setUser(data.user);
         updateUIWithUser(data.user);
         hideAuthOverlay();
+        startSessionInactivityMonitor();
       } else {
-        setToken('');
-        setUser(null);
-        renderAuthCard('signin');
+        handleSessionExpired(data.detail || 'Session expired. Please sign in again.');
       }
     } catch (e) {
       console.error('Auth check error:', e);
@@ -769,7 +926,10 @@
       if (cached) {
         updateUIWithUser(cached);
         hideAuthOverlay();
+        startSessionInactivityMonitor();
       } else {
+        var adminNav3 = document.getElementById('nav-item-admin');
+        if (adminNav3) adminNav3.style.display = 'none';
         renderAuthCard('signin');
       }
     }
@@ -794,7 +954,10 @@
     getAvatarColor: getAvatarColor,
     getInitials: getInitials,
     AVATAR_COLORS: AVATAR_COLORS,
-    updateUIWithUser: updateUIWithUser
+    updateUIWithUser: updateUIWithUser,
+    recordUserActivity: recordUserActivity,
+    handleSessionExpired: handleSessionExpired,
+    startSessionInactivityMonitor: startSessionInactivityMonitor
   };
 
   document.addEventListener('DOMContentLoaded', function () {

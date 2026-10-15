@@ -13,12 +13,15 @@ import hmac
 import re
 import secrets
 import time
-from typing import Dict, Any, Optional
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional, Tuple, Union
 
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from api.models.models import User
+from api.models.security import UserSession
+from api.services.audit_service import log_action
 from api.core.config import settings
 
 logger = logging.getLogger("ayur_intel.auth")
@@ -26,6 +29,68 @@ logger = logging.getLogger("ayur_intel.auth")
 DEFAULT_TOKEN_EXPIRE_SECONDS = 86400      # 24 hours default
 MIN_TOKEN_EXPIRE_SECONDS = 60              # 1 minute minimum
 MAX_TOKEN_EXPIRE_SECONDS = 30 * 24 * 3600  # 30 days maximum
+
+# Supported Inactivity Timeout options: 5m, 15m, 30m, 1h, 2h, 4h
+IDLE_TIMEOUT_MAP: Dict[Union[str, int], int] = {
+    "5m": 300,
+    "15m": 900,
+    "30m": 1800,
+    "1h": 3600,
+    "2h": 7200,
+    "4h": 14400,
+    300: 300,
+    900: 900,
+    1800: 1800,
+    3600: 3600,
+    7200: 7200,
+    14400: 14400,
+}
+DEFAULT_IDLE_TIMEOUT_SECONDS = 1800  # 30 minutes
+
+# Supported Maximum Session Lifetime options: 8h, 12h, 24h
+MAX_LIFETIME_MAP: Dict[Union[str, int], int] = {
+    "8h": 28800,
+    "12h": 43200,
+    "24h": 86400,
+    28800: 28800,
+    43200: 43200,
+    86400: 86400,
+}
+DEFAULT_MAX_LIFETIME_SECONDS = 43200  # 12 hours (Default)
+
+
+def parse_timeout_settings(
+    session_timeout: Optional[Any] = None,
+    max_lifetime: Optional[Any] = None,
+) -> Tuple[int, int]:
+    """Parse and validate session timeout (inactivity) and max session lifetime.
+
+    Supported inactivity timeouts: 5m (300s), 15m (900s), 30m (1800s), 1h (3600s), 2h (7200s), 4h (14400s).
+    Supported max session lifetimes: 8h (28800s), 12h (43200s), 24h (86400s).
+
+    Security bounds:
+    - Never allow frontend values to override server-enforced safety limits.
+    - Clamped to safe predefined intervals.
+    """
+    idle_sec = DEFAULT_IDLE_TIMEOUT_SECONDS
+    if session_timeout is not None:
+        if isinstance(session_timeout, str) and session_timeout.strip().lower() in IDLE_TIMEOUT_MAP:
+            idle_sec = IDLE_TIMEOUT_MAP[session_timeout.strip().lower()]
+        elif session_timeout in IDLE_TIMEOUT_MAP:
+            idle_sec = IDLE_TIMEOUT_MAP[session_timeout]
+
+    max_sec = DEFAULT_MAX_LIFETIME_SECONDS
+    if max_lifetime is not None:
+        if isinstance(max_lifetime, str) and max_lifetime.strip().lower() in MAX_LIFETIME_MAP:
+            max_sec = MAX_LIFETIME_MAP[max_lifetime.strip().lower()]
+        elif max_lifetime in MAX_LIFETIME_MAP:
+            max_sec = MAX_LIFETIME_MAP[max_lifetime]
+
+    if idle_sec > max_sec:
+        idle_sec = max_sec
+
+    return idle_sec, max_sec
+
 
 
 def get_token_ttl_seconds() -> int:
@@ -223,12 +288,55 @@ def user_to_dict(user: User) -> Dict[str, Any]:
         "username": user.username,
         "display_name": user.display_name or user.username,
         "email": user.email or "",
+        "role": getattr(user, "role", "user") or "user",
         "avatar_url": getattr(user, "avatar_url", None) or "",
         "created_at": user.created_at.isoformat() if user.created_at else "",
     }
 
 
-def signup_user(db: Session, full_name: str, email: str, password: str) -> Dict[str, Any]:
+def parse_device_info(user_agent: Optional[str]) -> str:
+    """Extract human-readable device and browser summary from User-Agent string."""
+    if not user_agent:
+        return "Unknown Device"
+    ua = user_agent.lower()
+
+    # OS detection
+    os_name = "Unknown OS"
+    if "windows" in ua:
+        os_name = "Windows"
+    elif "macintosh" in ua or "mac os" in ua:
+        os_name = "macOS"
+    elif "android" in ua:
+        os_name = "Android"
+    elif "iphone" in ua or "ipad" in ua or "ipod" in ua:
+        os_name = "iOS"
+    elif "linux" in ua:
+        os_name = "Linux"
+
+    # Browser detection
+    browser = "Unknown Browser"
+    if "edg/" in ua or "edge" in ua:
+        browser = "Edge"
+    elif "chrome" in ua and "chromium" not in ua and "edg" not in ua:
+        browser = "Chrome"
+    elif "firefox" in ua:
+        browser = "Firefox"
+    elif "safari" in ua and "chrome" not in ua:
+        browser = "Safari"
+    elif "curl" in ua or "postman" in ua or "python" in ua or "httpx" in ua:
+        browser = "API Client"
+
+    return f"{browser} on {os_name}"
+
+
+def signup_user(
+    db: Session,
+    full_name: str,
+    email: str,
+    password: str,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
     """Register a new user account."""
     clean_email = email.strip().lower()
     clean_name = full_name.strip()
@@ -258,13 +366,64 @@ def signup_user(db: Session, full_name: str, email: str, password: str) -> Dict[
         display_name=clean_name or base_username.capitalize(),
         email=clean_email,
         hashed_password=hashed,
+        role="user",
+        token_version=1,
         is_active=True,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    token = create_access_token({"sub": user.public_id, "email": user.email})
+    # Issue active session for newly registered user
+    idle_timeout_seconds, max_lifetime_seconds = parse_timeout_settings()
+    now_utc = datetime.now(timezone.utc)
+    expires_at = now_utc + timedelta(seconds=max_lifetime_seconds)
+    device_info = parse_device_info(user_agent)
+
+    session = UserSession(
+        user_id=user.id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        device_info=device_info,
+        is_revoked=False,
+        idle_timeout_seconds=idle_timeout_seconds,
+        max_lifetime_seconds=max_lifetime_seconds,
+        created_at=now_utc,
+        last_active_at=now_utc,
+        expires_at=expires_at,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    token = create_access_token(
+        {
+            "sub": user.public_id,
+            "email": user.email,
+            "sid": session.public_id,
+        },
+        ttl_seconds=max_lifetime_seconds,
+    )
+
+    try:
+        log_action(
+            db,
+            action="SIGNUP",
+            resource_type="AUTH",
+            resource_id=session.public_id,
+            user_id=user.id,
+            user_public_id=user.public_id,
+            username=user.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="User registered and session created",
+        )
+        db.commit()
+    except Exception as e:
+        logger.debug("Failed to record signup audit log: %s", e)
+        db.rollback()
+
     logger.info("User registered successfully: %s (%s)", user.display_name, user.email)
     return {
         "token": token,
@@ -272,7 +431,15 @@ def signup_user(db: Session, full_name: str, email: str, password: str) -> Dict[
     }
 
 
-def login_user(db: Session, email_or_username: str, password: str) -> Dict[str, Any]:
+def login_user(
+    db: Session,
+    email_or_username: str,
+    password: str,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    session_timeout: Optional[str] = None,
+    max_lifetime: Optional[str] = None,
+) -> Dict[str, Any]:
     """Authenticate an existing user with email/username and password."""
     clean_identifier = email_or_username.strip().lower()
     
@@ -289,21 +456,108 @@ def login_user(db: Session, email_or_username: str, password: str) -> Dict[str, 
     # An account without a configured password must NEVER become claimable through login.
     if not user or not user.hashed_password or not user.is_active:
         verify_password(password, DUMMY_PASSWORD_HASH)
+        try:
+            log_action(
+                db,
+                action="LOGIN",
+                resource_type="AUTH",
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="FAILED",
+                detail="Invalid credentials or account inactive",
+                metadata={"identifier": clean_identifier},
+            )
+            db.commit()
+        except Exception as e:
+            logger.debug("Failed to record login audit log: %s", e)
+            db.rollback()
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not verify_password(password, user.hashed_password):
+        try:
+            log_action(
+                db,
+                action="LOGIN",
+                resource_type="AUTH",
+                user_id=user.id,
+                user_public_id=user.public_id,
+                username=user.username,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="FAILED",
+                detail="Invalid password",
+                metadata={"identifier": clean_identifier},
+            )
+            db.commit()
+        except Exception as e:
+            logger.debug("Failed to record login audit log: %s", e)
+            db.rollback()
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    token = create_access_token({"sub": user.public_id, "email": user.email})
-    logger.info("User logged in: %s", user.email or user.username)
+    # Successful login: create active session
+    idle_timeout_seconds, max_lifetime_seconds = parse_timeout_settings(session_timeout, max_lifetime)
+    now_utc = datetime.now(timezone.utc)
+    expires_at = now_utc + timedelta(seconds=max_lifetime_seconds)
+    device_info = parse_device_info(user_agent)
+
+    session = UserSession(
+        user_id=user.id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        device_info=device_info,
+        is_revoked=False,
+        idle_timeout_seconds=idle_timeout_seconds,
+        max_lifetime_seconds=max_lifetime_seconds,
+        created_at=now_utc,
+        last_active_at=now_utc,
+        expires_at=expires_at,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    token = create_access_token(
+        {
+            "sub": user.public_id,
+            "email": user.email,
+            "sid": session.public_id,
+        },
+        ttl_seconds=max_lifetime_seconds,
+    )
+
+    try:
+        log_action(
+            db,
+            action="LOGIN",
+            resource_type="AUTH",
+            resource_id=session.public_id,
+            user_id=user.id,
+            user_public_id=user.public_id,
+            username=user.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="User logged in successfully",
+        )
+        db.commit()
+    except Exception as e:
+        logger.debug("Failed to record login audit log: %s", e)
+        db.rollback()
+
+    logger.info("User logged in: %s (session: %s)", user.email or user.username, session.public_id)
     return {
         "token": token,
         "user": user_to_dict(user),
     }
 
 
-def get_user_from_token(db: Session, token: str) -> User:
-    """Retrieve User model instance from authorization token."""
+def get_user_from_token(
+    db: Session,
+    token: str,
+    request: Optional[Any] = None,
+    is_background_request: bool = False,
+) -> User:
+    """Retrieve User model instance from authorization token and validate session."""
     payload = verify_access_token(token)
     if not payload or "sub" not in payload:
         raise HTTPException(status_code=401, detail="Invalid or expired authorization token")
@@ -312,7 +566,282 @@ def get_user_from_token(db: Session, token: str) -> User:
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User account not found or inactive")
 
+    sid = payload.get("sid")
+    if not sid:
+        # Admin accounts strictly require an active session and cannot use legacy tokens
+        if getattr(user, "role", "user") == "admin":
+            raise HTTPException(
+                status_code=401,
+                detail="Session identifier missing from token. Admin access requires an active session.",
+            )
+
+        # Deliberate legacy token policy:
+        # If the user has any persisted session records in user_sessions, legacy tokens
+        # without sid are strictly rejected to prevent session validation bypass.
+        user_has_sessions = db.query(UserSession.id).filter(UserSession.user_id == user.id).first()
+        if user_has_sessions:
+            raise HTTPException(
+                status_code=401,
+                detail="Session identifier missing from token. Please sign in again.",
+            )
+        # If the user has no recorded sessions (e.g. synthetic test users in legacy test suites),
+        # allow through only if token_version is default 1
+        if getattr(user, "token_version", 1) > 1:
+            raise HTTPException(
+                status_code=401,
+                detail="Session has been revoked. Please sign in again.",
+            )
+        return user
+
+    # Session exists in token - validate against user_sessions table
+    session = db.query(UserSession).filter(
+        UserSession.public_id == sid,
+        UserSession.user_id == user.id,
+    ).first()
+
+    if not session or session.is_revoked:
+        raise HTTPException(
+            status_code=401,
+            detail="Session has been revoked or expired. Please sign in again.",
+        )
+
+    now_utc = datetime.now(timezone.utc)
+
+    # 1. Absolute Maximum Session Lifetime check (enforced using trusted server-side creation time)
+    created_at = session.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+
+    max_life_sec = getattr(session, "max_lifetime_seconds", None) or DEFAULT_MAX_LIFETIME_SECONDS
+    abs_expires_at = created_at + timedelta(seconds=max_life_sec)
+
+    sess_exp = session.expires_at
+    if sess_exp.tzinfo is None:
+        sess_exp = sess_exp.replace(tzinfo=timezone.utc)
+
+    effective_max_exp = min(abs_expires_at, sess_exp)
+    if now_utc >= effective_max_exp:
+        session.is_revoked = True
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=401,
+            detail="Session has expired. Maximum session lifetime reached.",
+        )
+
+    # 2. Inactivity (Idle) Timeout check (enforced using server-side last_active_at)
+    last_active = session.last_active_at
+    if last_active.tzinfo is None:
+        last_active = last_active.replace(tzinfo=timezone.utc)
+
+    idle_sec = getattr(session, "idle_timeout_seconds", None) or DEFAULT_IDLE_TIMEOUT_SECONDS
+    if now_utc >= last_active + timedelta(seconds=idle_sec):
+        session.is_revoked = True
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(
+            status_code=401,
+            detail="Session has expired due to inactivity. Please sign in again.",
+        )
+
+    # 3. Activity tracking: update only for meaningful user activity (not background requests)
+    if not is_background_request:
+        if (now_utc - last_active).total_seconds() >= 10:
+            session.last_active_at = now_utc
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+
     return user
+
+
+def logout_user_session(
+    db: Session,
+    user: User,
+    token: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Revoke only the current active session for the authenticated user."""
+    sid = None
+    if token:
+        payload = verify_access_token(token)
+        if payload:
+            sid = payload.get("sid")
+
+    if sid:
+        session = db.query(UserSession).filter(
+            UserSession.public_id == sid,
+            UserSession.user_id == user.id,
+        ).first()
+
+        if session:
+            session.is_revoked = True
+            db.commit()
+
+        try:
+            log_action(
+                db,
+                action="LOGOUT",
+                resource_type="AUTH",
+                resource_id=sid,
+                user_id=user.id,
+                user_public_id=user.public_id,
+                username=user.username,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="SUCCESS",
+                detail="User session logged out successfully",
+            )
+            db.commit()
+        except Exception as e:
+            logger.debug("Logout audit log note: %s", e)
+            db.rollback()
+    else:
+        try:
+            log_action(
+                db,
+                action="LOGOUT",
+                resource_type="AUTH",
+                user_id=user.id,
+                user_public_id=user.public_id,
+                username=user.username,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="SUCCESS",
+                detail="User logged out",
+            )
+            db.commit()
+        except Exception as e:
+            logger.debug("Logout audit log note: %s", e)
+            db.rollback()
+
+    logger.info("User logged out: %s (session: %s)", user.username, sid or "legacy")
+    return {"message": "Logged out successfully"}
+
+
+def logout_all_user_sessions(
+    db: Session,
+    user: User,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Revoke all active sessions for a user across all devices."""
+    db.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.is_revoked == False,
+    ).update({"is_revoked": True})
+
+    user.token_version = (user.token_version or 1) + 1
+    db.commit()
+
+    try:
+        log_action(
+            db,
+            action="LOGOUT_ALL",
+            resource_type="AUTH",
+            user_id=user.id,
+            user_public_id=user.public_id,
+            username=user.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="All user sessions revoked successfully",
+        )
+        db.commit()
+    except Exception as e:
+        logger.debug("Logout all audit log note: %s", e)
+        db.rollback()
+
+    logger.info("All sessions revoked for user: %s", user.username)
+    return {"message": "All sessions logged out successfully"}
+
+
+def update_session_preferences(
+    db: Session,
+    user: User,
+    token: Optional[str] = None,
+    session_timeout: Optional[str] = None,
+    max_session_lifetime: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Update timeout preferences for the user's active session.
+
+    Security Policies:
+    - Rejects missing, revoked, or expired sessions.
+    - Changing preferences must not silently grant a longer lifetime to an already-expired session.
+    - Validates values against strictly allowed intervals.
+    - Ensures token expiry never extends beyond max session lifetime.
+    """
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication token required")
+
+    payload = verify_access_token(token)
+    if not payload or not payload.get("sid"):
+        raise HTTPException(status_code=401, detail="Active session required to update session settings")
+
+    sid = payload["sid"]
+    session = (
+        db.query(UserSession)
+        .filter(UserSession.public_id == sid, UserSession.user_id == user.id)
+        .first()
+    )
+
+    if not session or session.is_revoked:
+        raise HTTPException(status_code=401, detail="Session has been revoked or expired")
+
+    now_utc = datetime.now(timezone.utc)
+    created_at = session.created_at.replace(tzinfo=timezone.utc) if session.created_at.tzinfo is None else session.created_at
+    last_active = session.last_active_at.replace(tzinfo=timezone.utc) if session.last_active_at.tzinfo is None else session.last_active_at
+
+    current_max = getattr(session, "max_lifetime_seconds", None) or DEFAULT_MAX_LIFETIME_SECONDS
+    if now_utc >= created_at + timedelta(seconds=current_max):
+        session.is_revoked = True
+        db.commit()
+        raise HTTPException(status_code=401, detail="Session has expired. Maximum session lifetime reached.")
+
+    current_idle = getattr(session, "idle_timeout_seconds", None) or DEFAULT_IDLE_TIMEOUT_SECONDS
+    if now_utc >= last_active + timedelta(seconds=current_idle):
+        session.is_revoked = True
+        db.commit()
+        raise HTTPException(status_code=401, detail="Session has expired due to inactivity")
+
+    updated = False
+    if session_timeout:
+        clean_timeout = str(session_timeout).strip().lower()
+        if clean_timeout not in IDLE_TIMEOUT_MAP:
+            raise HTTPException(status_code=400, detail=f"Invalid session_timeout: {session_timeout}")
+        session.idle_timeout_seconds = IDLE_TIMEOUT_MAP[clean_timeout]
+        updated = True
+
+    if max_session_lifetime:
+        clean_max = str(max_session_lifetime).strip().lower()
+        if clean_max not in MAX_LIFETIME_MAP:
+            raise HTTPException(status_code=400, detail=f"Invalid max_session_lifetime: {max_session_lifetime}")
+        new_max_sec = MAX_LIFETIME_MAP[clean_max]
+        new_abs_exp = created_at + timedelta(seconds=new_max_sec)
+        # Cannot extend already-expired lifetime; if new max lifetime is already in the past, revoke immediately
+        if new_abs_exp <= now_utc:
+            session.is_revoked = True
+            db.commit()
+            raise HTTPException(status_code=401, detail="Session has expired. Maximum session lifetime reached.")
+        session.max_lifetime_seconds = new_max_sec
+        session.expires_at = new_abs_exp
+        updated = True
+
+    if updated:
+        db.commit()
+        db.refresh(session)
+
+    return {
+        "status": "success",
+        "idle_timeout_seconds": session.idle_timeout_seconds,
+        "max_lifetime_seconds": session.max_lifetime_seconds,
+    }
 
 
 def update_user_profile(
@@ -369,6 +898,19 @@ def update_user_avatar(db: Session, user: User, avatar_url: str) -> Dict[str, An
 
 def delete_user_account(db: Session, user: User) -> Dict[str, Any]:
     """Permanently delete user account and associated session."""
+    # Safeguard: Prevent deleting the sole active administrator account
+    if getattr(user, "role", "user") == "admin":
+        active_admins = (
+            db.query(User)
+            .filter(User.role == "admin", User.is_active == True)
+            .count()
+        )
+        if active_admins <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete the sole active administrator account",
+            )
+
     user_id = user.id
     display_name = user.display_name
     db.delete(user)

@@ -301,12 +301,32 @@
   }
 
   async function api(url, opts) {
-    var method = (opts && opts.method ? opts.method : "GET").toUpperCase();
+    var options = Object.assign({}, opts || {});
+    var headers = Object.assign({}, options.headers || {});
+
+    // Attach Authorization header if active session token exists and not already specified
+    var hasAuth = false;
+    for (var k in headers) {
+      if (headers.hasOwnProperty(k) && k.toLowerCase() === "authorization") {
+        hasAuth = true;
+        break;
+      }
+    }
+    if (!hasAuth && window.AYUR_AUTH && typeof window.AYUR_AUTH.getToken === "function") {
+      var tok = window.AYUR_AUTH.getToken();
+      if (tok) {
+        headers["Authorization"] = "Bearer " + tok;
+      }
+    }
+    options.headers = headers;
+
+    var method = (options.method ? options.method : "GET").toUpperCase();
     var isGet = method === "GET";
+    var isCacheableGet = isGet && !url.startsWith("/api/admin");
 
     // All protected API calls must carry the current signed-in user's bearer token.
     // Keep caller-provided headers/options intact, while safely adding Authorization.
-    var requestOpts = Object.assign({}, opts || {});
+    var requestOpts = Object.assign({}, options);
     var requestHeaders = new Headers((opts && opts.headers) || {});
     var authToken = (window.AYUR_AUTH && typeof window.AYUR_AUTH.getToken === "function")
       ? window.AYUR_AUTH.getToken()
@@ -323,7 +343,7 @@
     if (!isGet) {
       // Invalidate relevant cache on mutation
       invalidateClientApiCache("/api/cases");
-    } else {
+    } else if (isCacheableGet) {
       var cached = _clientApiCache.get(cacheKey);
       if (cached && (Date.now() - cached.ts < CLIENT_CACHE_TTL)) {
         return cached.data;
@@ -337,11 +357,20 @@
       try {
         var resp = await fetch(url, requestOpts);
         if (!resp.ok) {
-          var err = await resp.text();
-          throw new Error("HTTP " + resp.status + " " + url + ": " + err);
+          var errText = await resp.text();
+          var errObj = null;
+          try { errObj = JSON.parse(errText); } catch (_) {}
+          var msg = (errObj && (errObj.detail || errObj.message || errObj.error)) || errText || ("HTTP " + resp.status);
+          var err = new Error("HTTP " + resp.status + " " + url + ": " + msg);
+          err.status = resp.status;
+          err.data = errObj;
+          if (resp.status === 401 && window.AYUR_AUTH && typeof window.AYUR_AUTH.handleSessionExpired === 'function') {
+            window.AYUR_AUTH.handleSessionExpired(msg);
+          }
+          throw err;
         }
         var json = await resp.json();
-        if (isGet) {
+        if (isCacheableGet) {
           _clientApiCache.set(cacheKey, { ts: Date.now(), data: json });
         }
         return json;
@@ -522,6 +551,19 @@
       content.innerHTML = renderSettings();
     } else if (state.view === "profile") {
       content.innerHTML = renderProfilePage();
+    } else if (state.view === "admin-console") {
+      var currentUser = (window.AYUR_AUTH && typeof window.AYUR_AUTH.getUser === 'function') ? window.AYUR_AUTH.getUser() : null;
+      if (!currentUser || currentUser.role !== 'admin') {
+        state.view = "dashboard";
+        content.innerHTML = renderDashboard();
+        if (typeof showToast === 'function') {
+          showToast('⚠️ Administrator privileges required.', 'error');
+        }
+      } else if (window.AYUR_ADMIN && typeof window.AYUR_ADMIN.render === "function") {
+        content.innerHTML = window.AYUR_ADMIN.render();
+      } else {
+        content.innerHTML = '<div class="card"><div class="card-body"><p>Admin Console loading...</p></div></div>';
+      }
     } else {
       content.innerHTML = renderDashboard();
     }
@@ -530,6 +572,9 @@
 
     updateTopBarAndActiveNav(state.view);
     bindEvents();
+    if (state.view === 'admin-console' && window.AYUR_ADMIN && typeof window.AYUR_ADMIN.bindEvents === 'function') {
+      window.AYUR_ADMIN.bindEvents();
+    }
     if ((state.view === 'passport-wizard' || state.view === 'passport') && window.AYUR && window.AYUR.bindPassportEvents) { window.AYUR.bindPassportEvents(); }
 
     // Intentional Scroll Rules:
@@ -8333,7 +8378,9 @@
         "monitoring-center": { icon: "visibility", title: "Continuous Monitoring" },
         "source-router": { icon: "database", title: "AI Source Router" },
         "review-queue": { icon: "psychology", title: "Expert Review" },
-        "settings": { icon: "settings", title: "System Settings" }
+        "settings": { icon: "settings", title: "System Settings" },
+        "admin-console": { icon: "admin_panel_settings", title: "Admin Console & Security" },
+        "profile": { icon: "account_circle", title: "User Profile" }
       };
 
       var info = viewTitles[view] || { icon: "dashboard", title: "Overview" };
@@ -8637,7 +8684,7 @@
       growthTreeBg: true,
       tfaEnabled: false,
       sessionTimeout: '30m',
-      role: 'Researcher',
+      maxSessionLifetime: '12h',
       defaultStage: 'IDEA',
       defaultPathway: 'Both',
       patentAlerts: true,
@@ -8667,6 +8714,26 @@
       console.warn('Could not save setting:', e);
     }
 
+    // Sync session timeout settings to backend
+    if (key === 'sessionTimeout' || key === 'maxSessionLifetime') {
+      var tok = (window.AYUR_AUTH && typeof window.AYUR_AUTH.getToken === 'function') ? window.AYUR_AUTH.getToken() : '';
+      if (tok) {
+        fetch('/api/auth/session/settings', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + tok
+          },
+          body: JSON.stringify({
+            session_timeout: s.sessionTimeout,
+            max_session_lifetime: s.maxSessionLifetime || '12h'
+          })
+        }).catch(function (e) {
+          console.warn('Could not sync session settings:', e);
+        });
+      }
+    }
+
     // Reactive actions
     if (key === 'growthTreeBg') {
       var canvas = document.getElementById('growth-tree-canvas');
@@ -8674,6 +8741,10 @@
       toast('Growth Tree Background ' + (val ? 'Enabled 🌿' : 'Disabled 🚫'), 'info');
     } else if (key === 'tfaEnabled') {
       toast('Two-Factor Authentication ' + (val ? 'Enabled 🔒' : 'Disabled 🔓'), 'info');
+    } else if (key === 'sessionTimeout') {
+      toast('Inactivity timeout set to ' + val + ' ⏱️', 'info');
+    } else if (key === 'maxSessionLifetime') {
+      toast('Maximum session lifetime set to ' + val + ' ⏳', 'info');
     } else if (key === 'patentAlerts' || key === 'regulatoryUpdates' || key === 'expiryReminders' || key === 'emailDigest') {
       toast('Notification preference updated 🔔', 'info');
     } else if (key === 'accentColor') {
@@ -8810,11 +8881,24 @@
       + '<div class="settings-row-item">'
       + '<div class="settings-row-label">' + icon('timer', 16) + ' <span>Session Timeout</span></div>'
       + '<div class="settings-row-value">'
-      + '<select class="settings-select" onchange="window.updateSetting(\'sessionTimeout\', this.value)">'
+      + '<select class="settings-select" id="settings-session-timeout" onchange="window.updateSetting(\'sessionTimeout\', this.value)">'
       + '<option value="5m" ' + (s.sessionTimeout === '5m' ? 'selected' : '') + '>5 minutes</option>'
       + '<option value="15m" ' + (s.sessionTimeout === '15m' ? 'selected' : '') + '>15 minutes</option>'
       + '<option value="30m" ' + (s.sessionTimeout === '30m' ? 'selected' : '') + '>30 minutes</option>'
       + '<option value="1h" ' + (s.sessionTimeout === '1h' ? 'selected' : '') + '>1 hour</option>'
+      + '<option value="2h" ' + (s.sessionTimeout === '2h' ? 'selected' : '') + '>2 hours</option>'
+      + '<option value="4h" ' + (s.sessionTimeout === '4h' ? 'selected' : '') + '>4 hours</option>'
+      + '</select>'
+      + '</div>'
+      + '</div>'
+
+      + '<div class="settings-row-item">'
+      + '<div class="settings-row-label">' + icon('hourglass_top', 16) + ' <span>Max Session Lifetime</span></div>'
+      + '<div class="settings-row-value">'
+      + '<select class="settings-select" id="settings-max-session-lifetime" onchange="window.updateSetting(\'maxSessionLifetime\', this.value)">'
+      + '<option value="8h" ' + (s.maxSessionLifetime === '8h' ? 'selected' : '') + '>8 hours</option>'
+      + '<option value="12h" ' + (s.maxSessionLifetime === '12h' || !s.maxSessionLifetime ? 'selected' : '') + '>12 hours (Default)</option>'
+      + '<option value="24h" ' + (s.maxSessionLifetime === '24h' ? 'selected' : '') + '>24 hours</option>'
       + '</select>'
       + '</div>'
       + '</div>'
@@ -8846,13 +8930,7 @@
 
       + '<div class="settings-row-item">'
       + '<div class="settings-row-label">' + icon('admin_panel_settings', 16) + ' <span>Account Role</span></div>'
-      + '<div class="settings-row-value">'
-      + '<select class="settings-select" onchange="window.updateSetting(\'role\', this.value)">'
-      + '<option value="Researcher" ' + (s.role === 'Researcher' ? 'selected' : '') + '>Researcher</option>'
-      + '<option value="Admin" ' + (s.role === 'Admin' ? 'selected' : '') + '>Admin</option>'
-      + '<option value="Auditor" ' + (s.role === 'Auditor' ? 'selected' : '') + '>Auditor</option>'
-      + '</select>'
-      + '</div>'
+      + '<div class="settings-row-value"><span class="badge-status-green">' + escapeHtml((user && user.role === 'admin') ? 'Admin' : 'Researcher') + '</span></div>'
       + '</div>'
 
       + '<div class="settings-row-item">'
@@ -10392,7 +10470,7 @@
       + '<h2 class="profile-user-name">' + escapeHtml(name) + '</h2>'
       + '<p class="profile-user-email">' + escapeHtml(email) + '</p>'
       + '<div class="profile-badge-wrap">'
-      + '<span class="profile-role-badge">' + icon('verified_user', 14) + ' Researcher</span>'
+      + '<span class="profile-role-badge">' + icon('verified_user', 14) + ' ' + escapeHtml((user && user.role === 'admin') ? 'Admin' : 'Researcher') + '</span>'
       + '</div>'
       + '</div>'
       + '</div>'
@@ -10831,7 +10909,8 @@
     exploreDemoCase: exploreDemoCase,
     openKnowledgeGraph: openKnowledgeGraph,
     invalidateClientApiCache: invalidateClientApiCache,
-    invalidateCaseModuleCache: invalidateCaseModuleCache
+    invalidateCaseModuleCache: invalidateCaseModuleCache,
+    api: api
   };
 
   // Boot

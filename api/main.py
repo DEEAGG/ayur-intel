@@ -28,7 +28,7 @@ from api.routers import (
     health, innovation, knowledge, patent, patent_analysis, ip_strategy,
     regulatory, plant_discovery, product_cases, jurisdiction_comparison,
     evidence, risk, decision, monitoring, knowledge_graph, source_router,
-    security, review, analytics, ingredients, auth, assistant
+    security, review, analytics, ingredients, auth, assistant, admin
 )
 
 # ---------------------------------------------------------------------------
@@ -103,6 +103,7 @@ app.include_router(review.router)
 app.include_router(analytics.router)
 app.include_router(ingredients.router)
 app.include_router(assistant.router)
+app.include_router(admin.router)
 
 # ---------------------------------------------------------------------------
 # Security Headers Middleware
@@ -195,6 +196,18 @@ async def startup():
             db.close()
     except Exception as e:
         logger.warning("Startup demo initialization note: %s", e)
+
+    # Safely bootstrap designated admin account if configured
+    try:
+        from api.core.database import SessionLocal
+        from api.services.admin_service import bootstrap_admin_user
+        db = SessionLocal()
+        try:
+            bootstrap_admin_user(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("Startup admin bootstrap note: %s", e)
 
     logger.info("AYUR-INTEL ready at http://%s:%s", settings.AYURINTEL_HOST, settings.AYURINTEL_PORT)
     logger.info("API docs at http://%s:%s/api/docs", settings.AYURINTEL_HOST, settings.AYURINTEL_PORT)

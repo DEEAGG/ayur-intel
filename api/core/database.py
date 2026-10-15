@@ -72,7 +72,8 @@ def init_db() -> None:
     """Create all tables if they don't exist.
     Import models before calling this so SQLAlchemy registers them.
     """
-    from api.models import models  # noqa: F401 — triggers model registration
+    import api.models  # noqa: F401 — triggers model registration across all submodules
+    from api.models import models
 
     if not DATABASE_URL:
         # Only create SQLite directory if using SQLite
@@ -86,6 +87,8 @@ def init_db() -> None:
         
         # 1. Ensure columns exist for existing databases
         new_cols = [
+            ("users", "role", "VARCHAR(20) DEFAULT 'user'"),
+            ("users", "token_version", "INTEGER DEFAULT 1"),
             ("product_cases", "is_demo", "BOOLEAN DEFAULT 0" if is_sqlite else "BOOLEAN DEFAULT FALSE"),
             ("patent_records", "provider_record_id", "VARCHAR(100)"),
             ("patent_records", "family_id", "VARCHAR(100)"),
@@ -102,6 +105,8 @@ def init_db() -> None:
             ("patent_searches", "unique_screened_count", "INTEGER DEFAULT 0"),
             ("knowledge_evidence", "content_hash", "VARCHAR(64)"),
             ("knowledge_evidence", "license_note", "TEXT"),
+            ("user_sessions", "idle_timeout_seconds", "INTEGER DEFAULT 1800"),
+            ("user_sessions", "max_lifetime_seconds", "INTEGER DEFAULT 43200"),
         ]
 
         for table, col, col_type in new_cols:
@@ -136,6 +141,9 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_risk_assessments_owner_id ON risk_assessments (owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_dravya_plants_plant_id ON dravya_plants (plant_id)",
             "CREATE INDEX IF NOT EXISTS ix_dravya_plants_scientific_name ON dravya_plants (scientific_name)",
+            "CREATE INDEX IF NOT EXISTS ix_user_sessions_public_id ON user_sessions (public_id)",
+            "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_id ON user_sessions (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_user_sessions_is_revoked ON user_sessions (is_revoked)",
         ]
 
 

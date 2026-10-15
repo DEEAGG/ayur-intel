@@ -8,7 +8,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
 
 from api.models.models import Base
 
@@ -57,3 +58,35 @@ class AuditLog(Base):
 
     # Timestamp
     created_at = Column(DateTime, nullable=False, default=_now_utc)
+
+
+class UserSession(Base):
+    """User active session record for login history and remote revocation."""
+
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    public_id = Column(String(32), unique=True, nullable=False, default=_uuid, index=True)
+
+    # User reference
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Client / Device context
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    device_info = Column(String(200), nullable=True)
+
+    # Revocation & Activity
+    is_revoked = Column(Boolean, nullable=False, default=False, index=True)
+
+    # Inactivity and Maximum Lifetime settings (in seconds)
+    idle_timeout_seconds = Column(Integer, nullable=False, default=1800)
+    max_lifetime_seconds = Column(Integer, nullable=False, default=43200)
+
+    # Timestamps
+    created_at = Column(DateTime, nullable=False, default=_now_utc)
+    last_active_at = Column(DateTime, nullable=False, default=_now_utc)
+    expires_at = Column(DateTime, nullable=False)
+
+    # Relationships
+    user = relationship("User", back_populates="sessions", lazy="select")

@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     AYURINTEL_SESSION_SECRET: str = "change-me-in-production"
     AYURINTEL_SESSION_TTL_SECONDS: int = 86400
     AYURINTEL_DEMO_MODE: bool = True
+    AYURINTEL_ADMIN_EMAIL: Optional[str] = None
 
     # CORS
     AYURINTEL_CORS_ALLOW_ORIGINS: str = "http://127.0.0.1:8000"
