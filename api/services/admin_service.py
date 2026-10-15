@@ -10,7 +10,7 @@ Business logic for administrative console operations:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
@@ -60,13 +60,68 @@ def bootstrap_admin_user(db: Session) -> Optional[User]:
     return user
 
 
+def get_admin_metrics(db: Session) -> Dict[str, Any]:
+    """Retrieve real-time administrative intelligence and presence metrics."""
+    now_utc = datetime.now(timezone.utc)
+    total_users = db.query(User).count()
+    active_accounts = db.query(User).filter(User.is_active == True).count()
+    deactivated_accounts = max(0, total_users - active_accounts)
+
+    active_candidate_sessions = (
+        db.query(UserSession)
+        .filter(
+            UserSession.is_revoked == False,
+            UserSession.expires_at > now_utc,
+        )
+        .all()
+    )
+
+    online_user_ids = set()
+    valid_sessions_count = 0
+    for s in active_candidate_sessions:
+        s_created = (
+            s.created_at.replace(tzinfo=timezone.utc)
+            if s.created_at and s.created_at.tzinfo is None
+            else s.created_at
+        )
+        s_last_active = (
+            s.last_active_at.replace(tzinfo=timezone.utc)
+            if s.last_active_at and s.last_active_at.tzinfo is None
+            else s.last_active_at
+        )
+        idle_sec = getattr(s, "idle_timeout_seconds", None) or 1800
+        max_life_sec = getattr(s, "max_lifetime_seconds", None) or 43200
+
+        if s_created and (now_utc < s_created + timedelta(seconds=max_life_sec)):
+            if s_last_active and (now_utc < s_last_active + timedelta(seconds=idle_sec)):
+                online_user_ids.add(s.user_id)
+                valid_sessions_count += 1
+
+    online_users = len(online_user_ids)
+    offline_users = max(0, total_users - online_users)
+
+    yesterday = now_utc - timedelta(hours=24)
+    recent_events_count = db.query(AuditLog).filter(AuditLog.created_at >= yesterday).count()
+
+    return {
+        "total_users": total_users,
+        "online_users": online_users,
+        "offline_users": offline_users,
+        "active_accounts": active_accounts,
+        "deactivated_accounts": deactivated_accounts,
+        "total_active_sessions": valid_sessions_count,
+        "recent_audit_events_24h": recent_events_count,
+    }
+
+
 def get_admin_users(
     db: Session,
     query: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    status: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Retrieve paginated list of users with active session counts. Safe fields only."""
+    """Retrieve paginated list of users with presence tracking, online-first ordering, and session durations."""
     q = db.query(User)
 
     if query and query.strip():
@@ -77,35 +132,188 @@ def get_admin_users(
             | (func.lower(User.display_name).like(term))
         )
 
-    total = q.count()
-    users = q.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
+    if status and status.strip():
+        s_clean = status.strip().lower()
+        if s_clean == "active":
+            q = q.filter(User.is_active == True)
+        elif s_clean == "inactive":
+            q = q.filter(User.is_active == False)
+
+    matching_users = q.all()
+    total = len(matching_users)
 
     now_utc = datetime.now(timezone.utc)
-    results = []
-    for u in users:
-        active_sessions = (
+    user_ids = [u.id for u in matching_users]
+
+    sessions_by_user: Dict[int, List[UserSession]] = {uid: [] for uid in user_ids}
+    if user_ids:
+        # Efficient single batch query for all sessions belonging to the candidate users
+        all_sessions = (
             db.query(UserSession)
-            .filter(
-                UserSession.user_id == u.id,
-                UserSession.is_revoked == False,
-                UserSession.expires_at > now_utc,
-            )
-            .count()
+            .filter(UserSession.user_id.in_(user_ids))
+            .order_by(UserSession.created_at.desc())
+            .all()
         )
-        results.append({
+        for s in all_sessions:
+            sessions_by_user[s.user_id].append(s)
+
+    processed_users = []
+    for u in matching_users:
+        user_sessions = sessions_by_user.get(u.id, [])
+
+        active_sessions = []
+        ended_sessions = []
+
+        for s in user_sessions:
+            s_created = (
+                s.created_at.replace(tzinfo=timezone.utc)
+                if s.created_at and s.created_at.tzinfo is None
+                else s.created_at
+            )
+            s_last_active = (
+                s.last_active_at.replace(tzinfo=timezone.utc)
+                if s.last_active_at and s.last_active_at.tzinfo is None
+                else s.last_active_at
+            )
+            s_exp = (
+                s.expires_at.replace(tzinfo=timezone.utc)
+                if s.expires_at and s.expires_at.tzinfo is None
+                else s.expires_at
+            )
+
+            idle_sec = getattr(s, "idle_timeout_seconds", None) or 1800
+            max_life_sec = getattr(s, "max_lifetime_seconds", None) or 43200
+
+            is_session_online = False
+            # Session must not be revoked and must not have surpassed its hard expiration
+            if not s.is_revoked and s_exp and now_utc < s_exp:
+                # Must not exceed absolute session maximum lifetime
+                if s_created and (now_utc < s_created + timedelta(seconds=max_life_sec)):
+                    # Must not exceed idle inactivity timeout
+                    if s_last_active and (now_utc < s_last_active + timedelta(seconds=idle_sec)):
+                        is_session_online = True
+
+            if is_session_online:
+                active_sessions.append((s, s_created, s_last_active))
+            else:
+                ended_sessions.append((s, s_created, s_last_active))
+
+        is_online = len(active_sessions) > 0
+        active_sessions_count = len(active_sessions)
+
+        # 1. Last opened timestamp (login / session start)
+        last_opened_at_iso: Optional[str] = None
+        last_opened_dt: Optional[datetime] = None
+        if user_sessions:
+            s_latest = user_sessions[0]
+            if s_latest.created_at:
+                dt_open = (
+                    s_latest.created_at.replace(tzinfo=timezone.utc)
+                    if s_latest.created_at.tzinfo is None
+                    else s_latest.created_at
+                )
+                last_opened_dt = dt_open
+                last_opened_at_iso = dt_open.isoformat()
+
+        # 2. Last active timestamp
+        last_active_at_iso: Optional[str] = None
+        last_active_dt: Optional[datetime] = None
+        if active_sessions:
+            # For online users, pick latest active timestamp from active sessions
+            active_dts = [la for (_, _, la) in active_sessions if la is not None]
+            if active_dts:
+                last_active_dt = max(active_dts)
+                last_active_at_iso = last_active_dt.isoformat()
+        elif user_sessions:
+            # For offline users, pick latest active timestamp from all historical sessions
+            all_act_dts = [
+                (
+                    s.last_active_at.replace(tzinfo=timezone.utc)
+                    if s.last_active_at.tzinfo is None
+                    else s.last_active_at
+                )
+                for s in user_sessions
+                if s.last_active_at is not None
+            ]
+            if all_act_dts:
+                last_active_dt = max(all_act_dts)
+                last_active_at_iso = last_active_dt.isoformat()
+
+        # 3. Session durations
+        session_started_at_iso: Optional[str] = None
+        current_session_duration_sec: Optional[int] = None
+        last_session_duration_sec: Optional[int] = None
+
+        if is_online and active_sessions:
+            # Latest active session
+            latest_active_sess, s_act_created, _ = active_sessions[0]
+            if s_act_created:
+                session_started_at_iso = s_act_created.isoformat()
+                current_session_duration_sec = max(0, int((now_utc - s_act_created).total_seconds()))
+        elif ended_sessions:
+            # Latest ended session
+            latest_ended_sess, s_ended_created, s_ended_last_active = ended_sessions[0]
+            if s_ended_created:
+                session_started_at_iso = s_ended_created.isoformat()
+            if s_ended_created and s_ended_last_active:
+                last_session_duration_sec = max(0, int((s_ended_last_active - s_ended_created).total_seconds()))
+
+        u_created_dt = (
+            u.created_at.replace(tzinfo=timezone.utc)
+            if u.created_at and u.created_at.tzinfo is None
+            else u.created_at
+        )
+
+        user_data = {
             "id": u.public_id,
             "username": u.username,
             "display_name": u.display_name or u.username,
             "email": u.email or "",
             "role": getattr(u, "role", "user") or "user",
             "is_active": bool(u.is_active),
-            "active_sessions_count": active_sessions,
+            "is_online": is_online,
+            "active_sessions_count": active_sessions_count,
+            "last_opened_at": last_opened_at_iso,
+            "last_active_at": last_active_at_iso,
+            "session_started_at": session_started_at_iso,
+            "current_session_duration_seconds": current_session_duration_sec,
+            "last_session_duration_seconds": last_session_duration_sec,
+            "session_duration_seconds": current_session_duration_sec if is_online else last_session_duration_sec,
             "created_at": u.created_at.isoformat() if u.created_at else "",
             "updated_at": u.updated_at.isoformat() if u.updated_at else "",
-        })
+            # Internal fields for server-side sorting:
+            "_is_online": is_online,
+            "_last_active_dt": last_active_dt or last_opened_dt or u_created_dt,
+            "_user_created_dt": u_created_dt,
+        }
+        processed_users.append(user_data)
+
+    # Server-side sorting:
+    # 1. Online users first (is_online True -> 0, False -> 1)
+    # 2. Most recently active first (descending timestamp)
+    # 3. Newest user creation (descending timestamp)
+    def user_sort_key(item: Dict[str, Any]):
+        online_rank = 0 if item["_is_online"] else 1
+        la_ts = item["_last_active_dt"].timestamp() if item["_last_active_dt"] else 0.0
+        uc_ts = item["_user_created_dt"].timestamp() if item["_user_created_dt"] else 0.0
+        return (online_rank, -la_ts, -uc_ts)
+
+    processed_users.sort(key=user_sort_key)
+
+    # Slice for requested pagination window
+    paged_slice = processed_users[offset : offset + limit]
+
+    # Clean internal temporary keys from output payload
+    clean_results = []
+    for item in paged_slice:
+        res = dict(item)
+        res.pop("_is_online", None)
+        res.pop("_last_active_dt", None)
+        res.pop("_user_created_dt", None)
+        clean_results.append(res)
 
     return {
-        "users": results,
+        "users": clean_results,
         "total": total,
         "limit": limit,
         "offset": offset,

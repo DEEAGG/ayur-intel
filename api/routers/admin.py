@@ -24,6 +24,7 @@ from api.core.security import get_client_ip, require_admin
 from api.models.models import User
 from api.services.admin_service import (
     get_admin_audit_logs,
+    get_admin_metrics,
     get_admin_user_detail,
     get_admin_users,
     get_user_sessions,
@@ -41,16 +42,26 @@ class UpdateUserStatusRequest(BaseModel):
     is_active: bool = Field(..., description="Active status of the user account")
 
 
+@router.get("/metrics", summary="System security and presence metrics (Admin only)")
+def get_metrics(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Retrieve system-wide KPIs: user presence, active accounts, and session counts."""
+    return get_admin_metrics(db=db)
+
+
 @router.get("/users", summary="List users (Admin only)")
 def list_users(
     query: Optional[str] = Query(None, max_length=100, description="Search term for username, email, display name"),
+    status: Optional[str] = Query(None, max_length=20, description="Filter by status: all, active, inactive"),
     limit: int = Query(50, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Page offset"),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     """Retrieve paginated list of users with active session counts. Safe fields only."""
-    return get_admin_users(db=db, query=query, limit=limit, offset=offset)
+    return get_admin_users(db=db, query=query, limit=limit, offset=offset, status=status)
 
 
 @router.get("/users/{user_id}", summary="Get user details and sessions (Admin only)")

@@ -23,10 +23,12 @@
     // Users & Session Tracking
     users: [],
     totalUsers: 0,
+    metrics: null,
     userPage: 1,
     userLimit: 15,
     userQuery: '',
     statusFilter: 'all', // 'all' | 'active' | 'inactive'
+    durationTimerId: null,
 
     // User Detail & Sessions Modal
     selectedUser: null,
@@ -78,6 +80,42 @@
     } catch (_) {
       return isoStr;
     }
+  }
+
+  // Helper: Format Relative Time
+  function formatRelativeTime(isoStr) {
+    if (!isoStr) return '—';
+    try {
+      var d = new Date(isoStr);
+      if (isNaN(d.getTime())) return isoStr;
+      var now = Date.now();
+      var diffSec = Math.max(0, Math.floor((now - d.getTime()) / 1000));
+      if (diffSec < 45) return 'just now';
+      var min = Math.floor(diffSec / 60);
+      if (min < 60) return min + (min === 1 ? ' min ago' : ' mins ago');
+      var hr = Math.floor(min / 60);
+      if (hr < 24) return hr + (hr === 1 ? ' hr ago' : ' hrs ago');
+      var days = Math.floor(hr / 24);
+      if (days < 7) return days + (days === 1 ? ' day ago' : ' days ago');
+      return formatDate(isoStr);
+    } catch (_) {
+      return isoStr;
+    }
+  }
+
+  // Helper: Format Session Duration
+  function formatDuration(sec) {
+    if (sec === null || sec === undefined || isNaN(sec)) return '0 min';
+    var totalSeconds = Math.max(0, Math.floor(sec));
+    var m = Math.floor(totalSeconds / 60);
+    var h = Math.floor(m / 60);
+    m = m % 60;
+    var d = Math.floor(h / 24);
+    h = h % 24;
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + (m > 0 ? m + 'm' : '');
+    if (m > 0) return m + ' min';
+    return '< 1 min';
   }
 
   // Helper: Call Backend API with Authorization
@@ -139,9 +177,16 @@
       if (state.userQuery && state.userQuery.trim()) {
         params += '&query=' + encodeURIComponent(state.userQuery.trim());
       }
-      var data = await callApi('/api/admin/users' + params);
+      if (state.statusFilter && state.statusFilter !== 'all') {
+        params += '&status=' + encodeURIComponent(state.statusFilter);
+      }
+      var [data, metrics] = await Promise.all([
+        callApi('/api/admin/users' + params),
+        callApi('/api/admin/metrics').catch(function () { return null; })
+      ]);
       state.users = data.users || [];
       state.totalUsers = data.total || 0;
+      if (metrics) state.metrics = metrics;
       state.isLoading = false;
       refreshView();
     } catch (e) {
@@ -305,11 +350,15 @@
       filteredUsers = state.users.filter(function (u) { return !u.is_active; });
     }
 
-    // Dynamic Overview KPIs (Computed from real backend data)
-    var totalUsersCount = state.totalUsers;
-    var activeUsersCount = state.users.filter(function (u) { return u.is_active; }).length;
-    var inactiveUsersCount = state.users.filter(function (u) { return !u.is_active; }).length;
-    var totalActiveSessions = state.users.reduce(function (acc, u) { return acc + (u.active_sessions_count || 0); }, 0);
+    // Dynamic Overview KPIs (Prefers backend aggregate metrics if available)
+    var m = state.metrics || {};
+    var totalUsersCount = m.total_users !== undefined ? m.total_users : state.totalUsers;
+    var onlineUsersCount = m.online_users !== undefined ? m.online_users : state.users.filter(function (u) { return u.is_online; }).length;
+    var offlineUsersCount = m.offline_users !== undefined ? m.offline_users : Math.max(0, totalUsersCount - onlineUsersCount);
+    var activeAccountsCount = m.active_accounts !== undefined ? m.active_accounts : state.users.filter(function (u) { return u.is_active; }).length;
+    var deactivatedAccountsCount = m.deactivated_accounts !== undefined ? m.deactivated_accounts : state.users.filter(function (u) { return !u.is_active; }).length;
+    var totalActiveSessions = m.total_active_sessions !== undefined ? m.total_active_sessions : state.users.reduce(function (acc, u) { return acc + (u.active_sessions_count || 0); }, 0);
+    var auditEvents24h = m.recent_audit_events_24h !== undefined ? m.recent_audit_events_24h : state.auditTotal;
 
     var html = ''
       + '<div class="admin-console-wrapper">'
@@ -329,45 +378,60 @@
       + '    </div>'
       + '  </div>'
 
-      // Overview KPI Cards
+      // Overview KPI Cards (5 cards)
       + '  <div class="admin-kpi-grid">'
       + '    <div class="admin-kpi-card">'
-      + '      <div class="admin-kpi-icon" style="color: #2D4A3E; background: #e8f5e9;">'
+      + '      <div class="admin-kpi-icon kpi-icon-total">'
       + '        <span class="material-symbols-outlined">people</span>'
       + '      </div>'
       + '      <div class="admin-kpi-data">'
       + '        <div class="admin-kpi-val">' + totalUsersCount + '</div>'
-      + '        <div class="admin-kpi-lbl">Total Registered Accounts</div>'
+      + '        <div class="admin-kpi-lbl">Total Registered</div>'
+      + '        <div class="admin-kpi-sub">Institutional directory</div>'
+      + '      </div>'
+      + '    </div>'
+
+      + '    <div class="admin-kpi-card kpi-card-online">'
+      + '      <div class="admin-kpi-icon kpi-icon-online">'
+      + '        <span class="material-symbols-outlined">sensors</span>'
+      + '      </div>'
+      + '      <div class="admin-kpi-data">'
+      + '        <div class="admin-kpi-val"><span class="presence-pulse-dot inline"></span>' + onlineUsersCount + '</div>'
+      + '        <div class="admin-kpi-lbl">Currently Online</div>'
+      + '        <div class="admin-kpi-sub">' + totalActiveSessions + ' active sessions</div>'
       + '      </div>'
       + '    </div>'
 
       + '    <div class="admin-kpi-card">'
-      + '      <div class="admin-kpi-icon" style="color: #15803d; background: #dcfce7;">'
-      + '        <span class="material-symbols-outlined">verified</span>'
+      + '      <div class="admin-kpi-icon kpi-icon-offline">'
+      + '        <span class="material-symbols-outlined">nightlight</span>'
       + '      </div>'
       + '      <div class="admin-kpi-data">'
-      + '        <div class="admin-kpi-val">' + activeUsersCount + '</div>'
-      + '        <div class="admin-kpi-lbl">Active Users (Page)</div>'
+      + '        <div class="admin-kpi-val">' + offlineUsersCount + '</div>'
+      + '        <div class="admin-kpi-lbl">Offline Accounts</div>'
+      + '        <div class="admin-kpi-sub">Idle or signed out</div>'
       + '      </div>'
       + '    </div>'
 
       + '    <div class="admin-kpi-card">'
-      + '      <div class="admin-kpi-icon" style="color: #0284c7; background: #e0f2fe;">'
-      + '        <span class="material-symbols-outlined">devices</span>'
+      + '      <div class="admin-kpi-icon kpi-icon-standing">'
+      + '        <span class="material-symbols-outlined">verified_user</span>'
       + '      </div>'
       + '      <div class="admin-kpi-data">'
-      + '        <div class="admin-kpi-val">' + totalActiveSessions + '</div>'
-      + '        <div class="admin-kpi-lbl">Active Device Sessions (Page)</div>'
+      + '        <div class="admin-kpi-val">' + activeAccountsCount + '<span class="admin-kpi-val-sec"> / ' + deactivatedAccountsCount + '</span></div>'
+      + '        <div class="admin-kpi-lbl">Account Standing</div>'
+      + '        <div class="admin-kpi-sub">Active / Deactivated</div>'
       + '      </div>'
       + '    </div>'
 
       + '    <div class="admin-kpi-card">'
-      + '      <div class="admin-kpi-icon" style="color: #b91c1c; background: #fee2e2;">'
-      + '        <span class="material-symbols-outlined">block</span>'
+      + '      <div class="admin-kpi-icon kpi-icon-audit">'
+      + '        <span class="material-symbols-outlined">security</span>'
       + '      </div>'
       + '      <div class="admin-kpi-data">'
-      + '        <div class="admin-kpi-val">' + inactiveUsersCount + '</div>'
-      + '        <div class="admin-kpi-lbl">Deactivated / Blocked (Page)</div>'
+      + '        <div class="admin-kpi-val">' + auditEvents24h + '</div>'
+      + '        <div class="admin-kpi-lbl">Security Audit (24h)</div>'
+      + '        <div class="admin-kpi-sub">Access &amp; privilege events</div>'
       + '      </div>'
       + '    </div>'
       + '  </div>'
@@ -443,16 +507,41 @@
             ? '<span class="admin-badge badge-sessions"><span class="material-symbols-outlined" style="font-size:12px;">devices</span> ' + u.active_sessions_count + ' active</span>'
             : '<span class="admin-badge badge-idle">None</span>';
 
+          var presenceHtml = '';
+          if (u.is_online) {
+            presenceHtml = ''
+              + '<div class="admin-presence-line online" title="Session active within idle window">'
+              + '  <span class="presence-pulse-dot"></span>'
+              + '  <span class="presence-status-text">Online · Last active ' + escapeHtml(formatRelativeTime(u.last_active_at)) + '</span>'
+              + '  <span class="presence-duration-line live-duration" data-session-start="' + escapeHtml(u.session_started_at || '') + '" data-is-online="true">(Current session: ' + escapeHtml(formatDuration(u.current_session_duration_seconds)) + ')</span>'
+              + '</div>';
+          } else {
+            var openedText = u.last_opened_at ? ('Last opened ' + formatRelativeTime(u.last_opened_at)) : 'Last opened: Not available';
+            var lastDurationText = (u.last_session_duration_seconds !== null && u.last_session_duration_seconds !== undefined)
+              ? ('Last session: ' + formatDuration(u.last_session_duration_seconds))
+              : 'Session duration: Not recorded';
+            presenceHtml = ''
+              + '<div class="admin-presence-line offline" title="No active valid session">'
+              + '  <span class="presence-static-dot"></span>'
+              + '  <span class="presence-status-text">Offline · ' + escapeHtml(openedText) + '</span>'
+              + '  <span class="presence-duration-line">(' + escapeHtml(lastDurationText) + ')</span>'
+              + '</div>';
+          }
+
           html += ''
-            + '      <tr class="' + (!u.is_active ? 'tr-deactivated' : '') + '">'
+            + '      <tr class="' + (!u.is_active ? 'tr-deactivated' : (u.is_online ? 'tr-online' : 'tr-offline')) + '">'
             + '        <td>'
             + '          <div class="admin-user-cell">'
-            + '            <div class="admin-user-avatar" style="background-color: ' + (window.AYUR_AUTH ? window.AYUR_AUTH.getAvatarColor(u.display_name || u.email) : '#476558') + ';">'
+            + '            <div class="admin-user-avatar ' + (u.is_online ? 'avatar-online' : '') + '" style="background-color: ' + (window.AYUR_AUTH ? window.AYUR_AUTH.getAvatarColor(u.display_name || u.email) : '#10b981') + ';">'
             + '              ' + (window.AYUR_AUTH ? window.AYUR_AUTH.getInitials(u.display_name, u.email) : 'U')
+            + (u.is_online ? '<span class="avatar-presence-dot" title="Online"></span>' : '')
             + '            </div>'
             + '            <div class="admin-user-info">'
-            + '              <strong>' + escapeHtml(u.display_name || u.username) + (isSelf ? ' <span class="self-tag">(You)</span>' : '') + '</strong>'
-            + '              <small>@' + escapeHtml(u.username) + '</small>'
+            + '              <div class="admin-user-name-line">'
+            + '                <strong>' + escapeHtml(u.display_name || u.username) + (isSelf ? ' <span class="self-tag">(You)</span>' : '') + '</strong>'
+            + '                <small class="user-handle">@' + escapeHtml(u.username) + '</small>'
+            + '              </div>'
+            + '              ' + presenceHtml
             + '            </div>'
             + '          </div>'
             + '        </td>'
@@ -1022,11 +1111,34 @@
         if (state.auditPage < totalAuditPages) loadAuditLogs(state.auditPage + 1);
       };
     }
+
+    // 12. Client-Side Live Duration Updates (15s interval, zero backend polling)
+    if (state.durationTimerId) {
+      clearInterval(state.durationTimerId);
+      state.durationTimerId = null;
+    }
+    state.durationTimerId = setInterval(function () {
+      var liveEls = document.querySelectorAll('.live-duration[data-session-start]');
+      var now = Date.now();
+      liveEls.forEach(function (el) {
+        var startIso = el.getAttribute('data-session-start');
+        if (!startIso) return;
+        var startTime = new Date(startIso).getTime();
+        if (isNaN(startTime)) return;
+        var elapsedSec = Math.max(0, Math.floor((now - startTime) / 1000));
+        el.textContent = '(Current session: ' + formatDuration(elapsedSec) + ')';
+      });
+    }, 15000);
   }
 
   function clearData() {
+    if (state.durationTimerId) {
+      clearInterval(state.durationTimerId);
+      state.durationTimerId = null;
+    }
     state.users = [];
     state.totalUsers = 0;
+    state.metrics = null;
     state.selectedUser = null;
     state.auditLogs = [];
     state.auditTotal = 0;
