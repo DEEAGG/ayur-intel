@@ -12958,3 +12958,201 @@ input:checked + .ios-slider:before {
 }
 
 
+
+
+/* ==================================================================
+   AYUR-INTEL — Admin Console Layout Repair (2026-10-16)
+   Explicit full-width layout rules to prevent legacy global styles
+   from collapsing dashboard sections into a narrow left column.
+   ================================================================== */
+#content .admin-console-wrapper {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 18px !important;
+  width: 100% !important;
+  max-width: 1480px !important;
+  min-width: 0 !important;
+  margin: 0 auto !important;
+  padding: 12px clamp(12px, 2vw, 28px) 48px !important;
+  box-sizing: border-box !important;
+}
+
+#content .admin-header {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: start !important;
+  gap: 20px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+#content .admin-header-titles,
+#content .admin-header-actions-group {
+  min-width: 0 !important;
+}
+
+#content .admin-header-actions-group {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  flex-wrap: wrap !important;
+  max-width: 100% !important;
+}
+
+#content .admin-kpi-grid-8 {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  align-items: stretch !important;
+  gap: 14px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+#content .admin-kpi-grid-8 > .admin-kpi-card {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
+
+#content .admin-kpi-data {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+}
+
+#content .admin-tabs {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  border-bottom: 0 !important;
+}
+
+#content .admin-tab-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 52px !important;
+  padding: 12px 14px !important;
+  border: 1px solid rgba(94, 179, 126, 0.2) !important;
+  border-radius: 10px !important;
+  text-align: center !important;
+  white-space: normal !important;
+  line-height: 1.35 !important;
+  box-sizing: border-box !important;
+}
+
+#content .admin-tab-btn.active {
+  border-color: rgba(16, 185, 129, 0.55) !important;
+  box-shadow: 0 5px 18px rgba(16, 185, 129, 0.08) !important;
+}
+
+#content .admin-card {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
+#content .admin-filter-bar,
+#content .admin-toolbar-row {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+#content .admin-user-cards-list {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 18px !important;
+  box-sizing: border-box !important;
+}
+
+#content .admin-user-card {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 20px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
+
+#content .admin-card-stats {
+  min-width: 0 !important;
+}
+
+#content .admin-card-actions {
+  flex-shrink: 0 !important;
+}
+
+@media (max-width: 1200px) {
+  #content .admin-kpi-grid-8 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  #content .admin-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  #content .admin-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #content .admin-header-actions-group {
+    justify-content: flex-start !important;
+  }
+  #content .admin-user-card {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  #content .admin-card-stats {
+    width: 100% !important;
+    padding: 10px 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    border-top: 1px solid rgba(94, 179, 126, 0.12) !important;
+    border-bottom: 1px solid rgba(94, 179, 126, 0.12) !important;
+    flex-wrap: wrap !important;
+  }
+  #content .admin-card-actions {
+    width: 100% !important;
+    justify-content: flex-start !important;
+    flex-wrap: wrap !important;
+  }
+}
+
+@media (max-width: 560px) {
+  #content .admin-console-wrapper {
+    padding: 8px 10px 32px !important;
+  }
+  #content .admin-kpi-grid-8,
+  #content .admin-tabs {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #content .admin-user-cards-list {
+    padding: 12px !important;
+  }
+}
