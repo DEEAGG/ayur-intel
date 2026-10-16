@@ -4978,9 +4978,10 @@ html, body {
    ======================================== */
 
 .case-intelligence {
-    padding: 24px 32px;
-    max-width: 1200px;
-    margin: 0 auto;
+    padding: 0 0 48px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     background: transparent;
 }
 
@@ -5499,9 +5500,10 @@ html, body {
 
 /* ===== KNOWLEDGE HUB ===== */
 .knowledge-hub {
-    padding: 24px 32px;
-    max-width: 1200px;
-    margin: 0 auto;
+    padding: 0 0 48px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .kh-header h2 {
@@ -5782,9 +5784,10 @@ html, body {
 .app {
     display: flex;
     min-height: 100vh;
+    width: 100%;
     align-items: stretch;
     background: transparent;
-    color: #e0eee8;
+    color: var(--on-surface, #f2f7f4);
     font-family: 'Geist', sans-serif;
     position: relative;
     z-index: 1;
@@ -5793,20 +5796,22 @@ html, body {
 /* ===== SIDEBAR ===== */
 .sidebar {
     width: 260px;
+    min-width: 260px;
     min-height: 100vh;
     height: 100vh;
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    background: #0f1a16;
-    border-right: 1px solid rgba(255,255,255,0.04);
+    background: rgba(9, 20, 15, 0.98);
+    border-right: 1px solid rgba(94, 179, 126, 0.16);
     padding: 20px 16px;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
     overflow-y: auto;
     z-index: 100;
+    box-sizing: border-box;
 }
 
 /* ===== MAIN CONTENT AREA ===== */
@@ -5817,6 +5822,9 @@ html, body {
     min-height: 100vh;
     overflow-x: hidden;
     margin-left: 260px;
+    width: calc(100% - 260px);
+    max-width: calc(100% - 260px);
+    box-sizing: border-box;
 }
 
 /* ===== TOPBAR ===== */
@@ -5824,31 +5832,33 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 32px;
-    background: rgba(11, 18, 14, 0.9);
-    border-bottom: 1px solid rgba(255,255,255,0.04);
-    backdrop-filter: blur(12px);
+    padding: 0 36px;
+    height: 64px;
+    background: rgba(8, 18, 13, 0.92);
+    border-bottom: 1px solid rgba(94, 179, 126, 0.14);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     position: sticky;
     top: 0;
     z-index: 50;
+    box-sizing: border-box;
+    width: 100%;
 }
 
-/* ===== CONTENT - CENTERED ===== */
+/* ===== CONTENT - FLUID SPACIOUS CONTAINER ===== */
 .content {
     flex: 1;
-    padding: 32px 40px;
-    max-width: 1440px;
+    padding: 32px 40px 64px;
     width: 100%;
+    max-width: 1600px;
     margin: 0 auto;
     box-sizing: border-box;
 }
 
-/* Dashboard specific container */
+/* View containers */
 #content > div {
-    max-width: 1440px;
-    margin-left: auto;
-    margin-right: auto;
     width: 100%;
+    max-width: 100%;
     box-sizing: border-box;
 }
 
@@ -5883,118 +5893,150 @@ html, body {
     box-shadow: 0 4px 16px rgba(0,0,0,0.2);
 }
 
-/* ===== PRODUCT CARDS ===== */
+/* ===== CASE & PRODUCT CARDS ===== */
+.case-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 32px;
+}
+
 .clean-product-card {
-    background: #14221b;
-    border: 1px solid rgba(45,139,106,0.08);
-    border-left: 3px solid #7dba9a;
-    border-radius: 14px;
-    padding: 16px 20px;
-    transition: all 0.3s ease;
-    margin-bottom: 10px;
+    background: linear-gradient(135deg, rgba(14, 30, 22, 0.85) 0%, rgba(8, 20, 14, 0.95) 100%);
+    border: 1px solid rgba(94, 179, 126, 0.18);
+    border-left: 4px solid #10b981;
+    border-radius: 12px;
+    padding: 18px 24px;
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 16px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+    width: 100%;
+    box-sizing: border-box;
+    cursor: pointer;
 }
 
 .clean-product-card:hover {
-    border-color: rgba(45,139,106,0.25);
-    border-left: 3px solid #92e0ba;
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.2), 0 0 16px rgba(125,186,154,0.15);
+    border-color: rgba(16, 185, 129, 0.45);
+    border-left: 4px solid #34d399;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.38), 0 0 20px rgba(16, 185, 129, 0.1);
+    background: linear-gradient(135deg, rgba(18, 38, 28, 0.92) 0%, rgba(10, 25, 18, 0.98) 100%);
 }
 
 .product-card-left {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
+    flex: 1;
+    min-width: 220px;
 }
 
 .product-card-name {
-    color: #e0eee8;
+    color: #f2f7f4;
     font-size: 16px;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: -0.01em;
 }
 
 .product-card-meta {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
-    gap: 12px;
-    font-size: 12px;
-    color: #6b8a7a;
+    gap: 16px;
+    font-size: 12.5px;
+    color: #94a39b;
 }
 
 .product-card-meta .ingredient-count {
-    color: #7dba9a;
+    color: #34d399;
+    font-weight: 500;
 }
 
 .product-card-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .product-card-status {
-    font-size: 11px;
-    padding: 2px 12px;
-    border-radius: 12px;
-    background: rgba(255,193,7,0.1);
-    color: #d4b87a;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 12px;
+    border-radius: 9999px;
+    background: rgba(245, 158, 11, 0.14);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.28);
     text-transform: capitalize;
 }
 
 .product-card-status.completed {
-    background: rgba(45,139,106,0.12);
-    color: #7dba9a;
+    background: rgba(16, 185, 129, 0.14);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.3);
 }
 
 .product-card-status.draft {
-    background: rgba(45,139,106,0.12);
-    color: #7dba9a;
+    background: rgba(148, 163, 155, 0.12);
+    color: #94a39b;
+    border-color: rgba(148, 163, 155, 0.25);
 }
 
 .product-card-status.analyzing {
-    background: rgba(56,189,248,0.12);
+    background: rgba(56, 189, 248, 0.14);
     color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.3);
 }
 
 .product-open-btn {
-    background: rgba(45,139,106,0.12);
-    color: #7dba9a;
-    border: 1px solid rgba(45,139,106,0.15);
-    border-radius: 6px;
-    padding: 4px 14px;
+    background: rgba(16, 185, 129, 0.14);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 8px;
+    padding: 7px 16px;
     cursor: pointer;
-    font-size: 12px;
-    transition: all 0.3s;
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-family: inherit;
 }
 
 .product-open-btn:hover {
-    background: rgba(45,139,106,0.25);
+    background: rgba(16, 185, 129, 0.28);
+    color: #ffffff;
+    border-color: #10b981;
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.2);
     transform: translateY(-1px);
-    color: #a8ebd0;
 }
 
 .product-delete-btn {
-    background: rgba(255,80,80,0.08);
-    color: #ff6b6b;
-    border: 1px solid rgba(255,80,80,0.12);
-    border-radius: 6px;
-    padding: 4px 14px;
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    border-radius: 8px;
+    padding: 7px 14px;
     cursor: pointer;
-    font-size: 12px;
-    transition: all 0.3s;
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: all 0.2s ease;
     font-family: inherit;
 }
 
 .product-delete-btn:hover {
-    background: rgba(255,80,80,0.15);
+    background: rgba(239, 68, 68, 0.22);
+    color: #ffffff;
+    border-color: #ef4444;
     transform: translateY(-1px);
-    color: #ffa3a3;
 }
 
 /* ===== KNOWLEDGE HUB ===== */
@@ -7956,8 +7998,6 @@ html, body {
   overflow-wrap: anywhere;
   max-width: 100%;
 }
-  font-family: 'JetBrains Mono', monospace;
-}
 
 .profile-badge-wrap {
   display: flex;
@@ -9902,9 +9942,11 @@ input:checked + .ios-slider:before {
    PLANT DISCOVERY STYLES (PHASE 2/3)
    ================================================================== */
 .pd-wrapper {
-  max-width: 1200px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
-  padding: 24px 20px 60px;
+  padding: 0 0 48px;
 }
 
 .pd-header {
@@ -11235,15 +11277,19 @@ input:checked + .ios-slider:before {
   .auth-overlay:hover .auth-forest-far,
   .auth-overlay:hover .auth-forest-mid,
   .auth-overlay:hover .auth-forest-near { transform: none; }
+}
+
 /* ==================================================================
    AYUR-INTEL — Private Admin Console Styles (Phase 3B & Redesign)
    Dark Botanical Intelligence SaaS System
    ================================================================== */
 
 .admin-console-wrapper {
-  max-width: 1400px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
-  padding: 8px 4px 48px;
+  padding: 0 0 48px;
 }
 
 /* Header */

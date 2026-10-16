@@ -813,7 +813,7 @@
       + '  </div>'
 
       // Overview 8-KPI Responsive Grid
-      + '  <div class="admin-kpi-grid-8">'
+      + '  <div class="admin-kpi-grid admin-kpi-grid-8">'
       // 1. Total Registered Accounts
       + '    <div class="admin-kpi-card">'
       + '      <div class="admin-kpi-icon kpi-icon-total"><span class="material-symbols-outlined">people</span></div>'
