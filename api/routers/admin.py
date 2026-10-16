@@ -36,8 +36,12 @@ from api.services.admin_service import (
     approve_access_request_admin,
     reject_access_request_admin,
     unlock_admin_console,
+    setup_admin_console_password,
+    change_admin_console_password,
+    recover_admin_console_password,
     lock_admin_console,
     get_admin_unlock_status,
+    get_all_active_sessions_admin,
 )
 
 logger = logging.getLogger("ayur_intel.routers.admin")
@@ -50,7 +54,25 @@ class UpdateUserStatusRequest(BaseModel):
 
 
 class AdminUnlockRequest(BaseModel):
-    password: str = Field(..., min_length=1, description="Administrator account password")
+    password: str = Field(..., min_length=1, description="Admin Console password")
+
+
+class SetupConsolePasswordRequest(BaseModel):
+    account_password: str = Field(..., min_length=1, description="Current administrator account password")
+    console_password: str = Field(..., min_length=12, description="New Admin Console password (min 12 chars)")
+    confirm_password: str = Field(..., min_length=12, description="Confirm Admin Console password")
+
+
+class ChangeConsolePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, description="Current Admin Console password")
+    new_password: str = Field(..., min_length=12, description="New Admin Console password (min 12 chars)")
+    confirm_password: str = Field(..., min_length=12, description="Confirm new Admin Console password")
+
+
+class RecoverConsolePasswordRequest(BaseModel):
+    account_password: str = Field(..., min_length=1, description="Current administrator account password")
+    new_console_password: str = Field(..., min_length=12, description="New Admin Console password (min 12 chars)")
+    confirm_console_password: str = Field(..., min_length=12, description="Confirm new Admin Console password")
 
 
 class AccessRequestDecision(BaseModel):
@@ -80,6 +102,84 @@ def unlock_console(
         admin=admin,
         session=session,
         password=req.password,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
+
+@router.post("/setup-password", summary="First-time setup of persistent Admin Console password")
+def setup_console_password(
+    req: SetupConsolePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Verify administrator account password and initialize isolated Admin Console password."""
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+    session = getattr(admin, "_current_session", None)
+    if not session and hasattr(request, "state") and hasattr(request.state, "current_session"):
+        session = request.state.current_session
+
+    return setup_admin_console_password(
+        db=db,
+        admin=admin,
+        session=session,
+        account_password=req.account_password,
+        console_password=req.console_password,
+        confirm_password=req.confirm_password,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
+
+@router.post("/change-console-password", summary="Change persistent Admin Console password")
+def change_console_password(
+    req: ChangeConsolePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin_unlocked),
+) -> Dict[str, Any]:
+    """Change the Admin Console password requiring verification of current console password."""
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+    session = getattr(admin, "_current_session", None)
+    if not session and hasattr(request, "state") and hasattr(request.state, "current_session"):
+        session = request.state.current_session
+
+    return change_admin_console_password(
+        db=db,
+        admin=admin,
+        session=session,
+        current_password=req.current_password,
+        new_password=req.new_password,
+        confirm_password=req.confirm_password,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
+
+@router.post("/recover-console-password", summary="Recover Admin Console password with account credentials")
+def recover_console_password(
+    req: RecoverConsolePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Reset the Admin Console password using primary account credentials."""
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+    session = getattr(admin, "_current_session", None)
+    if not session and hasattr(request, "state") and hasattr(request.state, "current_session"):
+        session = request.state.current_session
+
+    return recover_admin_console_password(
+        db=db,
+        admin=admin,
+        session=session,
+        account_password=req.account_password,
+        new_console_password=req.new_console_password,
+        confirm_console_password=req.confirm_console_password,
         ip_address=client_ip,
         user_agent=user_agent,
     )
@@ -120,11 +220,21 @@ def unlock_status(
     return get_admin_unlock_status(session=session, admin=admin)
 
 
+@router.get("/all-sessions", summary="List all active sessions system-wide (Admin only)")
+def list_all_sessions(
+    limit: int = Query(50, ge=1, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Page offset"),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin_unlocked),
+) -> Dict[str, Any]:
+    """Retrieve all active concurrent user sessions across the platform."""
+    return get_all_active_sessions_admin(db=db, limit=limit, offset=offset)
+
 
 @router.get("/metrics", summary="System security and presence metrics (Admin only)")
 def get_metrics(
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Retrieve system-wide KPIs: user presence, active accounts, and session counts."""
     return get_admin_metrics(db=db)
@@ -137,7 +247,7 @@ def list_users(
     limit: int = Query(50, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Page offset"),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Retrieve paginated list of users with active session counts. Safe fields only."""
     return get_admin_users(db=db, query=query, limit=limit, offset=offset, status=status)
@@ -147,7 +257,7 @@ def list_users(
 def get_user_detail(
     user_id: str = Path(..., min_length=1, max_length=64, description="User public ID"),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Retrieve safe user details and recent session history."""
     return get_admin_user_detail(db=db, user_id=user_id)
@@ -179,7 +289,7 @@ def set_user_status(
 def list_user_sessions(
     user_id: str = Path(..., min_length=1, max_length=64, description="User public ID"),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> List[Dict[str, Any]]:
     """Retrieve complete session history for a specific user."""
     return get_user_sessions(db=db, user_id=user_id)
@@ -237,7 +347,7 @@ def list_access_requests(
     limit: int = Query(50, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Page offset"),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Retrieve paginated user reactivation requests with device contexts."""
     return get_admin_access_requests(db=db, status=status, limit=limit, offset=offset)
@@ -247,7 +357,7 @@ def list_access_requests(
 def get_request_detail(
     request_id: str = Path(..., min_length=1, max_length=64, description="Access request public ID"),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Retrieve full request context including device hash and review notes."""
     return get_admin_access_request_detail(db=db, request_id=request_id)
@@ -308,7 +418,7 @@ def list_audit_logs(
     limit: int = Query(50, ge=1, le=100, description="Items per page"),
     offset: int = Query(0, ge=0, description="Page offset"),
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Retrieve paginated system audit logs with administrative filtering."""
     return get_admin_audit_logs(

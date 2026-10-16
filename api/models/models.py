@@ -67,6 +67,7 @@ class User(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     login_count = Column(Integer, nullable=False, default=0)
     approved_device_hash = Column(String(64), nullable=True)
+    admin_console_password_hash = Column(String(300), nullable=True)
     created_at = Column(DateTime, nullable=False, default=_now_utc)
     updated_at = Column(DateTime, nullable=False, default=_now_utc, onupdate=_now_utc)
 

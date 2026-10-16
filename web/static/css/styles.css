@@ -6622,18 +6622,28 @@ html, body {
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
     .sidebar {
-        width: 200px;
-        padding: 12px;
+        width: 260px;
+        transform: translateX(-100%);
+        transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        z-index: 200;
+    }
+    .sidebar.open {
+        transform: translateX(0) !important;
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
     }
     .main {
-        margin-left: 200px;
+        margin-left: 0 !important;
+        width: 100%;
+    }
+    .mobile-toggle {
+        display: flex;
     }
     .content {
-        padding: 16px 18px;
+        padding: 18px 20px;
     }
     .ci-grid {
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
+        grid-template-columns: 1fr;
+        gap: 14px;
     }
     .kh-grid {
         grid-template-columns: 1fr;
@@ -6641,20 +6651,11 @@ html, body {
 }
 
 @media (max-width: 480px) {
-    .sidebar {
-        display: none;
-    }
-    .main {
-        margin-left: 0;
-    }
-    .ci-grid {
-        grid-template-columns: 1fr;
-    }
     .content {
-        padding: 12px 14px;
+        padding: 14px 16px;
     }
     .topbar {
-        padding: 8px 14px;
+        padding: 10px 14px;
         flex-wrap: wrap;
     }
 }
@@ -12782,4 +12783,178 @@ input:checked + .ios-slider:before {
     justify-content: flex-end;
   }
 }
+
+/* ==================================================================
+   AYUR-INTEL — Phase 5 Persistent Console Password Lock & Global Sessions
+   ================================================================== */
+
+/* Full Viewport / Console Blur when Locked */
+.admin-blurred-content {
+  filter: blur(14px) brightness(0.55);
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  transition: filter 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+}
+
+/* Centre-Screen Lock Overlay */
+.admin-centre-lock-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  background: rgba(3, 10, 6, 0.45);
+  padding: 20px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: adminModalFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.admin-centre-lock-card {
+  width: 100%;
+  max-width: 520px;
+  background: linear-gradient(145deg, #0d2017 0%, #07150f 100%);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 16px;
+  padding: 36px 32px;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.75), 0 0 50px rgba(16, 185, 129, 0.12);
+  color: #f2f7f4;
+  text-align: center;
+}
+
+.admin-centre-lock-card h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #f2f7f4;
+  margin-top: 14px;
+  margin-bottom: 6px;
+  letter-spacing: -0.01em;
+}
+
+.admin-centre-lock-card p.lock-sub {
+  font-size: 13px;
+  color: #94a39b;
+  line-height: 1.5;
+  margin-bottom: 22px;
+}
+
+.admin-lock-form-group {
+  text-align: left;
+  margin-bottom: 16px;
+}
+
+.admin-lock-form-group label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #a7f3d0;
+  margin-bottom: 6px;
+}
+
+.admin-lock-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.admin-lock-input-wrap input {
+  width: 100%;
+  padding: 10px 42px 10px 14px;
+  font-size: 13.5px;
+  border: 1px solid rgba(94, 179, 126, 0.3);
+  border-radius: 8px;
+  background: #060e0a;
+  color: #f2f7f4;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-lock-input-wrap input:focus {
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.admin-lock-toggle-pwd {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: #6b8275;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-lock-toggle-pwd:hover {
+  color: #f2f7f4;
+}
+
+/* Password Strength Meter */
+.admin-pwd-meter {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.admin-pwd-meter-fill {
+  height: 100%;
+  width: 0%;
+  transition: width 0.25s ease, background-color 0.25s ease;
+}
+
+.admin-pwd-meter-fill.weak { width: 25%; background: #ef4444; }
+.admin-pwd-meter-fill.fair { width: 50%; background: #f59e0b; }
+.admin-pwd-meter-fill.good { width: 75%; background: #38bdf8; }
+.admin-pwd-meter-fill.strong { width: 100%; background: #10b981; }
+
+.admin-pwd-hint {
+  font-size: 11px;
+  color: #6b8275;
+  margin-top: 4px;
+  display: block;
+}
+
+.admin-lock-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.admin-lock-secondary-link {
+  background: transparent;
+  border: none;
+  color: #94a39b;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 4px;
+  transition: color 0.15s ease;
+}
+
+.admin-lock-secondary-link:hover {
+  color: #34d399;
+}
+
+/* Active Sessions Tab Badges & Layout */
+.session-current-device-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+
 

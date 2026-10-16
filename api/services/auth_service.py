@@ -556,8 +556,13 @@ def login_user(
     expires_at = now_utc + timedelta(seconds=max_lifetime_seconds)
     device_info = parse_device_info(user_agent)
 
-    # Admin sessions receive an initial 15-minute elevated unlock window upon password authentication
-    admin_unlocked = (now_utc + timedelta(minutes=15)) if getattr(user, "role", "user") == "admin" else None
+    # For admin users: if a separate persistent Admin Console password has been configured,
+    # the console starts strictly locked until unlocked via the separate console password.
+    # If not yet configured (first-time setup or legacy test fixture), seed initial elevation.
+    admin_unlocked = None
+    if getattr(user, "role", "user") == "admin":
+        if not getattr(user, "admin_console_password_hash", None):
+            admin_unlocked = now_utc + timedelta(minutes=15)
 
     session = UserSession(
         user_id=user.id,
@@ -752,6 +757,7 @@ def logout_user_session(
 
         if session:
             session.is_revoked = True
+            session.admin_unlocked_until = None
             db.commit()
 
         try:
@@ -805,7 +811,7 @@ def logout_all_user_sessions(
     db.query(UserSession).filter(
         UserSession.user_id == user.id,
         UserSession.is_revoked == False,
-    ).update({"is_revoked": True})
+    ).update({"is_revoked": True, "admin_unlocked_until": None})
 
     user.token_version = (user.token_version or 1) + 1
     db.commit()

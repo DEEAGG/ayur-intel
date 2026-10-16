@@ -21,7 +21,7 @@ from api.core.config import settings
 from api.models.models import User
 from api.models.security import AuditLog, UserSession, AccessRequest
 from api.services.audit_service import log_action
-from api.services.auth_service import verify_password, create_access_token
+from api.services.auth_service import verify_password, create_access_token, hash_password
 import time
 
 logger = logging.getLogger("ayur_intel.admin")
@@ -919,7 +919,10 @@ def unlock_admin_console(
     """Re-authenticate administrator and issue elevated unlock state for session."""
     check_unlock_rate_limit(admin.public_id, ip_address or "unknown")
 
-    if not admin.hashed_password or not verify_password(password, admin.hashed_password):
+    has_console_pwd = bool(getattr(admin, "admin_console_password_hash", None))
+    target_hash = admin.admin_console_password_hash if has_console_pwd else admin.hashed_password
+
+    if not target_hash or not verify_password(password, target_hash):
         record_failed_unlock(admin.public_id, ip_address or "unknown")
         try:
             log_action(
@@ -977,10 +980,244 @@ def unlock_admin_console(
 
     logger.info("Admin console unlocked for %s", admin.username)
     return {
+        "status": "unlocked",
+        "is_unlocked": True,
+        "is_configured": has_console_pwd,
         "unlocked": True,
-        "expires_at": unlocked_until.isoformat(),
+        "token": unlock_token,
         "unlock_token": unlock_token,
+        "expires_at": unlocked_until.isoformat(),
+        "unlocked_until": unlocked_until.isoformat(),
+        "remaining_seconds": 900,
         "message": "Admin console successfully unlocked",
+    }
+
+
+def setup_admin_console_password(
+    db: Session,
+    admin: User,
+    session: Optional[UserSession],
+    account_password: str,
+    console_password: str,
+    confirm_password: str,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Verify administrator account password, validate, and store separate persistent Admin Console password hash."""
+    if getattr(admin, "role", "user") != "admin":
+        raise HTTPException(status_code=403, detail="Administrator privileges required")
+
+    # Re-authenticate using the existing admin account password before allowing setup
+    if not admin.hashed_password or not verify_password(account_password, admin.hashed_password):
+        record_failed_unlock(admin.public_id, ip_address or "unknown")
+        try:
+            log_action(
+                db,
+                action="ADMIN_CONSOLE_PASSWORD_SETUP_FAILED",
+                resource_type="ADMIN_LOCK",
+                user_id=admin.id,
+                user_public_id=admin.public_id,
+                username=admin.username,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="FAILED",
+                detail="Invalid administrator account password during initial setup",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(status_code=401, detail="Invalid administrator account password")
+
+    if console_password != confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    if len(console_password) < 12:
+        raise HTTPException(status_code=400, detail="Admin Console password must be at least 12 characters in length")
+
+    admin.admin_console_password_hash = hash_password(console_password)
+
+    now_utc = datetime.now(timezone.utc)
+    unlocked_until = now_utc + timedelta(minutes=15)
+
+    if session:
+        session.admin_unlocked_until = unlocked_until
+
+    db.commit()
+    db.refresh(admin)
+    if session:
+        db.refresh(session)
+
+    # Issue signed unlock token
+    unlock_token = create_access_token(
+        {
+            "sub": admin.public_id,
+            "email": admin.email,
+            "sid": session.public_id if session else "",
+            "scope": "admin_unlock",
+        },
+        ttl_seconds=900,
+    )
+
+    try:
+        log_action(
+            db,
+            action="ADMIN_CONSOLE_PASSWORD_SETUP",
+            resource_type="ADMIN_LOCK",
+            user_id=admin.id,
+            user_public_id=admin.public_id,
+            username=admin.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="Admin Console persistent password configured and elevated access granted",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    logger.info("Admin Console persistent password configured for %s", admin.username)
+    return {
+        "status": "configured",
+        "is_configured": True,
+        "is_unlocked": True,
+        "unlocked": True,
+        "token": unlock_token,
+        "unlock_token": unlock_token,
+        "expires_at": unlocked_until.isoformat(),
+        "unlocked_until": unlocked_until.isoformat(),
+        "remaining_seconds": 900,
+        "message": "Admin Console password successfully established",
+    }
+
+
+def change_admin_console_password(
+    db: Session,
+    admin: User,
+    session: Optional[UserSession],
+    current_password: str,
+    new_password: str,
+    confirm_password: str,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Change the separate Admin Console password requiring current console password verification."""
+    if getattr(admin, "role", "user") != "admin":
+        raise HTTPException(status_code=403, detail="Administrator privileges required")
+
+    target_hash = admin.admin_console_password_hash or admin.hashed_password
+    if not target_hash or not verify_password(current_password, target_hash):
+        record_failed_unlock(admin.public_id, ip_address or "unknown")
+        raise HTTPException(status_code=401, detail="Current Admin Console password is incorrect")
+
+    if new_password != confirm_password:
+        raise HTTPException(status_code=400, detail="New passwords do not match")
+
+    if len(new_password) < 12:
+        raise HTTPException(status_code=400, detail="New Admin Console password must be at least 12 characters in length")
+
+    admin.admin_console_password_hash = hash_password(new_password)
+
+    now_utc = datetime.now(timezone.utc)
+    unlocked_until = now_utc + timedelta(minutes=15)
+    if session:
+        session.admin_unlocked_until = unlocked_until
+
+    db.commit()
+    db.refresh(admin)
+
+    try:
+        log_action(
+            db,
+            action="ADMIN_CONSOLE_PASSWORD_CHANGE",
+            resource_type="ADMIN_LOCK",
+            user_id=admin.id,
+            user_public_id=admin.public_id,
+            username=admin.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="Admin Console persistent password successfully changed",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    logger.info("Admin Console password changed for %s", admin.username)
+    return {
+        "status": "success",
+        "message": "Admin Console password changed successfully",
+        "expires_at": unlocked_until.isoformat(),
+    }
+
+
+def recover_admin_console_password(
+    db: Session,
+    admin: User,
+    session: Optional[UserSession],
+    account_password: str,
+    new_console_password: str,
+    confirm_console_password: str,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Recover and reset the Admin Console password using primary account password authentication."""
+    if getattr(admin, "role", "user") != "admin":
+        raise HTTPException(status_code=403, detail="Administrator privileges required")
+
+    if not admin.hashed_password or not verify_password(account_password, admin.hashed_password):
+        record_failed_unlock(admin.public_id, ip_address or "unknown")
+        raise HTTPException(status_code=401, detail="Invalid administrator account password")
+
+    if new_console_password != confirm_console_password:
+        raise HTTPException(status_code=400, detail="New passwords do not match")
+
+    if len(new_console_password) < 12:
+        raise HTTPException(status_code=400, detail="New Admin Console password must be at least 12 characters in length")
+
+    admin.admin_console_password_hash = hash_password(new_console_password)
+
+    now_utc = datetime.now(timezone.utc)
+    unlocked_until = now_utc + timedelta(minutes=15)
+    if session:
+        session.admin_unlocked_until = unlocked_until
+
+    db.commit()
+    db.refresh(admin)
+
+    unlock_token = create_access_token(
+        {
+            "sub": admin.public_id,
+            "email": admin.email,
+            "sid": session.public_id if session else "",
+            "scope": "admin_unlock",
+        },
+        ttl_seconds=900,
+    )
+
+    try:
+        log_action(
+            db,
+            action="ADMIN_CONSOLE_PASSWORD_RECOVERED",
+            resource_type="ADMIN_LOCK",
+            user_id=admin.id,
+            user_public_id=admin.public_id,
+            username=admin.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="Admin Console password recovered using account credentials",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    logger.info("Admin Console password recovered for %s", admin.username)
+    return {
+        "status": "recovered",
+        "is_unlocked": True,
+        "token": unlock_token,
+        "expires_at": unlocked_until.isoformat(),
+        "message": "Admin Console password successfully recovered and reset",
     }
 
 
@@ -1017,6 +1254,7 @@ def lock_admin_console(
     logger.info("Admin console locked for %s", admin.username)
     return {
         "unlocked": False,
+        "is_unlocked": False,
         "message": "Admin console locked successfully",
     }
 
@@ -1025,16 +1263,83 @@ def get_admin_unlock_status(
     session: Optional[UserSession],
     admin: Optional[User] = None,
 ) -> Dict[str, Any]:
-    """Inspect current elevated unlock status of the session."""
-    if not session or not session.admin_unlocked_until:
-        return {"unlocked": False, "expires_at": None}
-
+    """Inspect current elevated unlock status of the session and whether persistent password is set."""
+    is_configured = bool(admin and getattr(admin, "admin_console_password_hash", None))
     now_utc = datetime.now(timezone.utc)
-    until = session.admin_unlocked_until
-    if until.tzinfo is None:
-        until = until.replace(tzinfo=timezone.utc)
 
-    if now_utc < until:
-        return {"unlocked": True, "expires_at": until.isoformat()}
-    return {"unlocked": False, "expires_at": None}
+    is_unlocked = False
+    until_iso = None
+    remaining_sec = 0
+
+    if session and getattr(session, "admin_unlocked_until", None):
+        until = session.admin_unlocked_until
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        if now_utc < until:
+            is_unlocked = True
+            until_iso = until.isoformat()
+            remaining_sec = max(0, int((until - now_utc).total_seconds()))
+
+    return {
+        "is_configured": is_configured,
+        "is_unlocked": is_unlocked,
+        "unlocked_until": until_iso,
+        "remaining_seconds": remaining_sec,
+        "unlocked": is_unlocked,
+        "expires_at": until_iso,
+    }
+
+
+def get_all_active_sessions_admin(
+    db: Session,
+    limit: int = 50,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Retrieve all active unrevoked device sessions across the entire system for Session Management."""
+    now_utc = datetime.now(timezone.utc)
+    q = (
+        db.query(UserSession, User)
+        .join(User, UserSession.user_id == User.id)
+        .filter(
+            UserSession.is_revoked == False,
+            UserSession.expires_at > now_utc,
+        )
+        .order_by(UserSession.last_active_at.desc())
+    )
+
+    total = q.count()
+    rows = q.offset(offset).limit(limit).all()
+
+    sessions = []
+    for s, u in rows:
+        started_iso = s.created_at.isoformat() if s.created_at else ""
+        last_active_iso = s.last_active_at.isoformat() if s.last_active_at else ""
+        elapsed_sec = None
+        if s.created_at:
+            s_created = s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else s.created_at
+            elapsed_sec = max(0, int((now_utc - s_created).total_seconds()))
+
+        sessions.append({
+            "id": s.public_id,
+            "user_id": u.public_id,
+            "username": u.username,
+            "display_name": u.display_name or u.username,
+            "email": u.email or "",
+            "role": u.role,
+            "ip_address": s.ip_address or "—",
+            "device_info": s.device_info or "Unknown Device",
+            "user_agent": s.user_agent or "",
+            "created_at": started_iso,
+            "last_active_at": last_active_iso,
+            "duration_seconds": elapsed_sec,
+            "is_revoked": False,
+        })
+
+    return {
+        "sessions": sessions,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
 

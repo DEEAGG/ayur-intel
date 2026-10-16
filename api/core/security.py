@@ -207,10 +207,14 @@ def require_admin_unlocked(
     if session is None:
         return admin
 
+    is_configured = bool(getattr(admin, "admin_console_password_hash", None))
     raise HTTPException(
         status_code=423,
         detail="Admin console is locked. Re-authentication required.",
-        headers={"X-Admin-Locked": "true"},
+        headers={
+            "X-Admin-Locked": "true",
+            "X-Admin-Configured": "true" if is_configured else "false",
+        },
     )
 
 

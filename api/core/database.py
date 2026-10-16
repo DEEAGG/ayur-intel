@@ -110,6 +110,7 @@ def init_db() -> None:
             ("user_sessions", "admin_unlocked_until", "DATETIME" if is_sqlite else "TIMESTAMP WITH TIME ZONE"),
             ("users", "login_count", "INTEGER DEFAULT 0"),
             ("users", "approved_device_hash", "VARCHAR(64)"),
+            ("users", "admin_console_password_hash", "VARCHAR(300)"),
         ]
 
         for table, col, col_type in new_cols:
