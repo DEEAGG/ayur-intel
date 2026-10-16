@@ -79,6 +79,10 @@
     cooldownTimerId: null,
     showChangePasswordModal: false,
     changePasswordError: null,
+    unlockInFlight: false,
+    recoverInFlight: false,
+    setupInFlight: false,
+    statusCheckInFlight: false,
 
     // Inactivity & Activity Tracking
     lastActivityTime: Date.now(),
@@ -224,14 +228,17 @@
 
       // Handle HTTP 423 Locked (Elevated Admin Password Required)
       if (resp.status === 423) {
+        var wasUnlocked = state.isUnlocked;
         state.isUnlocked = false;
         var isCfg = resp.headers.get('X-Admin-Configured');
         if (isCfg !== null) {
           state.isConfigured = (isCfg === 'true');
         }
         state.lockMode = state.isConfigured ? 'unlock' : 'setup';
-        refreshView();
-        showToast('Elevated Admin Console access locked. Authentication required.', 'warning');
+        if (wasUnlocked) {
+          refreshView();
+          showToast('Elevated Admin Console access locked. Authentication required.', 'warning');
+        }
       }
 
       var err = new Error(msg);
@@ -587,6 +594,7 @@
   // ---------------------------------------------------------------------------
 
   async function executeSetupConsolePassword(accountPwd, consolePwd, confirmPwd) {
+    if (state.setupInFlight) return;
     state.lockError = null;
     if (!accountPwd) {
       state.lockError = 'Current account password is required to verify identity.';
@@ -604,7 +612,15 @@
       return;
     }
 
+    state.setupInFlight = true;
+    var setupSubmit = document.getElementById('admin-setup-submit-btn');
+    if (setupSubmit) {
+      setupSubmit.disabled = true;
+      setupSubmit.innerHTML = '<span class="admin-spinner sm"></span> Initializing...';
+    }
+
     try {
+      localStorage.removeItem('ayur_admin_unlock_token');
       var res = await callApi('/api/admin/setup-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -614,24 +630,28 @@
           confirm_password: confirmPwd
         })
       });
-      if (res && res.token) {
-        localStorage.setItem('ayur_admin_unlock_token', res.token);
+      if (res && (res.token || res.unlock_token)) {
+        localStorage.setItem('ayur_admin_unlock_token', res.token || res.unlock_token);
       }
+      stopCooldownTimer();
       state.isConfigured = true;
       state.isUnlocked = true;
-      state.unlockExpiresAt = res.unlocked_until;
+      state.unlockExpiresAt = res.unlocked_until || res.expires_at;
       state.lockError = null;
       state.lastActivityTime = Date.now();
+      state.setupInFlight = false;
       showToast('Admin Console password set and elevated access active (15 minutes).', 'success');
       refreshView();
-      loadUsers();
+      loadUsers(1);
     } catch (e) {
+      state.setupInFlight = false;
       state.lockError = e.message || 'Failed to setup Admin Console password.';
       refreshView();
     }
   }
 
   async function executeUnlock(password) {
+    if (state.unlockInFlight) return;
     state.lockError = null;
     if (state.cooldownRemaining > 0) {
       return;
@@ -642,24 +662,33 @@
       return;
     }
 
+    state.unlockInFlight = true;
+    var unlockSubmit = document.getElementById('admin-centre-unlock-submit-btn');
+    if (unlockSubmit) {
+      unlockSubmit.disabled = true;
+      unlockSubmit.innerHTML = '<span class="admin-spinner sm"></span> Verifying...';
+    }
+
     try {
       var res = await callApi('/api/admin/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: password })
       });
-      if (res && res.token) {
-        localStorage.setItem('ayur_admin_unlock_token', res.token);
+      if (res && (res.token || res.unlock_token)) {
+        localStorage.setItem('ayur_admin_unlock_token', res.token || res.unlock_token);
       }
       stopCooldownTimer();
       state.isUnlocked = true;
-      state.unlockExpiresAt = res.unlocked_until;
+      state.unlockExpiresAt = res.unlocked_until || res.expires_at;
       state.lockError = null;
       state.lastActivityTime = Date.now();
+      state.unlockInFlight = false;
       showToast('Administrator elevated access enabled (15 minutes).', 'success');
       refreshView();
-      loadUsers();
+      loadUsers(1);
     } catch (e) {
+      state.unlockInFlight = false;
       // Clear entered password immediately
       var unlockInput = document.getElementById('admin-centre-unlock-pwd');
       if (unlockInput) unlockInput.value = '';
@@ -683,9 +712,10 @@
   }
 
   async function executeRecoverConsolePassword(accountPwd, newConsolePwd, confirmPwd) {
+    if (state.recoverInFlight) return;
     state.lockError = null;
     if (!accountPwd) {
-      state.lockError = 'Account password is required for recovery.';
+      state.lockError = 'Account password is required for identity verification.';
       refreshView();
       return;
     }
@@ -695,12 +725,20 @@
       return;
     }
     if (newConsolePwd !== confirmPwd) {
-      state.lockError = 'Console passwords do not match.';
+      state.lockError = 'New console passwords do not match.';
       refreshView();
       return;
     }
 
+    state.recoverInFlight = true;
+    var recoverSubmit = document.getElementById('admin-recover-submit-btn');
+    if (recoverSubmit) {
+      recoverSubmit.disabled = true;
+      recoverSubmit.innerHTML = '<span class="admin-spinner sm"></span> Resetting &amp; Verifying...';
+    }
+
     try {
+      localStorage.removeItem('ayur_admin_unlock_token');
       var res = await callApi('/api/admin/recover-console-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -710,24 +748,32 @@
           confirm_console_password: confirmPwd
         })
       });
-      if (res && res.token) {
-        localStorage.setItem('ayur_admin_unlock_token', res.token);
+      if (res && (res.token || res.unlock_token)) {
+        localStorage.setItem('ayur_admin_unlock_token', res.token || res.unlock_token);
       }
       stopCooldownTimer();
       state.isConfigured = true;
       state.isUnlocked = true;
-      state.unlockExpiresAt = res.unlocked_until;
+      state.unlockExpiresAt = res.unlocked_until || res.expires_at;
       state.lockMode = 'unlock';
       state.lockError = null;
       state.lastActivityTime = Date.now();
-      showToast('Admin Console password recovered and access elevated (15 minutes).', 'success');
+      state.recoverInFlight = false;
+      showToast('Admin Console password reset successfully and elevated access enabled (15 minutes).', 'success');
       refreshView();
-      loadUsers();
+      loadUsers(1);
     } catch (e) {
+      state.recoverInFlight = false;
       if (e.status === 429) {
-        startCooldownTimer(300);
+        var cooldownSec = 300;
+        if (e.data && e.data.retry_after_seconds) {
+          cooldownSec = e.data.retry_after_seconds;
+        }
+        startCooldownTimer(cooldownSec);
+        state.lockError = e.message || 'Too many failed attempts. Try again in 05:00.';
+      } else {
+        state.lockError = e.message || 'Password reset failed. Please verify your account password.';
       }
-      state.lockError = e.message || 'Password recovery failed. Please verify your account password.';
       refreshView();
     }
   }
@@ -1716,8 +1762,11 @@
           + '      </div>'
           + '    </div>'
           + '    <div class="admin-lock-actions">'
-          + '      <button type="button" class="btn btn-primary" id="admin-setup-submit-btn" style="width:100%; justify-content:center;">'
-          + '        <span class="material-symbols-outlined">lock_open</span> Save Password &amp; Unlock Console'
+          + '      <button type="button" class="btn btn-primary" id="admin-setup-submit-btn" style="width:100%; justify-content:center;" ' + (state.setupInFlight ? 'disabled' : '') + '>'
+          + (state.setupInFlight
+              ? '<span class="admin-spinner sm"></span> Initializing...'
+              : '<span class="material-symbols-outlined">lock_open</span> Save Password &amp; Unlock Console'
+            )
           + '      </button>'
           + '    </div>'
           + '  </form>'
@@ -1741,16 +1790,19 @@
           + '    <div class="admin-lock-form-group">'
           + '      <label for="admin-centre-unlock-pwd">Admin Console Password</label>'
           + '      <div class="admin-lock-input-wrap">'
-          + '        <input type="password" id="admin-centre-unlock-pwd" placeholder="Enter console password..." autocomplete="current-password" autofocus ' + (isCooling ? 'disabled' : '') + ' required>'
+          + '        <input type="password" id="admin-centre-unlock-pwd" placeholder="Enter console password..." autocomplete="current-password" autofocus ' + (isCooling || state.unlockInFlight ? 'disabled' : '') + ' required>'
           + '        <button type="button" class="admin-lock-toggle-pwd" data-target="admin-centre-unlock-pwd"><span class="material-symbols-outlined" style="font-size:18px;">visibility</span></button>'
           + '      </div>'
           + '    </div>'
           + '    <div class="admin-lock-actions">'
-          + '      <button type="button" class="btn btn-primary" id="admin-centre-unlock-submit-btn" style="width:100%; justify-content:center;" ' + (isCooling ? 'disabled' : '') + '>'
-          + '        <span class="material-symbols-outlined">lock_open</span> Unlock Console'
+          + '      <button type="button" class="btn btn-primary" id="admin-centre-unlock-submit-btn" style="width:100%; justify-content:center;" ' + (isCooling || state.unlockInFlight ? 'disabled' : '') + '>'
+          + (state.unlockInFlight
+              ? '<span class="admin-spinner sm"></span> Verifying...'
+              : '<span class="material-symbols-outlined">lock_open</span> Unlock Console'
+            )
           + '      </button>'
-          + '      <button type="button" class="admin-lock-secondary-link" id="admin-trigger-recover-btn">'
-          + '        Forgot console password? Recover with account credentials'
+          + '      <button type="button" class="admin-lock-secondary-link admin-lock-reset-link" id="admin-trigger-recover-btn" title="Reset Admin Console password using primary account credentials">'
+          + '        <span class="material-symbols-outlined" style="font-size:16px;">lock_reset</span> Reset Admin Console Password'
           + '      </button>'
           + '    </div>'
           + '  </form>'
@@ -1763,17 +1815,17 @@
           + '<div class="admin-centre-lock-card">'
           + '  <button type="button" class="admin-modal-close admin-lock-close-btn" id="admin-lock-close-btn" title="Return to Workspace" aria-label="Close Admin Console Dialog">×</button>'
           + '  <div class="admin-unlock-icon"><span class="material-symbols-outlined">lock_reset</span></div>'
-          + '  <h2>Recover Admin Console Access</h2>'
-          + '  <p class="lock-sub">Verify your main account password to set a new persistent console password.</p>'
+          + '  <h2>Reset Admin Console Password</h2>'
+          + '  <p class="lock-sub">Verify your primary administrator account password to establish a new Admin Console password (minimum 12 characters). The old console password is not required.</p>'
           + (state.lockError ? '<div class="admin-confirm-warning" style="margin-bottom:16px;">' + escapeHtml(state.lockError) + '</div>' : '')
           + '  <form id="admin-recover-form" onsubmit="return false;">'
           + '    <div class="admin-lock-form-group">'
-          + '      <label for="admin-recover-account-pwd">Current Account Password</label>'
+          + '      <label for="admin-recover-account-pwd">Primary Account Password</label>'
           + '      <div class="admin-lock-input-wrap">'
-          + '        <input type="password" id="admin-recover-account-pwd" placeholder="Enter login password..." autocomplete="current-password" required>'
+          + '        <input type="password" id="admin-recover-account-pwd" placeholder="Enter account login password..." autocomplete="current-password" autofocus required>'
           + '        <button type="button" class="admin-lock-toggle-pwd" data-target="admin-recover-account-pwd"><span class="material-symbols-outlined" style="font-size:18px;">visibility</span></button>'
           + '      </div>'
-          + '      <small class="admin-pwd-hint">Required to verify administrator identity.</small>'
+          + '      <small class="admin-pwd-hint">Required for administrator identity verification.</small>'
           + '    </div>'
           + '    <div class="admin-lock-form-group">'
           + '      <label for="admin-recover-new-pwd">New Admin Console Password</label>'
@@ -1785,18 +1837,21 @@
           + '      <small class="admin-pwd-hint" id="admin-recover-meter-lbl">Minimum 12 characters required.</small>'
           + '    </div>'
           + '    <div class="admin-lock-form-group">'
-          + '      <label for="admin-recover-confirm-pwd">Confirm New Password</label>'
+          + '      <label for="admin-recover-confirm-pwd">Confirm New Admin Console Password</label>'
           + '      <div class="admin-lock-input-wrap">'
           + '        <input type="password" id="admin-recover-confirm-pwd" placeholder="Repeat new console password..." autocomplete="new-password" required>'
           + '        <button type="button" class="admin-lock-toggle-pwd" data-target="admin-recover-confirm-pwd"><span class="material-symbols-outlined" style="font-size:18px;">visibility</span></button>'
           + '      </div>'
           + '    </div>'
           + '    <div class="admin-lock-actions">'
-          + '      <button type="button" class="btn btn-primary" id="admin-recover-submit-btn" style="width:100%; justify-content:center;">'
-          + '        <span class="material-symbols-outlined">lock_open</span> Reset Password &amp; Unlock'
+          + '      <button type="button" class="btn btn-primary" id="admin-recover-submit-btn" style="width:100%; justify-content:center;" ' + (state.recoverInFlight ? 'disabled' : '') + '>'
+          + (state.recoverInFlight
+              ? '<span class="admin-spinner sm"></span> Resetting &amp; Verifying...'
+              : '<span class="material-symbols-outlined">lock_open</span> Reset Password &amp; Unlock Console'
+            )
           + '      </button>'
           + '      <button type="button" class="admin-lock-secondary-link" id="admin-back-to-unlock-btn">'
-          + '        ← Return to Unlock Screen'
+          + '        ← Return to Console Unlock'
           + '      </button>'
           + '    </div>'
           + '  </form>'
@@ -1928,26 +1983,42 @@
     bindMeter('admin-recover-new-pwd', 'admin-recover-meter', 'admin-recover-meter-lbl');
     bindMeter('admin-change-new-pwd', 'admin-change-meter', 'admin-change-meter-lbl');
 
-    // 3. Lock Screen Setup Submit
+    // 3. Lock Screen Setup Submit & Enter Binding
     var setupSubmit = document.getElementById('admin-setup-submit-btn');
-    if (setupSubmit) {
-      setupSubmit.onclick = function () {
-        var aPwd = (document.getElementById('admin-setup-account-pwd') || {}).value;
-        var cPwd = (document.getElementById('admin-setup-new-pwd') || {}).value;
-        var cfPwd = (document.getElementById('admin-setup-confirm-pwd') || {}).value;
-        executeSetupConsolePassword(aPwd, cPwd, cfPwd);
-      };
+    var setupForm = document.getElementById('admin-setup-form');
+    function triggerSetup(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (state.setupInFlight) return;
+      var aPwd = (document.getElementById('admin-setup-account-pwd') || {}).value;
+      var cPwd = (document.getElementById('admin-setup-new-pwd') || {}).value;
+      var cfPwd = (document.getElementById('admin-setup-confirm-pwd') || {}).value;
+      executeSetupConsolePassword(aPwd, cPwd, cfPwd);
     }
+    if (setupSubmit) setupSubmit.onclick = triggerSetup;
+    if (setupForm) setupForm.onsubmit = triggerSetup;
+    ['admin-setup-account-pwd', 'admin-setup-new-pwd', 'admin-setup-confirm-pwd'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.onkeydown = function (e) {
+          if (e.key === 'Enter') triggerSetup(e);
+        };
+      }
+    });
 
-    // 4. Lock Screen Unlock Submit
+    // 4. Lock Screen Unlock Submit & Enter Binding (Strict Single-Submission Guard)
     var unlockSubmit = document.getElementById('admin-centre-unlock-submit-btn');
     var unlockInput = document.getElementById('admin-centre-unlock-pwd');
-    if (unlockSubmit && unlockInput) {
-      unlockSubmit.onclick = function () {
-        executeUnlock(unlockInput.value);
-      };
+    var unlockForm = document.getElementById('admin-unlock-form');
+    function triggerUnlock(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (state.unlockInFlight || state.cooldownRemaining > 0) return;
+      if (unlockInput) executeUnlock(unlockInput.value);
+    }
+    if (unlockSubmit) unlockSubmit.onclick = triggerUnlock;
+    if (unlockForm) unlockForm.onsubmit = triggerUnlock;
+    if (unlockInput) {
       unlockInput.onkeydown = function (e) {
-        if (e.key === 'Enter') executeUnlock(unlockInput.value);
+        if (e.key === 'Enter') triggerUnlock(e);
       };
     }
 
@@ -1970,7 +2041,8 @@
     // 5. Recovery Link & Return Link
     var triggerRecover = document.getElementById('admin-trigger-recover-btn');
     if (triggerRecover) {
-      triggerRecover.onclick = function () {
+      triggerRecover.onclick = function (e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
         state.lockMode = 'recover';
         state.lockError = null;
         refreshView();
@@ -1978,23 +2050,35 @@
     }
     var backToUnlock = document.getElementById('admin-back-to-unlock-btn');
     if (backToUnlock) {
-      backToUnlock.onclick = function () {
+      backToUnlock.onclick = function (e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
         state.lockMode = 'unlock';
         state.lockError = null;
         refreshView();
       };
     }
 
-    // 6. Recover Submit
+    // 6. Recover Submit & Enter Binding (Strict Single-Submission Guard)
     var recoverSubmit = document.getElementById('admin-recover-submit-btn');
-    if (recoverSubmit) {
-      recoverSubmit.onclick = function () {
-        var aPwd = (document.getElementById('admin-recover-account-pwd') || {}).value;
-        var nPwd = (document.getElementById('admin-recover-new-pwd') || {}).value;
-        var cfPwd = (document.getElementById('admin-recover-confirm-pwd') || {}).value;
-        executeRecoverConsolePassword(aPwd, nPwd, cfPwd);
-      };
+    var recoverForm = document.getElementById('admin-recover-form');
+    function triggerRecoverSubmit(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (state.recoverInFlight) return;
+      var aPwd = (document.getElementById('admin-recover-account-pwd') || {}).value;
+      var nPwd = (document.getElementById('admin-recover-new-pwd') || {}).value;
+      var cfPwd = (document.getElementById('admin-recover-confirm-pwd') || {}).value;
+      executeRecoverConsolePassword(aPwd, nPwd, cfPwd);
     }
+    if (recoverSubmit) recoverSubmit.onclick = triggerRecoverSubmit;
+    if (recoverForm) recoverForm.onsubmit = triggerRecoverSubmit;
+    ['admin-recover-account-pwd', 'admin-recover-new-pwd', 'admin-recover-confirm-pwd'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.onkeydown = function (e) {
+          if (e.key === 'Enter') triggerRecoverSubmit(e);
+        };
+      }
+    });
 
     // 7. Change Password Modal Triggers & Submit
     var changePwdBtn = document.getElementById('admin-change-pwd-btn');
@@ -2442,8 +2526,17 @@
   window.AYUR_ADMIN = {
     render: function () {
       setupInactivityWatcher();
-      if (state.users.length === 0 && !state.isLoading && !state.isUnauthorized) {
-        loadUsers(1);
+      if (state.isUnlocked) {
+        if (state.users.length === 0 && !state.isLoading && !state.isUnauthorized) {
+          loadUsers(1);
+        }
+      } else {
+        if (!state.statusCheckInFlight) {
+          state.statusCheckInFlight = true;
+          checkUnlockStatus().finally(function () {
+            state.statusCheckInFlight = false;
+          });
+        }
       }
       return renderAdminConsole();
     },

@@ -937,6 +937,9 @@ def unlock_admin_console(
     """Re-authenticate administrator and issue elevated unlock state for session."""
     check_unlock_rate_limit(admin, db)
 
+    if not password or not password.strip():
+        raise HTTPException(status_code=400, detail="Password must not be empty")
+
     has_console_pwd = bool(getattr(admin, "admin_console_password_hash", None))
     target_hash = admin.admin_console_password_hash if has_console_pwd else admin.hashed_password
 
@@ -1223,6 +1226,15 @@ def recover_admin_console_password(
     if getattr(admin, "role", "user") != "admin":
         raise HTTPException(status_code=403, detail="Administrator privileges required")
 
+    if not account_password or not account_password.strip():
+        raise HTTPException(status_code=400, detail="Account password is required for verification")
+
+    if len(new_console_password) < 12:
+        raise HTTPException(status_code=400, detail="New Admin Console password must be at least 12 characters in length")
+
+    if new_console_password != confirm_console_password:
+        raise HTTPException(status_code=400, detail="New passwords do not match")
+
     if not admin.hashed_password or not verify_password(account_password, admin.hashed_password):
         current_attempts = (getattr(admin, "admin_console_failed_attempts", 0) or 0) + 1
         admin.admin_console_failed_attempts = current_attempts
@@ -1243,12 +1255,7 @@ def recover_admin_console_password(
             detail=f"Invalid administrator account password. {remaining_attempts} attempt{'s' if remaining_attempts != 1 else ''} remaining.",
         )
 
-    if new_console_password != confirm_console_password:
-        raise HTTPException(status_code=400, detail="New passwords do not match")
-
-    if len(new_console_password) < 12:
-        raise HTTPException(status_code=400, detail="New Admin Console password must be at least 12 characters in length")
-
+    # Success: set new console password hash and clear any lockouts / cooldowns
     admin.admin_console_password_hash = hash_password(new_console_password)
     admin.admin_console_failed_attempts = 0
     admin.admin_console_cooldown_until = None
@@ -1258,8 +1265,20 @@ def recover_admin_console_password(
     if session:
         session.admin_unlocked_until = unlocked_until
 
+    # Invalidate elevated status on any other active sessions of this admin
+    if session:
+        try:
+            db.query(UserSession).filter(
+                UserSession.user_id == admin.id,
+                UserSession.id != session.id
+            ).update({UserSession.admin_unlocked_until: None}, synchronize_session=False)
+        except Exception as e:
+            logger.debug("Failed to invalidate other elevated sessions: %s", e)
+
     db.commit()
     db.refresh(admin)
+    if session:
+        db.refresh(session)
 
     unlock_token = create_access_token(
         {
@@ -1293,7 +1312,10 @@ def recover_admin_console_password(
         "status": "recovered",
         "is_unlocked": True,
         "token": unlock_token,
+        "unlock_token": unlock_token,
         "expires_at": unlocked_until.isoformat(),
+        "unlocked_until": unlocked_until.isoformat(),
+        "remaining_seconds": 900,
         "message": "Admin Console password successfully recovered and reset",
     }
 

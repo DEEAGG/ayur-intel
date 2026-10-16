@@ -634,6 +634,146 @@ class TestPersistentPasswordLock(unittest.TestCase):
         self.assertEqual(unlock_new.status_code, 200)
         self.assertTrue(unlock_new.json()["is_unlocked"])
 
+    def test_empty_password_unlock_does_not_increment_counter(self):
+        """Submitting an empty password returns 400 without incrementing failed attempt counter."""
+        self.admin_user.admin_console_password_hash = hash_password("SecretConsole123!")
+        self.admin_user.admin_console_failed_attempts = 0
+        self.admin_user.admin_console_cooldown_until = None
+        self.db.commit()
+
+        login_resp = self.client.post(
+            "/api/auth/login",
+            json={"email": "admin@ayurintel.org", "password": "AccountMasterPassword123!"},
+        )
+        auth_hdr = {"Authorization": f"Bearer {login_resp.json()['token']}"}
+
+        resp = self.client.post(
+            "/api/admin/unlock",
+            json={"password": "   "},
+            headers=auth_hdr,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("empty", resp.json()["detail"].lower())
+
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 0)
+        self.assertIsNone(self.admin_user.admin_console_cooldown_until)
+
+    def test_status_check_does_not_increment_counter(self):
+        """Calling /api/admin/unlock-status is strictly read-only and never increments failed attempts."""
+        self.admin_user.admin_console_password_hash = hash_password("SecretConsole123!")
+        self.admin_user.admin_console_failed_attempts = 1
+        self.db.commit()
+
+        login_resp = self.client.post(
+            "/api/auth/login",
+            json={"email": "admin@ayurintel.org", "password": "AccountMasterPassword123!"},
+        )
+        auth_hdr = {"Authorization": f"Bearer {login_resp.json()['token']}"}
+
+        # Multiple status checks
+        for _ in range(5):
+            resp = self.client.get("/api/admin/unlock-status", headers=auth_hdr)
+            self.assertEqual(resp.status_code, 200)
+
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 1)
+
+    def test_recovery_validation_mismatches_do_not_increment_counter(self):
+        """Mismatched passwords or short passwords in recovery return 400/422 without incrementing failed counter."""
+        self.admin_user.admin_console_password_hash = hash_password("SecretConsole123!")
+        self.admin_user.admin_console_failed_attempts = 0
+        self.db.commit()
+
+        login_resp = self.client.post(
+            "/api/auth/login",
+            json={"email": "admin@ayurintel.org", "password": "AccountMasterPassword123!"},
+        )
+        auth_hdr = {"Authorization": f"Bearer {login_resp.json()['token']}"}
+
+        # 1. Mismatched passwords
+        mismatch_resp = self.client.post(
+            "/api/admin/recover-console-password",
+            json={
+                "account_password": "AccountMasterPassword123!",
+                "new_console_password": "ValidConsolePassword123!",
+                "confirm_console_password": "DifferentConsolePassword123!",
+            },
+            headers=auth_hdr,
+        )
+        self.assertEqual(mismatch_resp.status_code, 400)
+
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 0)
+
+        # 2. Too short password (< 12 chars)
+        short_resp = self.client.post(
+            "/api/admin/recover-console-password",
+            json={
+                "account_password": "AccountMasterPassword123!",
+                "new_console_password": "Short1!",
+                "confirm_console_password": "Short1!",
+            },
+            headers=auth_hdr,
+        )
+        self.assertIn(short_resp.status_code, [400, 422])
+
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 0)
+
+    def test_recovery_breaks_cooldown_and_invalidates_other_elevated_sessions(self):
+        """Recovery with valid primary account password succeeds even during cooldown and strips elevation from other sessions."""
+        self.admin_user.admin_console_password_hash = hash_password("ForgottenPassword123!")
+        self.admin_user.admin_console_failed_attempts = 3
+        self.admin_user.admin_console_cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=5)
+        self.db.commit()
+
+        # Session 1: Current session to recover
+        login1 = self.client.post(
+            "/api/auth/login",
+            json={"email": "admin@ayurintel.org", "password": "AccountMasterPassword123!"},
+        )
+        token1 = login1.json()["token"]
+        auth_hdr1 = {"Authorization": f"Bearer {token1}"}
+
+        # Session 2: Another active session that was previously elevated
+        sess2 = UserSession(
+            user_id=self.admin_user.id,
+            ip_address="10.0.0.99",
+            user_agent="Firefox Client",
+            device_info="Other Desktop",
+            admin_unlocked_until=datetime.now(timezone.utc) + timedelta(minutes=10),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+            is_revoked=False,
+        )
+        self.db.add(sess2)
+        self.db.commit()
+
+        # Recovery on Session 1 succeeds with valid account password
+        rec_resp = self.client.post(
+            "/api/admin/recover-console-password",
+            json={
+                "account_password": "AccountMasterPassword123!",
+                "new_console_password": "FreshNewConsoleSecret123!",
+                "confirm_console_password": "FreshNewConsoleSecret123!",
+            },
+            headers=auth_hdr1,
+        )
+        self.assertEqual(rec_resp.status_code, 200)
+        rec_json = rec_resp.json()
+        self.assertTrue(rec_json["is_unlocked"])
+        self.assertIn("unlock_token", rec_json)
+        self.assertEqual(rec_json["remaining_seconds"], 900)
+
+        # Counter and cooldown reset on admin
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 0)
+        self.assertIsNone(self.admin_user.admin_console_cooldown_until)
+
+        # Session 2 has had its elevated elevation stripped
+        self.db.refresh(sess2)
+        self.assertIsNone(sess2.admin_unlocked_until)
+
 
 if __name__ == "__main__":
     unittest.main()
