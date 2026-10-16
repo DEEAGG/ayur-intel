@@ -89,6 +89,9 @@ class TestPersistentPasswordLock(unittest.TestCase):
     """Test suite for persistent admin console password lock and security policies."""
 
     def setUp(self):
+        from api.core.security import _auth_rate_limit_store
+        _auth_rate_limit_store.clear()
+
         self.engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -138,6 +141,8 @@ class TestPersistentPasswordLock(unittest.TestCase):
         self.db.commit()
 
     def tearDown(self):
+        from api.core.security import _auth_rate_limit_store
+        _auth_rate_limit_store.clear()
         self.db.close()
         Base.metadata.drop_all(bind=self.engine)
 
@@ -473,6 +478,161 @@ class TestPersistentPasswordLock(unittest.TestCase):
         after_sess = self.client.get("/api/admin/all-sessions", headers=elevated_hdr)
         active_ids_after = [s["id"] for s in after_sess.json()["sessions"]]
         self.assertNotIn(user_session_id, active_ids_after)
+
+    def test_failed_attempts_rate_limit_and_cooldown(self):
+        """Test that 3 consecutive failed unlock attempts enforce a 5-minute cooldown with HTTP 429."""
+        # Setup admin console password
+        self.admin_user.admin_console_password_hash = hash_password("ValidConsoleSecret123!")
+        self.admin_user.admin_console_failed_attempts = 0
+        self.admin_user.admin_console_cooldown_until = None
+        self.db.commit()
+
+        login_resp = self.client.post(
+            "/api/auth/login",
+            json={"email": "admin@ayurintel.org", "password": "AccountMasterPassword123!"},
+        )
+        self.assertEqual(login_resp.status_code, 200)
+        admin_token = login_resp.json()["token"]
+        auth_hdr = {"Authorization": f"Bearer {admin_token}"}
+
+        # Attempt 1: wrong password -> 401, 2 attempts remaining
+        resp1 = self.client.post(
+            "/api/admin/unlock",
+            json={"password": "WrongPassword1!"},
+            headers=auth_hdr,
+        )
+        self.assertEqual(resp1.status_code, 401)
+        self.assertIn("2 attempts remaining", resp1.json()["detail"])
+
+        # Check DB state
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 1)
+        self.assertIsNone(self.admin_user.admin_console_cooldown_until)
+
+        # Attempt 2: wrong password -> 401, 1 attempt remaining
+        resp2 = self.client.post(
+            "/api/admin/unlock",
+            json={"password": "WrongPassword2!"},
+            headers=auth_hdr,
+        )
+        self.assertEqual(resp2.status_code, 401)
+        self.assertIn("1 attempt remaining", resp2.json()["detail"])
+
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 2)
+
+        # Attempt 3: wrong password -> 429, triggers 5-minute cooldown
+        resp3 = self.client.post(
+            "/api/admin/unlock",
+            json={"password": "WrongPassword3!"},
+            headers=auth_hdr,
+        )
+        self.assertEqual(resp3.status_code, 429)
+        self.assertIn("Too many failed attempts", resp3.json()["detail"])
+        self.assertEqual(resp3.headers.get("Retry-After"), "300")
+
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 3)
+        self.assertIsNotNone(self.admin_user.admin_console_cooldown_until)
+
+        # Subsequent attempt during cooldown (even with correct password) returns 429
+        resp_blocked = self.client.post(
+            "/api/admin/unlock",
+            json={"password": "ValidConsoleSecret123!"},
+            headers=auth_hdr,
+        )
+        self.assertEqual(resp_blocked.status_code, 429)
+
+        # Check unlock-status reports cooldown active
+        status_resp = self.client.get("/api/admin/unlock-status", headers=auth_hdr)
+        self.assertEqual(status_resp.status_code, 200)
+        status_json = status_resp.json()
+        self.assertTrue(status_json["cooldown_active"])
+        self.assertGreater(status_json["cooldown_remaining_seconds"], 0)
+        self.assertEqual(status_json["failed_attempts"], 3)
+
+        # Fast forward time: simulate cooldown expiration
+        self.admin_user.admin_console_cooldown_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+        self.db.commit()
+
+        # Valid unlock now succeeds and resets counters
+        resp_success = self.client.post(
+            "/api/admin/unlock",
+            json={"password": "ValidConsoleSecret123!"},
+            headers=auth_hdr,
+        )
+        self.assertEqual(resp_success.status_code, 200)
+        self.assertTrue(resp_success.json()["is_unlocked"])
+
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 0)
+        self.assertIsNone(self.admin_user.admin_console_cooldown_until)
+
+    def test_recovery_flow_and_counter_reset(self):
+        """Test console password recovery with primary account credentials and failed counter reset."""
+        # Set initial console password
+        self.admin_user.admin_console_password_hash = hash_password("OldConsoleSecret123!")
+        self.admin_user.admin_console_failed_attempts = 1  # 1 failed attempt existing
+        self.db.commit()
+
+        login_resp = self.client.post(
+            "/api/auth/login",
+            json={"email": "admin@ayurintel.org", "password": "AccountMasterPassword123!"},
+        )
+        admin_token = login_resp.json()["token"]
+        auth_hdr = {"Authorization": f"Bearer {admin_token}"}
+
+        # Recovery rejection: mismatched new passwords
+        mismatch_resp = self.client.post(
+            "/api/admin/recover-console-password",
+            json={
+                "account_password": "AccountMasterPassword123!",
+                "new_console_password": "NewConsoleSecret123!",
+                "confirm_console_password": "DifferentConsoleSecret123!",
+            },
+            headers=auth_hdr,
+        )
+        self.assertEqual(mismatch_resp.status_code, 400)
+
+        # Recovery rejection: invalid account password
+        wrong_acc_resp = self.client.post(
+            "/api/admin/recover-console-password",
+            json={
+                "account_password": "WrongAccountPassword123!",
+                "new_console_password": "NewConsoleSecret123!",
+                "confirm_console_password": "NewConsoleSecret123!",
+            },
+            headers=auth_hdr,
+        )
+        self.assertEqual(wrong_acc_resp.status_code, 401)
+
+        # Recovery success with valid account credentials
+        valid_recover_resp = self.client.post(
+            "/api/admin/recover-console-password",
+            json={
+                "account_password": "AccountMasterPassword123!",
+                "new_console_password": "BrandNewConsoleSecret123!",
+                "confirm_console_password": "BrandNewConsoleSecret123!",
+            },
+            headers=auth_hdr,
+        )
+        self.assertEqual(valid_recover_resp.status_code, 200)
+        self.assertTrue(valid_recover_resp.json()["is_unlocked"])
+        self.assertIn("token", valid_recover_resp.json())
+
+        # Verify failed attempts counter was reset to 0
+        self.db.refresh(self.admin_user)
+        self.assertEqual(self.admin_user.admin_console_failed_attempts, 0)
+        self.assertIsNone(self.admin_user.admin_console_cooldown_until)
+
+        # Verify new console password unlocks successfully
+        unlock_new = self.client.post(
+            "/api/admin/unlock",
+            json={"password": "BrandNewConsoleSecret123!"},
+            headers=auth_hdr,
+        )
+        self.assertEqual(unlock_new.status_code, 200)
+        self.assertTrue(unlock_new.json()["is_unlocked"])
 
 
 if __name__ == "__main__":

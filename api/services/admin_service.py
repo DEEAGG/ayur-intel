@@ -883,29 +883,47 @@ def reject_access_request_admin(
 # Admin Console Elevated Unlock Management
 # ---------------------------------------------------------------------------
 
-_failed_unlock_attempts: Dict[str, List[float]] = {}
+COOLDOWN_DURATION_SECONDS = 300  # 5 minutes
+MAX_FAILED_UNLOCK_ATTEMPTS = 3
 
 
-def check_unlock_rate_limit(admin_id: str, ip: str) -> None:
+def get_unlock_cooldown_remaining(admin: Optional[User], db: Optional[Session] = None) -> int:
+    """Return remaining cooldown seconds for admin, or 0 if no active cooldown."""
+    if not admin:
+        return 0
+    cooldown_until = getattr(admin, "admin_console_cooldown_until", None)
+    if not cooldown_until:
+        return 0
+    now_utc = datetime.now(timezone.utc)
+    if cooldown_until.tzinfo is None:
+        cooldown_until = cooldown_until.replace(tzinfo=timezone.utc)
+
+    if now_utc < cooldown_until:
+        return max(1, int((cooldown_until - now_utc).total_seconds()))
+    else:
+        # Cooldown has expired, auto-reset counter and timestamp
+        if getattr(admin, "admin_console_failed_attempts", 0) or getattr(admin, "admin_console_cooldown_until", None):
+            admin.admin_console_failed_attempts = 0
+            admin.admin_console_cooldown_until = None
+            if db:
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
+        return 0
+
+
+def check_unlock_rate_limit(admin: User, db: Session) -> None:
     """Enforce rate limits on failed administrator console unlock attempts."""
-    now = time.time()
-    key = f"{admin_id}:{ip}"
-    attempts = [t for t in _failed_unlock_attempts.get(key, []) if now - t < 300]
-    _failed_unlock_attempts[key] = attempts
-    if len(attempts) >= 5:
+    remaining = get_unlock_cooldown_remaining(admin, db)
+    if remaining > 0:
+        mins = remaining // 60
+        secs = remaining % 60
         raise HTTPException(
             status_code=429,
-            detail="Too many failed unlock attempts. Please wait 5 minutes before trying again.",
+            detail=f"Too many failed attempts. Try again in {mins:02d}:{secs:02d}.",
+            headers={"Retry-After": str(remaining)},
         )
-
-
-def record_failed_unlock(admin_id: str, ip: str) -> None:
-    """Record timestamp of failed unlock attempt for sliding window rate limit."""
-    now = time.time()
-    key = f"{admin_id}:{ip}"
-    attempts = [t for t in _failed_unlock_attempts.get(key, []) if now - t < 300]
-    attempts.append(now)
-    _failed_unlock_attempts[key] = attempts
 
 
 def unlock_admin_console(
@@ -917,30 +935,69 @@ def unlock_admin_console(
     user_agent: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Re-authenticate administrator and issue elevated unlock state for session."""
-    check_unlock_rate_limit(admin.public_id, ip_address or "unknown")
+    check_unlock_rate_limit(admin, db)
 
     has_console_pwd = bool(getattr(admin, "admin_console_password_hash", None))
     target_hash = admin.admin_console_password_hash if has_console_pwd else admin.hashed_password
 
     if not target_hash or not verify_password(password, target_hash):
-        record_failed_unlock(admin.public_id, ip_address or "unknown")
-        try:
-            log_action(
-                db,
-                action="ADMIN_UNLOCK_FAILED",
-                resource_type="ADMIN_LOCK",
-                user_id=admin.id,
-                user_public_id=admin.public_id,
-                username=admin.username,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                status="FAILED",
-                detail="Invalid password provided for admin unlock",
-            )
+        current_attempts = (getattr(admin, "admin_console_failed_attempts", 0) or 0) + 1
+        admin.admin_console_failed_attempts = current_attempts
+
+        if current_attempts >= MAX_FAILED_UNLOCK_ATTEMPTS:
+            now_utc = datetime.now(timezone.utc)
+            admin.admin_console_cooldown_until = now_utc + timedelta(seconds=COOLDOWN_DURATION_SECONDS)
+            admin.admin_console_failed_attempts = MAX_FAILED_UNLOCK_ATTEMPTS
             db.commit()
-        except Exception:
-            db.rollback()
-        raise HTTPException(status_code=401, detail="Invalid administrator password")
+            try:
+                log_action(
+                    db,
+                    action="ADMIN_UNLOCK_RATE_LIMITED",
+                    resource_type="ADMIN_LOCK",
+                    user_id=admin.id,
+                    user_public_id=admin.public_id,
+                    username=admin.username,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    status="FAILED",
+                    detail=f"Max failed attempts ({MAX_FAILED_UNLOCK_ATTEMPTS}) reached. Console locked for 5 minutes.",
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+            raise HTTPException(
+                status_code=429,
+                detail="Too many failed attempts. Try again in 05:00.",
+                headers={"Retry-After": str(COOLDOWN_DURATION_SECONDS)},
+            )
+        else:
+            db.commit()
+            remaining_attempts = MAX_FAILED_UNLOCK_ATTEMPTS - current_attempts
+            try:
+                log_action(
+                    db,
+                    action="ADMIN_UNLOCK_FAILED",
+                    resource_type="ADMIN_LOCK",
+                    user_id=admin.id,
+                    user_public_id=admin.public_id,
+                    username=admin.username,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    status="FAILED",
+                    detail=f"Invalid password provided for admin unlock. {remaining_attempts} attempt{'s' if remaining_attempts != 1 else ''} remaining.",
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+            raise HTTPException(
+                status_code=401,
+                detail=f"Invalid Admin Console password. {remaining_attempts} attempt{'s' if remaining_attempts != 1 else ''} remaining.",
+            )
+
+    # Successful authentication resets failed attempts & cooldown
+    admin.admin_console_failed_attempts = 0
+    admin.admin_console_cooldown_until = None
+    db.commit()
 
     now_utc = datetime.now(timezone.utc)
     unlocked_until = now_utc + timedelta(minutes=15)
@@ -1009,7 +1066,6 @@ def setup_admin_console_password(
 
     # Re-authenticate using the existing admin account password before allowing setup
     if not admin.hashed_password or not verify_password(account_password, admin.hashed_password):
-        record_failed_unlock(admin.public_id, ip_address or "unknown")
         try:
             log_action(
                 db,
@@ -1035,6 +1091,8 @@ def setup_admin_console_password(
         raise HTTPException(status_code=400, detail="Admin Console password must be at least 12 characters in length")
 
     admin.admin_console_password_hash = hash_password(console_password)
+    admin.admin_console_failed_attempts = 0
+    admin.admin_console_cooldown_until = None
 
     now_utc = datetime.now(timezone.utc)
     unlocked_until = now_utc + timedelta(minutes=15)
@@ -1106,7 +1164,6 @@ def change_admin_console_password(
 
     target_hash = admin.admin_console_password_hash or admin.hashed_password
     if not target_hash or not verify_password(current_password, target_hash):
-        record_failed_unlock(admin.public_id, ip_address or "unknown")
         raise HTTPException(status_code=401, detail="Current Admin Console password is incorrect")
 
     if new_password != confirm_password:
@@ -1116,6 +1173,8 @@ def change_admin_console_password(
         raise HTTPException(status_code=400, detail="New Admin Console password must be at least 12 characters in length")
 
     admin.admin_console_password_hash = hash_password(new_password)
+    admin.admin_console_failed_attempts = 0
+    admin.admin_console_cooldown_until = None
 
     now_utc = datetime.now(timezone.utc)
     unlocked_until = now_utc + timedelta(minutes=15)
@@ -1165,8 +1224,24 @@ def recover_admin_console_password(
         raise HTTPException(status_code=403, detail="Administrator privileges required")
 
     if not admin.hashed_password or not verify_password(account_password, admin.hashed_password):
-        record_failed_unlock(admin.public_id, ip_address or "unknown")
-        raise HTTPException(status_code=401, detail="Invalid administrator account password")
+        current_attempts = (getattr(admin, "admin_console_failed_attempts", 0) or 0) + 1
+        admin.admin_console_failed_attempts = current_attempts
+        if current_attempts >= MAX_FAILED_UNLOCK_ATTEMPTS:
+            now_utc = datetime.now(timezone.utc)
+            admin.admin_console_cooldown_until = now_utc + timedelta(seconds=COOLDOWN_DURATION_SECONDS)
+            admin.admin_console_failed_attempts = MAX_FAILED_UNLOCK_ATTEMPTS
+            db.commit()
+            raise HTTPException(
+                status_code=429,
+                detail="Too many failed attempts. Try again in 05:00.",
+                headers={"Retry-After": str(COOLDOWN_DURATION_SECONDS)},
+            )
+        db.commit()
+        remaining_attempts = MAX_FAILED_UNLOCK_ATTEMPTS - current_attempts
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid administrator account password. {remaining_attempts} attempt{'s' if remaining_attempts != 1 else ''} remaining.",
+        )
 
     if new_console_password != confirm_console_password:
         raise HTTPException(status_code=400, detail="New passwords do not match")
@@ -1175,6 +1250,8 @@ def recover_admin_console_password(
         raise HTTPException(status_code=400, detail="New Admin Console password must be at least 12 characters in length")
 
     admin.admin_console_password_hash = hash_password(new_console_password)
+    admin.admin_console_failed_attempts = 0
+    admin.admin_console_cooldown_until = None
 
     now_utc = datetime.now(timezone.utc)
     unlocked_until = now_utc + timedelta(minutes=15)
@@ -1262,6 +1339,7 @@ def lock_admin_console(
 def get_admin_unlock_status(
     session: Optional[UserSession],
     admin: Optional[User] = None,
+    db: Optional[Session] = None,
 ) -> Dict[str, Any]:
     """Inspect current elevated unlock status of the session and whether persistent password is set."""
     is_configured = bool(admin and getattr(admin, "admin_console_password_hash", None))
@@ -1280,6 +1358,15 @@ def get_admin_unlock_status(
             until_iso = until.isoformat()
             remaining_sec = max(0, int((until - now_utc).total_seconds()))
 
+    cooldown_remaining = get_unlock_cooldown_remaining(admin, db) if admin else 0
+    cooldown_until_iso = None
+    if admin and getattr(admin, "admin_console_cooldown_until", None):
+        cooldown_dt = admin.admin_console_cooldown_until
+        if cooldown_dt.tzinfo is None:
+            cooldown_dt = cooldown_dt.replace(tzinfo=timezone.utc)
+        if now_utc < cooldown_dt:
+            cooldown_until_iso = cooldown_dt.isoformat()
+
     return {
         "is_configured": is_configured,
         "is_unlocked": is_unlocked,
@@ -1287,6 +1374,10 @@ def get_admin_unlock_status(
         "remaining_seconds": remaining_sec,
         "unlocked": is_unlocked,
         "expires_at": until_iso,
+        "cooldown_active": cooldown_remaining > 0,
+        "cooldown_remaining_seconds": cooldown_remaining,
+        "cooldown_until": cooldown_until_iso,
+        "failed_attempts": getattr(admin, "admin_console_failed_attempts", 0) if admin else 0,
     }
 
 

@@ -210,6 +210,7 @@ def lock_console(
 @router.get("/unlock-status", summary="Check administrator console unlock state")
 def unlock_status(
     request: Request,
+    db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ) -> Dict[str, Any]:
     """Retrieve current unlock status and expiry for the active administrative session."""
@@ -217,7 +218,7 @@ def unlock_status(
     if not session and hasattr(request, "state") and hasattr(request.state, "current_session"):
         session = request.state.current_session
 
-    return get_admin_unlock_status(session=session, admin=admin)
+    return get_admin_unlock_status(session=session, admin=admin, db=db)
 
 
 @router.get("/all-sessions", summary="List all active sessions system-wide (Admin only)")

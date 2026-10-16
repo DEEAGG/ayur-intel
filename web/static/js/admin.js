@@ -75,6 +75,8 @@
     lockMode: 'unlock', // 'unlock' | 'setup' | 'recover'
     lockError: null,
     lockSuccess: null,
+    cooldownRemaining: 0,
+    cooldownTimerId: null,
     showChangePasswordModal: false,
     changePasswordError: null,
 
@@ -173,6 +175,12 @@
     return { score: 4, label: 'Strong Botanical Hash', class: 'strong' };
   }
 
+  function formatCooldown(seconds) {
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
   function showToast(msg, type) {
     if (typeof window.showToast === 'function') {
       window.showToast(msg, type || 'info');
@@ -230,7 +238,12 @@
       err.status = resp.status;
       err.data = errObj;
 
-      if (resp.status === 401 && window.AYUR_AUTH && typeof window.AYUR_AUTH.handleSessionExpired === 'function') {
+      var isConsoleLockEndpoint = url.indexOf('/api/admin/unlock') !== -1 ||
+                                  url.indexOf('/api/admin/setup-password') !== -1 ||
+                                  url.indexOf('/api/admin/recover-console-password') !== -1 ||
+                                  url.indexOf('/api/admin/change-console-password') !== -1;
+
+      if (!isConsoleLockEndpoint && resp.status === 401 && window.AYUR_AUTH && typeof window.AYUR_AUTH.handleSessionExpired === 'function') {
         window.AYUR_AUTH.handleSessionExpired(msg);
       }
       throw err;
@@ -269,6 +282,44 @@
   // Data Fetching & State Synchronization
   // ---------------------------------------------------------------------------
 
+  function startCooldownTimer(remainingSeconds) {
+    if (state.cooldownTimerId) {
+      clearInterval(state.cooldownTimerId);
+      state.cooldownTimerId = null;
+    }
+    state.cooldownRemaining = Math.max(0, parseInt(remainingSeconds, 10) || 0);
+
+    var unlockInput = document.getElementById('admin-centre-unlock-pwd');
+    var unlockSubmit = document.getElementById('admin-centre-unlock-submit-btn');
+    if (unlockInput) unlockInput.disabled = true;
+    if (unlockSubmit) unlockSubmit.disabled = true;
+
+    state.cooldownTimerId = setInterval(function () {
+      state.cooldownRemaining--;
+      var bannerText = document.getElementById('admin-cooldown-text');
+      if (bannerText) {
+        bannerText.textContent = 'Too many failed attempts. Try again in ' + formatCooldown(Math.max(0, state.cooldownRemaining));
+      }
+      if (state.cooldownRemaining <= 0) {
+        clearInterval(state.cooldownTimerId);
+        state.cooldownTimerId = null;
+        state.cooldownRemaining = 0;
+        state.lockError = null;
+        refreshView();
+        var retryInput = document.getElementById('admin-centre-unlock-pwd');
+        if (retryInput) retryInput.focus();
+      }
+    }, 1000);
+  }
+
+  function stopCooldownTimer() {
+    if (state.cooldownTimerId) {
+      clearInterval(state.cooldownTimerId);
+      state.cooldownTimerId = null;
+    }
+    state.cooldownRemaining = 0;
+  }
+
   async function checkUnlockStatus() {
     try {
       var status = await callApi('/api/admin/unlock-status');
@@ -278,6 +329,11 @@
       state.remainingSeconds = (status && status.remaining_seconds) || 0;
       if (!state.isUnlocked) {
         state.lockMode = state.isConfigured ? 'unlock' : 'setup';
+      }
+      if (status && status.cooldown_active && status.cooldown_remaining_seconds > 0) {
+        startCooldownTimer(status.cooldown_remaining_seconds);
+      } else if (!status || !status.cooldown_active) {
+        stopCooldownTimer();
       }
     } catch (_) {
       state.isUnlocked = false;
@@ -577,6 +633,9 @@
 
   async function executeUnlock(password) {
     state.lockError = null;
+    if (state.cooldownRemaining > 0) {
+      return;
+    }
     if (!password) {
       state.lockError = 'Please enter your Admin Console password.';
       refreshView();
@@ -592,6 +651,7 @@
       if (res && res.token) {
         localStorage.setItem('ayur_admin_unlock_token', res.token);
       }
+      stopCooldownTimer();
       state.isUnlocked = true;
       state.unlockExpiresAt = res.unlocked_until;
       state.lockError = null;
@@ -600,8 +660,25 @@
       refreshView();
       loadUsers();
     } catch (e) {
-      state.lockError = e.message || 'Invalid administrator console password.';
+      // Clear entered password immediately
+      var unlockInput = document.getElementById('admin-centre-unlock-pwd');
+      if (unlockInput) unlockInput.value = '';
+
+      if (e.status === 429) {
+        var cooldownSec = 300;
+        if (e.data && e.data.retry_after_seconds) {
+          cooldownSec = e.data.retry_after_seconds;
+        }
+        startCooldownTimer(cooldownSec);
+        state.lockError = e.message || 'Too many failed attempts. Try again in 05:00.';
+      } else {
+        state.lockError = e.message || 'Invalid Admin Console password.';
+      }
       refreshView();
+      if (state.cooldownRemaining <= 0) {
+        var retryInput = document.getElementById('admin-centre-unlock-pwd');
+        if (retryInput) retryInput.focus();
+      }
     }
   }
 
@@ -636,6 +713,7 @@
       if (res && res.token) {
         localStorage.setItem('ayur_admin_unlock_token', res.token);
       }
+      stopCooldownTimer();
       state.isConfigured = true;
       state.isUnlocked = true;
       state.unlockExpiresAt = res.unlocked_until;
@@ -646,6 +724,9 @@
       refreshView();
       loadUsers();
     } catch (e) {
+      if (e.status === 429) {
+        startCooldownTimer(300);
+      }
       state.lockError = e.message || 'Password recovery failed. Please verify your account password.';
       refreshView();
     }
@@ -1604,6 +1685,7 @@
       if (state.lockMode === 'setup') {
         html += ''
           + '<div class="admin-centre-lock-card">'
+          + '  <button type="button" class="admin-modal-close admin-lock-close-btn" id="admin-lock-close-btn" title="Return to Workspace" aria-label="Close Admin Console Dialog">×</button>'
           + '  <div class="admin-unlock-icon"><span class="material-symbols-outlined">lock_person</span></div>'
           + '  <h2>Setup Admin Console Password</h2>'
           + '  <p class="lock-sub">Set a dedicated, persistent password to protect Institutional Oversight. This password is isolated from your standard account credentials (minimum 12 characters).</p>'
@@ -1644,22 +1726,27 @@
 
       // Mode B: Standard Persistent Password Unlock
       else if (state.lockMode === 'unlock') {
+        var isCooling = state.cooldownRemaining > 0;
         html += ''
           + '<div class="admin-centre-lock-card">'
+          + '  <button type="button" class="admin-modal-close admin-lock-close-btn" id="admin-lock-close-btn" title="Return to Workspace" aria-label="Close Admin Console Dialog">×</button>'
           + '  <div class="admin-unlock-icon"><span class="material-symbols-outlined">lock</span></div>'
           + '  <h2>Institutional Oversight Locked</h2>'
           + '  <p class="lock-sub">Enter your persistent Admin Console password to elevate permissions and inspect administrative intelligence.</p>'
-          + (state.lockError ? '<div class="admin-confirm-warning" style="margin-bottom:16px;">' + escapeHtml(state.lockError) + '</div>' : '')
+          + (isCooling
+              ? '<div class="admin-cooldown-banner" id="admin-lock-cooldown-banner"><span class="material-symbols-outlined">hourglass_top</span> <span id="admin-cooldown-text">Too many failed attempts. Try again in ' + formatCooldown(state.cooldownRemaining) + '</span></div>'
+              : (state.lockError ? '<div class="admin-confirm-warning" style="margin-bottom:16px;">' + escapeHtml(state.lockError) + '</div>' : '')
+            )
           + '  <form id="admin-unlock-form" onsubmit="return false;">'
           + '    <div class="admin-lock-form-group">'
           + '      <label for="admin-centre-unlock-pwd">Admin Console Password</label>'
           + '      <div class="admin-lock-input-wrap">'
-          + '        <input type="password" id="admin-centre-unlock-pwd" placeholder="Enter console password..." autocomplete="current-password" autofocus required>'
+          + '        <input type="password" id="admin-centre-unlock-pwd" placeholder="Enter console password..." autocomplete="current-password" autofocus ' + (isCooling ? 'disabled' : '') + ' required>'
           + '        <button type="button" class="admin-lock-toggle-pwd" data-target="admin-centre-unlock-pwd"><span class="material-symbols-outlined" style="font-size:18px;">visibility</span></button>'
           + '      </div>'
           + '    </div>'
           + '    <div class="admin-lock-actions">'
-          + '      <button type="button" class="btn btn-primary" id="admin-centre-unlock-submit-btn" style="width:100%; justify-content:center;">'
+          + '      <button type="button" class="btn btn-primary" id="admin-centre-unlock-submit-btn" style="width:100%; justify-content:center;" ' + (isCooling ? 'disabled' : '') + '>'
           + '        <span class="material-symbols-outlined">lock_open</span> Unlock Console'
           + '      </button>'
           + '      <button type="button" class="admin-lock-secondary-link" id="admin-trigger-recover-btn">'
@@ -1674,6 +1761,7 @@
       else if (state.lockMode === 'recover') {
         html += ''
           + '<div class="admin-centre-lock-card">'
+          + '  <button type="button" class="admin-modal-close admin-lock-close-btn" id="admin-lock-close-btn" title="Return to Workspace" aria-label="Close Admin Console Dialog">×</button>'
           + '  <div class="admin-unlock-icon"><span class="material-symbols-outlined">lock_reset</span></div>'
           + '  <h2>Recover Admin Console Access</h2>'
           + '  <p class="lock-sub">Verify your main account password to set a new persistent console password.</p>'
@@ -1685,6 +1773,7 @@
           + '        <input type="password" id="admin-recover-account-pwd" placeholder="Enter login password..." autocomplete="current-password" required>'
           + '        <button type="button" class="admin-lock-toggle-pwd" data-target="admin-recover-account-pwd"><span class="material-symbols-outlined" style="font-size:18px;">visibility</span></button>'
           + '      </div>'
+          + '      <small class="admin-pwd-hint">Required to verify administrator identity.</small>'
           + '    </div>'
           + '    <div class="admin-lock-form-group">'
           + '      <label for="admin-recover-new-pwd">New Admin Console Password</label>'
@@ -1859,6 +1948,22 @@
       };
       unlockInput.onkeydown = function (e) {
         if (e.key === 'Enter') executeUnlock(unlockInput.value);
+      };
+    }
+
+    // 4b. Lock Screen Close (X) Button -> Return to Workspace (Dashboard)
+    var lockCloseBtn = document.getElementById('admin-lock-close-btn');
+    if (lockCloseBtn) {
+      lockCloseBtn.onclick = function (e) {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        state.lockError = null;
+        state.lockMode = state.isConfigured ? 'unlock' : 'setup';
+        if (window.AYUR && typeof window.AYUR.navigateTo === 'function') {
+          window.AYUR.navigateTo('dashboard');
+        }
       };
     }
 
@@ -2305,6 +2410,7 @@
   }
 
   function clearData() {
+    stopCooldownTimer();
     if (state.durationTimerId) {
       clearInterval(state.durationTimerId);
       state.durationTimerId = null;
