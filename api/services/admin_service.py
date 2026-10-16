@@ -19,8 +19,10 @@ from sqlalchemy.orm import Session
 
 from api.core.config import settings
 from api.models.models import User
-from api.models.security import AuditLog, UserSession
+from api.models.security import AuditLog, UserSession, AccessRequest
 from api.services.audit_service import log_action
+from api.services.auth_service import verify_password, create_access_token
+import time
 
 logger = logging.getLogger("ayur_intel.admin")
 
@@ -100,6 +102,10 @@ def get_admin_metrics(db: Session) -> Dict[str, Any]:
     online_users = len(online_user_ids)
     offline_users = max(0, total_users - online_users)
 
+    pending_access_requests = (
+        db.query(AccessRequest).filter(AccessRequest.status == "PENDING").count()
+    )
+
     yesterday = now_utc - timedelta(hours=24)
     recent_events_count = db.query(AuditLog).filter(AuditLog.created_at >= yesterday).count()
 
@@ -109,9 +115,11 @@ def get_admin_metrics(db: Session) -> Dict[str, Any]:
         "offline_users": offline_users,
         "active_accounts": active_accounts,
         "deactivated_accounts": deactivated_accounts,
+        "pending_access_requests": pending_access_requests,
         "total_active_sessions": valid_sessions_count,
         "recent_audit_events_24h": recent_events_count,
     }
+
 
 
 def get_admin_users(
@@ -136,8 +144,10 @@ def get_admin_users(
         s_clean = status.strip().lower()
         if s_clean == "active":
             q = q.filter(User.is_active == True)
-        elif s_clean == "inactive":
+        elif s_clean in ("inactive", "deactivated"):
             q = q.filter(User.is_active == False)
+        elif s_clean in ("pending", "pending_approval"):
+            q = q.join(AccessRequest, AccessRequest.user_id == User.id).filter(AccessRequest.status == "PENDING").distinct()
 
     matching_users = q.all()
     total = len(matching_users)
@@ -146,6 +156,7 @@ def get_admin_users(
     user_ids = [u.id for u in matching_users]
 
     sessions_by_user: Dict[int, List[UserSession]] = {uid: [] for uid in user_ids}
+    pending_user_ids = set()
     if user_ids:
         # Efficient single batch query for all sessions belonging to the candidate users
         all_sessions = (
@@ -157,9 +168,19 @@ def get_admin_users(
         for s in all_sessions:
             sessions_by_user[s.user_id].append(s)
 
+        pending_rows = (
+            db.query(AccessRequest.user_id)
+            .filter(AccessRequest.user_id.in_(user_ids), AccessRequest.status == "PENDING")
+            .all()
+        )
+        pending_user_ids = {r[0] for r in pending_rows}
+
     processed_users = []
     for u in matching_users:
         user_sessions = sessions_by_user.get(u.id, [])
+        has_pending = u.id in pending_user_ids
+        logins = getattr(u, "login_count", 0) or len(user_sessions)
+
 
         active_sessions = []
         ended_sessions = []
@@ -279,6 +300,9 @@ def get_admin_users(
             "current_session_duration_seconds": current_session_duration_sec,
             "last_session_duration_seconds": last_session_duration_sec,
             "session_duration_seconds": current_session_duration_sec if is_online else last_session_duration_sec,
+            "login_count": logins,
+            "has_pending_request": has_pending,
+            "approved_device_hash": getattr(u, "approved_device_hash", None),
             "created_at": u.created_at.isoformat() if u.created_at else "",
             "updated_at": u.updated_at.isoformat() if u.updated_at else "",
             # Internal fields for server-side sorting:
@@ -321,7 +345,7 @@ def get_admin_users(
 
 
 def get_admin_user_detail(db: Session, user_id: str) -> Dict[str, Any]:
-    """Retrieve full safe details and recent sessions for a single user."""
+    """Retrieve full safe details, session history, and access requests for a single user."""
     user = db.query(User).filter(User.public_id == user_id.strip()).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -337,13 +361,24 @@ def get_admin_user_detail(db: Session, user_id: str) -> Dict[str, Any]:
         .count()
     )
 
-    recent_sessions = (
+    all_user_sessions = (
         db.query(UserSession)
         .filter(UserSession.user_id == user.id)
         .order_by(UserSession.created_at.desc())
+        .all()
+    )
+    recent_sessions = all_user_sessions[:20]
+
+    user_requests = (
+        db.query(AccessRequest)
+        .filter(AccessRequest.user_id == user.id)
+        .order_by(AccessRequest.created_at.desc())
         .limit(10)
         .all()
     )
+
+    logins = getattr(user, "login_count", 0) or len(all_user_sessions)
+    has_pending = any(r.status == "PENDING" for r in user_requests)
 
     return {
         "id": user.public_id,
@@ -352,6 +387,9 @@ def get_admin_user_detail(db: Session, user_id: str) -> Dict[str, Any]:
         "email": user.email or "",
         "role": getattr(user, "role", "user") or "user",
         "is_active": bool(user.is_active),
+        "login_count": logins,
+        "has_pending_request": has_pending,
+        "approved_device_hash": getattr(user, "approved_device_hash", None),
         "avatar_url": user.avatar_url or "",
         "active_sessions_count": active_sessions,
         "created_at": user.created_at.isoformat() if user.created_at else "",
@@ -369,7 +407,22 @@ def get_admin_user_detail(db: Session, user_id: str) -> Dict[str, Any]:
             }
             for s in recent_sessions
         ],
+        "access_requests": [
+            {
+                "id": r.public_id,
+                "status": r.status,
+                "reason": r.reason,
+                "device_info": r.device_info,
+                "ip_address": r.ip_address,
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+                "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+                "reviewer_username": r.reviewer_username,
+                "review_notes": r.review_notes,
+            }
+            for r in user_requests
+        ],
     }
+
 
 
 def update_user_status(
@@ -632,3 +685,356 @@ def get_admin_audit_logs(
         "limit": limit,
         "offset": offset,
     }
+
+
+# ---------------------------------------------------------------------------
+# Access / Reactivation Requests Management
+# ---------------------------------------------------------------------------
+
+def get_admin_access_requests(
+    db: Session,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Retrieve paginated access / reactivation requests for administrative review."""
+    q = db.query(AccessRequest)
+    if status and status.strip() and status.strip().lower() != "all":
+        q = q.filter(AccessRequest.status == status.strip().upper())
+
+    total = q.count()
+    pending_count = db.query(AccessRequest).filter(AccessRequest.status == "PENDING").count()
+    requests = q.order_by(AccessRequest.created_at.desc()).offset(offset).limit(limit).all()
+
+    return {
+        "requests": [
+            {
+                "id": r.public_id,
+                "user_id": r.user.public_id if r.user else str(r.user_id),
+                "user_email": r.user_email,
+                "user_display_name": r.user_display_name or (r.user.display_name if r.user else ""),
+                "user_is_active": r.user.is_active if r.user else False,
+                "status": r.status,
+                "reason": r.reason or "",
+                "device_id": r.device_id or "Not provided",
+                "device_info": r.device_info or "Unknown Device",
+                "ip_address": r.ip_address,
+                "reviewer_username": r.reviewer_username,
+                "review_notes": r.review_notes,
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+                "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+            }
+            for r in requests
+        ],
+        "total": total,
+        "pending_count": pending_count,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def get_admin_access_request_detail(db: Session, request_id: str) -> Dict[str, Any]:
+    """Retrieve details for a single access request."""
+    req = db.query(AccessRequest).filter(AccessRequest.public_id == request_id.strip()).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Access request not found")
+
+    return {
+        "id": req.public_id,
+        "user_id": req.user.public_id if req.user else str(req.user_id),
+        "user_email": req.user_email,
+        "user_display_name": req.user_display_name,
+        "user_is_active": req.user.is_active if req.user else False,
+        "status": req.status,
+        "reason": req.reason or "",
+        "device_id": req.device_id,
+        "device_hash": req.device_hash,
+        "device_info": req.device_info or "Unknown Device",
+        "ip_address": req.ip_address,
+        "user_agent": req.user_agent,
+        "reviewer_id": req.reviewer_id,
+        "reviewer_username": req.reviewer_username,
+        "review_notes": req.review_notes,
+        "created_at": req.created_at.isoformat() if req.created_at else "",
+        "reviewed_at": req.reviewed_at.isoformat() if req.reviewed_at else None,
+    }
+
+
+def approve_access_request_admin(
+    db: Session,
+    admin: User,
+    request_id: str,
+    review_notes: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Approve access request, reactivating the account and binding approved device."""
+    req = db.query(AccessRequest).filter(AccessRequest.public_id == request_id.strip()).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Access request not found")
+
+    if req.status == "APPROVED":
+        raise HTTPException(status_code=400, detail="This request has already been approved")
+
+    now_utc = datetime.now(timezone.utc)
+    target = req.user
+    if not target:
+        raise HTTPException(status_code=404, detail="Target user account not found")
+
+    # Reactivate target user
+    target.is_active = True
+    if req.device_hash:
+        target.approved_device_hash = req.device_hash
+
+    req.status = "APPROVED"
+    req.reviewer_id = admin.id
+    req.reviewer_username = admin.username
+    req.review_notes = (review_notes or "").strip() if review_notes else None
+    req.reviewed_at = now_utc
+
+    try:
+        log_action(
+            db,
+            action="ACCESS_REQUEST_APPROVE",
+            resource_type="ACCESS_REQUEST",
+            resource_id=req.public_id,
+            user_id=admin.id,
+            user_public_id=admin.public_id,
+            username=admin.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail=f"Admin approved access request for user {target.username}. Account reactivated.",
+            metadata={"target_user": target.username, "request_id": req.public_id, "device_info": req.device_info},
+        )
+        db.commit()
+        db.refresh(req)
+        db.refresh(target)
+    except Exception as e:
+        logger.debug("Failed to record access request approve audit log: %s", e)
+        db.rollback()
+        raise
+
+    logger.info("Admin %s approved access request %s for %s", admin.username, req.public_id, target.username)
+    return {
+        "message": f"Access request approved. Account for {target.username} has been reactivated.",
+        "request_id": req.public_id,
+        "status": "APPROVED",
+        "user_is_active": True,
+    }
+
+
+def reject_access_request_admin(
+    db: Session,
+    admin: User,
+    request_id: str,
+    review_notes: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Reject access request. Account remains deactivated."""
+    req = db.query(AccessRequest).filter(AccessRequest.public_id == request_id.strip()).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Access request not found")
+
+    if req.status == "REJECTED":
+        raise HTTPException(status_code=400, detail="This request has already been rejected")
+
+    now_utc = datetime.now(timezone.utc)
+    target = req.user
+
+    req.status = "REJECTED"
+    req.reviewer_id = admin.id
+    req.reviewer_username = admin.username
+    req.review_notes = (review_notes or "").strip() if review_notes else None
+    req.reviewed_at = now_utc
+
+    try:
+        log_action(
+            db,
+            action="ACCESS_REQUEST_REJECT",
+            resource_type="ACCESS_REQUEST",
+            resource_id=req.public_id,
+            user_id=admin.id,
+            user_public_id=admin.public_id,
+            username=admin.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail=f"Admin rejected access request for user {target.username if target else req.user_email}",
+            metadata={"target_user": target.username if target else req.user_email, "request_id": req.public_id},
+        )
+        db.commit()
+        db.refresh(req)
+    except Exception as e:
+        logger.debug("Failed to record access request reject audit log: %s", e)
+        db.rollback()
+        raise
+
+    logger.info("Admin %s rejected access request %s", admin.username, req.public_id)
+    return {
+        "message": "Access request rejected. Account remains deactivated.",
+        "request_id": req.public_id,
+        "status": "REJECTED",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin Console Elevated Unlock Management
+# ---------------------------------------------------------------------------
+
+_failed_unlock_attempts: Dict[str, List[float]] = {}
+
+
+def check_unlock_rate_limit(admin_id: str, ip: str) -> None:
+    """Enforce rate limits on failed administrator console unlock attempts."""
+    now = time.time()
+    key = f"{admin_id}:{ip}"
+    attempts = [t for t in _failed_unlock_attempts.get(key, []) if now - t < 300]
+    _failed_unlock_attempts[key] = attempts
+    if len(attempts) >= 5:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed unlock attempts. Please wait 5 minutes before trying again.",
+        )
+
+
+def record_failed_unlock(admin_id: str, ip: str) -> None:
+    """Record timestamp of failed unlock attempt for sliding window rate limit."""
+    now = time.time()
+    key = f"{admin_id}:{ip}"
+    attempts = [t for t in _failed_unlock_attempts.get(key, []) if now - t < 300]
+    attempts.append(now)
+    _failed_unlock_attempts[key] = attempts
+
+
+def unlock_admin_console(
+    db: Session,
+    admin: User,
+    session: Optional[UserSession],
+    password: str,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Re-authenticate administrator and issue elevated unlock state for session."""
+    check_unlock_rate_limit(admin.public_id, ip_address or "unknown")
+
+    if not admin.hashed_password or not verify_password(password, admin.hashed_password):
+        record_failed_unlock(admin.public_id, ip_address or "unknown")
+        try:
+            log_action(
+                db,
+                action="ADMIN_UNLOCK_FAILED",
+                resource_type="ADMIN_LOCK",
+                user_id=admin.id,
+                user_public_id=admin.public_id,
+                username=admin.username,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="FAILED",
+                detail="Invalid password provided for admin unlock",
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(status_code=401, detail="Invalid administrator password")
+
+    now_utc = datetime.now(timezone.utc)
+    unlocked_until = now_utc + timedelta(minutes=15)
+
+    if session:
+        session.admin_unlocked_until = unlocked_until
+        db.commit()
+        db.refresh(session)
+
+    # Issue signed unlock token
+    unlock_token = create_access_token(
+        {
+            "sub": admin.public_id,
+            "email": admin.email,
+            "sid": session.public_id if session else "",
+            "scope": "admin_unlock",
+        },
+        ttl_seconds=900,
+    )
+
+    try:
+        log_action(
+            db,
+            action="ADMIN_UNLOCK",
+            resource_type="ADMIN_LOCK",
+            user_id=admin.id,
+            user_public_id=admin.public_id,
+            username=admin.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="Admin console unlocked with valid password re-authentication",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    logger.info("Admin console unlocked for %s", admin.username)
+    return {
+        "unlocked": True,
+        "expires_at": unlocked_until.isoformat(),
+        "unlock_token": unlock_token,
+        "message": "Admin console successfully unlocked",
+    }
+
+
+def lock_admin_console(
+    db: Session,
+    admin: User,
+    session: Optional[UserSession],
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Explicitly lock the admin console for the current session."""
+    if session:
+        session.admin_unlocked_until = None
+        db.commit()
+        db.refresh(session)
+
+    try:
+        log_action(
+            db,
+            action="ADMIN_LOCK",
+            resource_type="ADMIN_LOCK",
+            user_id=admin.id,
+            user_public_id=admin.public_id,
+            username=admin.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="Admin console explicitly locked",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    logger.info("Admin console locked for %s", admin.username)
+    return {
+        "unlocked": False,
+        "message": "Admin console locked successfully",
+    }
+
+
+def get_admin_unlock_status(
+    session: Optional[UserSession],
+    admin: Optional[User] = None,
+) -> Dict[str, Any]:
+    """Inspect current elevated unlock status of the session."""
+    if not session or not session.admin_unlocked_until:
+        return {"unlocked": False, "expires_at": None}
+
+    now_utc = datetime.now(timezone.utc)
+    until = session.admin_unlocked_until
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+
+    if now_utc < until:
+        return {"unlocked": True, "expires_at": until.isoformat()}
+    return {"unlocked": False, "expires_at": None}
+

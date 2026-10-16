@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.core.database import get_db
-from api.core.security import get_client_ip, require_admin
+from api.core.security import get_client_ip, require_admin, require_admin_unlocked
 from api.models.models import User
 from api.services.admin_service import (
     get_admin_audit_logs,
@@ -31,6 +31,13 @@ from api.services.admin_service import (
     revoke_all_user_sessions_admin,
     revoke_user_session_admin,
     update_user_status,
+    get_admin_access_requests,
+    get_admin_access_request_detail,
+    approve_access_request_admin,
+    reject_access_request_admin,
+    unlock_admin_console,
+    lock_admin_console,
+    get_admin_unlock_status,
 )
 
 logger = logging.getLogger("ayur_intel.routers.admin")
@@ -40,6 +47,78 @@ router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
 class UpdateUserStatusRequest(BaseModel):
     is_active: bool = Field(..., description="Active status of the user account")
+
+
+class AdminUnlockRequest(BaseModel):
+    password: str = Field(..., min_length=1, description="Administrator account password")
+
+
+class AccessRequestDecision(BaseModel):
+    review_notes: Optional[str] = Field(None, max_length=500, description="Optional review decision notes")
+
+
+# ---------------------------------------------------------------------------
+# Admin Console Elevated Unlock Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/unlock", summary="Re-authenticate administrator and unlock console")
+def unlock_console(
+    req: AdminUnlockRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Verify administrator password and issue elevated console unlock token."""
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+    session = getattr(admin, "_current_session", None)
+    if not session and hasattr(request, "state") and hasattr(request.state, "current_session"):
+        session = request.state.current_session
+
+    return unlock_admin_console(
+        db=db,
+        admin=admin,
+        session=session,
+        password=req.password,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
+
+@router.post("/lock", summary="Explicitly lock the administrator console")
+def lock_console(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Explicitly terminate elevated unlock state for the current administrative session."""
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+    session = getattr(admin, "_current_session", None)
+    if not session and hasattr(request, "state") and hasattr(request.state, "current_session"):
+        session = request.state.current_session
+
+    return lock_admin_console(
+        db=db,
+        admin=admin,
+        session=session,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
+
+@router.get("/unlock-status", summary="Check administrator console unlock state")
+def unlock_status(
+    request: Request,
+    admin: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Retrieve current unlock status and expiry for the active administrative session."""
+    session = getattr(admin, "_current_session", None)
+    if not session and hasattr(request, "state") and hasattr(request.state, "current_session"):
+        session = request.state.current_session
+
+    return get_admin_unlock_status(session=session, admin=admin)
+
 
 
 @router.get("/metrics", summary="System security and presence metrics (Admin only)")
@@ -80,7 +159,7 @@ def set_user_status(
     req: UpdateUserStatusRequest = ...,
     request: Request = ...,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Activate or deactivate a user account with safeguards against self and sole-admin lockouts."""
     client_ip = get_client_ip(request)
@@ -112,7 +191,7 @@ def revoke_session(
     session_id: str = Path(..., min_length=1, max_length=64, description="Session public ID"),
     request: Request = ...,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Remotely terminate an individual user session."""
     client_ip = get_client_ip(request)
@@ -133,7 +212,7 @@ def logout_all_sessions(
     user_id: str = Path(..., min_length=1, max_length=64, description="User public ID"),
     request: Request = ...,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin_unlocked),
 ) -> Dict[str, Any]:
     """Revoke all active sessions for a user across all devices."""
     client_ip = get_client_ip(request)
@@ -143,6 +222,78 @@ def logout_all_sessions(
         db=db,
         admin=admin,
         user_id=user_id,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Access Requests Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/requests", summary="List access / reactivation requests (Admin only)")
+def list_access_requests(
+    status: Optional[str] = Query(None, max_length=20, description="Filter by status: all, pending, approved, rejected"),
+    limit: int = Query(50, ge=1, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Page offset"),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Retrieve paginated user reactivation requests with device contexts."""
+    return get_admin_access_requests(db=db, status=status, limit=limit, offset=offset)
+
+
+@router.get("/requests/{request_id}", summary="Get access request details (Admin only)")
+def get_request_detail(
+    request_id: str = Path(..., min_length=1, max_length=64, description="Access request public ID"),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Retrieve full request context including device hash and review notes."""
+    return get_admin_access_request_detail(db=db, request_id=request_id)
+
+
+@router.post("/requests/{request_id}/approve", summary="Approve reactivation request (Admin only)")
+def approve_request(
+    request_id: str = Path(..., min_length=1, max_length=64, description="Access request public ID"),
+    decision: Optional[AccessRequestDecision] = None,
+    request: Request = ...,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin_unlocked),
+) -> Dict[str, Any]:
+    """Approve access request, reactivate account, bind approved device, and record decision."""
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+    notes = decision.review_notes if decision else None
+
+    return approve_access_request_admin(
+        db=db,
+        admin=admin,
+        request_id=request_id,
+        review_notes=notes,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
+
+@router.post("/requests/{request_id}/reject", summary="Reject reactivation request (Admin only)")
+def reject_request(
+    request_id: str = Path(..., min_length=1, max_length=64, description="Access request public ID"),
+    decision: Optional[AccessRequestDecision] = None,
+    request: Request = ...,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin_unlocked),
+) -> Dict[str, Any]:
+    """Reject access request and retain account deactivation."""
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
+    notes = decision.review_notes if decision else None
+
+    return reject_access_request_admin(
+        db=db,
+        admin=admin,
+        request_id=request_id,
+        review_notes=notes,
         ip_address=client_ip,
         user_agent=user_agent,
     )
@@ -169,3 +320,4 @@ def list_audit_logs(
         limit=limit,
         offset=offset,
     )
+

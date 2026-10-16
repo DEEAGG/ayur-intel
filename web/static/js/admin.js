@@ -1,14 +1,15 @@
 /**
- * AYUR-INTEL — Private Admin Console UI Module (Phase 3B)
+ * AYUR-INTEL — Private Admin Console UI Module (Phase 4 Overhaul)
  *
- * Implements administrative interface for user management, device session tracking,
- * remote session revocation, and immutable system audit log inspection.
- *
- * Security & Architecture Policies:
- * - Rendered only when the authenticated user's server-verified role is 'admin'.
- * - 401/403 responses trigger immediate data purging and access-denied state.
- * - All actions (activate/deactivate, session revocation) require explicit confirmation.
- * - Never renders secrets, tokens, or password hashes.
+ * Dark Botanical Intelligence SaaS System
+ * Implements Institutional Oversight:
+ * - 8-KPI responsive overview grid
+ * - Horizontal user cards without initial circles
+ * - User detail sliding side drawer with complete session history
+ * - Elevated administrator re-authentication lock/unlock workflow
+ * - Device-level access request review and approval queue
+ * - Remote session revocation and account state management
+ * - Immutable system audit log inspection
  */
 
 (function () {
@@ -18,21 +19,38 @@
   // Module State
   // ---------------------------------------------------------------------------
   var state = {
-    activeTab: 'users', // 'users' | 'audit'
+    activeTab: 'users', // 'users' | 'requests' | 'audit'
 
-    // Users & Session Tracking
+    // Users Directory & Session Tracking
     users: [],
     totalUsers: 0,
     metrics: null,
     userPage: 1,
-    userLimit: 15,
+    userLimit: 12,
     userQuery: '',
-    statusFilter: 'all', // 'all' | 'active' | 'inactive'
+    statusFilter: 'all', // 'all' | 'online' | 'offline' | 'active' | 'inactive' | 'pending'
+    userSort: 'presence', // 'presence' | 'recent' | 'newest' | 'name'
     durationTimerId: null,
 
-    // User Detail & Sessions Modal
+    // User Detail Side Drawer
     selectedUser: null,
+    selectedUserSubtab: 'overview', // 'overview' | 'sessions' | 'requests' | 'controls'
     loadingUserDetail: false,
+
+    // Access Requests Queue
+    accessRequests: [],
+    requestsTotal: 0,
+    requestsPage: 1,
+    requestsLimit: 10,
+    requestsFilter: 'all', // 'all' | 'pending' | 'approved' | 'rejected'
+    isRequestsLoading: false,
+
+    // Elevated Admin Lock State
+    isUnlocked: false,
+    unlockExpiresAt: null,
+    showUnlockModal: false,
+    unlockError: null,
+    unlockPassword: '',
 
     // System Audit Logs
     auditLogs: [],
@@ -49,7 +67,7 @@
     error: null,
     isUnauthorized: false,
 
-    // Confirmation Dialog State
+    // Generic Confirmation Dialog State
     confirmation: null // { title, message, warning, confirmText, isDanger, onConfirm }
   };
 
@@ -64,7 +82,7 @@
       .replace(/'/g, '&#039;');
   }
 
-  // Helper: Format ISO Dates
+  // Helper: Format ISO Dates in Browser Local Timezone
   function formatDate(isoStr) {
     if (!isoStr) return '—';
     try {
@@ -118,19 +136,25 @@
     return '< 1 min';
   }
 
-  // Helper: Call Backend API with Authorization
+  // Helper: Call Backend API with Bearer Token and Elevated Unlock Token
   async function callApi(url, opts) {
-    if (window.AYUR && typeof window.AYUR.api === 'function') {
-      return await window.AYUR.api(url, opts);
-    }
     var options = Object.assign({}, opts || {});
     var headers = Object.assign({}, options.headers || {});
+
+    // Bearer Token
     var token = (window.AYUR_AUTH && typeof window.AYUR_AUTH.getToken === 'function')
       ? window.AYUR_AUTH.getToken()
       : '';
     if (token && !headers['Authorization']) {
       headers['Authorization'] = 'Bearer ' + token;
     }
+
+    // Admin Unlock Token
+    var unlockToken = localStorage.getItem('ayur_admin_unlock_token');
+    if (unlockToken && !headers['X-Admin-Unlock-Token']) {
+      headers['X-Admin-Unlock-Token'] = unlockToken;
+    }
+
     options.headers = headers;
 
     var resp = await fetch(url, options);
@@ -139,9 +163,19 @@
       var errObj = null;
       try { errObj = JSON.parse(errText); } catch (_) {}
       var msg = (errObj && (errObj.detail || errObj.message || errObj.error)) || errText || ('HTTP ' + resp.status);
+
+      // Handle HTTP 423 Locked (Elevated Admin Re-authentication Required)
+      if (resp.status === 423) {
+        state.isUnlocked = false;
+        state.showUnlockModal = true;
+        refreshView();
+        showToast('Elevated administrator re-authentication required.', 'warning');
+      }
+
       var err = new Error(msg);
       err.status = resp.status;
       err.data = errObj;
+
       if (resp.status === 401 && window.AYUR_AUTH && typeof window.AYUR_AUTH.handleSessionExpired === 'function') {
         window.AYUR_AUTH.handleSessionExpired(msg);
       }
@@ -161,8 +195,18 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Data Fetching
+  // Data Fetching & State Synchronization
   // ---------------------------------------------------------------------------
+
+  async function checkUnlockStatus() {
+    try {
+      var status = await callApi('/api/admin/unlock-status');
+      state.isUnlocked = !!(status && status.is_unlocked);
+      state.unlockExpiresAt = status && status.unlocked_until;
+    } catch (_) {
+      state.isUnlocked = false;
+    }
+  }
 
   async function loadUsers(page) {
     if (page !== undefined) state.userPage = page;
@@ -174,16 +218,22 @@
     try {
       var offset = (state.userPage - 1) * state.userLimit;
       var params = '?limit=' + state.userLimit + '&offset=' + offset;
+
       if (state.userQuery && state.userQuery.trim()) {
         params += '&query=' + encodeURIComponent(state.userQuery.trim());
       }
-      if (state.statusFilter && state.statusFilter !== 'all') {
+
+      // Backend status parameter supports: 'active', 'inactive', 'pending', 'all'
+      if (state.statusFilter === 'active' || state.statusFilter === 'inactive' || state.statusFilter === 'pending') {
         params += '&status=' + encodeURIComponent(state.statusFilter);
       }
+
       var [data, metrics] = await Promise.all([
         callApi('/api/admin/users' + params),
-        callApi('/api/admin/metrics').catch(function () { return null; })
+        callApi('/api/admin/metrics').catch(function () { return null; }),
+        checkUnlockStatus().catch(function () {})
       ]);
+
       state.users = data.users || [];
       state.totalUsers = data.total || 0;
       if (metrics) state.metrics = metrics;
@@ -205,6 +255,7 @@
 
   async function loadUserDetail(userId) {
     state.loadingUserDetail = true;
+    state.selectedUser = { id: userId, loading: true };
     refreshView();
 
     try {
@@ -214,6 +265,7 @@
       refreshView();
     } catch (e) {
       state.loadingUserDetail = false;
+      state.selectedUser = null;
       showToast('Failed to load user details: ' + (e.message || 'Unknown error'), 'error');
       refreshView();
     }
@@ -228,15 +280,14 @@
       });
       showToast(res.message || ('User successfully ' + (makeActive ? 'activated' : 'deactivated')), 'success');
 
-      // Refresh current user list
       await loadUsers();
-
-      // If modal for this user is open, refresh detail
       if (state.selectedUser && state.selectedUser.id === user.id) {
         await loadUserDetail(user.id);
       }
     } catch (e) {
-      showToast('Status update failed: ' + (e.message || 'Server error'), 'error');
+      if (e.status !== 423) {
+        showToast('Status update failed: ' + (e.message || 'Server error'), 'error');
+      }
     }
   }
 
@@ -247,13 +298,14 @@
       });
       showToast(res.message || 'Session revoked successfully.', 'success');
 
-      // Refresh detail and users
       if (state.selectedUser && state.selectedUser.id === userId) {
         await loadUserDetail(userId);
       }
       await loadUsers();
     } catch (e) {
-      showToast('Failed to revoke session: ' + (e.message || 'Server error'), 'error');
+      if (e.status !== 423) {
+        showToast('Failed to revoke session: ' + (e.message || 'Server error'), 'error');
+      }
     }
   }
 
@@ -269,7 +321,105 @@
       }
       await loadUsers();
     } catch (e) {
-      showToast('Failed to revoke all sessions: ' + (e.message || 'Server error'), 'error');
+      if (e.status !== 423) {
+        showToast('Failed to revoke all sessions: ' + (e.message || 'Server error'), 'error');
+      }
+    }
+  }
+
+  async function loadAccessRequests(page) {
+    if (page !== undefined) state.requestsPage = page;
+    state.isRequestsLoading = true;
+    refreshView();
+
+    try {
+      var offset = (state.requestsPage - 1) * state.requestsLimit;
+      var params = '?limit=' + state.requestsLimit + '&offset=' + offset;
+      if (state.requestsFilter && state.requestsFilter !== 'all') {
+        params += '&status=' + encodeURIComponent(state.requestsFilter);
+      }
+
+      var data = await callApi('/api/admin/requests' + params);
+      state.accessRequests = data.requests || [];
+      state.requestsTotal = data.total || 0;
+      state.isRequestsLoading = false;
+      refreshView();
+    } catch (e) {
+      state.isRequestsLoading = false;
+      showToast('Failed to load access requests: ' + (e.message || 'Server error'), 'error');
+      refreshView();
+    }
+  }
+
+  async function executeApproveRequest(reqId, notes) {
+    try {
+      var res = await callApi('/api/admin/requests/' + encodeURIComponent(reqId) + '/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ review_notes: notes || 'Access request approved by administrator.' })
+      });
+      showToast(res.message || 'Access request approved. Account reactivated and device bound.', 'success');
+      await loadAccessRequests();
+      await loadUsers();
+    } catch (e) {
+      if (e.status !== 423) {
+        showToast('Failed to approve request: ' + (e.message || 'Server error'), 'error');
+      }
+    }
+  }
+
+  async function executeRejectRequest(reqId, notes) {
+    try {
+      var res = await callApi('/api/admin/requests/' + encodeURIComponent(reqId) + '/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ review_notes: notes || 'Access request rejected by administrator.' })
+      });
+      showToast(res.message || 'Access request rejected.', 'info');
+      await loadAccessRequests();
+      await loadUsers();
+    } catch (e) {
+      if (e.status !== 423) {
+        showToast('Failed to reject request: ' + (e.message || 'Server error'), 'error');
+      }
+    }
+  }
+
+  async function executeUnlock(password) {
+    state.unlockError = null;
+    try {
+      var res = await callApi('/api/admin/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: password })
+      });
+      if (res && res.token) {
+        localStorage.setItem('ayur_admin_unlock_token', res.token);
+      }
+      state.isUnlocked = true;
+      state.unlockExpiresAt = res.unlocked_until;
+      state.showUnlockModal = false;
+      state.unlockPassword = '';
+      showToast('Administrator elevated access enabled (15 minutes).', 'success');
+      refreshView();
+    } catch (e) {
+      state.unlockError = e.message || 'Invalid administrator password.';
+      refreshView();
+    }
+  }
+
+  async function executeLock() {
+    try {
+      await callApi('/api/admin/lock', { method: 'POST' }).catch(function () {});
+      localStorage.removeItem('ayur_admin_unlock_token');
+      state.isUnlocked = false;
+      state.unlockExpiresAt = null;
+      showToast('Admin console locked. Sensitive actions will require re-authentication.', 'info');
+      refreshView();
+    } catch (_) {
+      localStorage.removeItem('ayur_admin_unlock_token');
+      state.isUnlocked = false;
+      refreshView();
     }
   }
 
@@ -342,55 +492,90 @@
       ? window.AYUR_AUTH.getUser()
       : null;
 
-    // Filter users by client-side status filter if specified
-    var filteredUsers = state.users;
-    if (state.statusFilter === 'active') {
-      filteredUsers = state.users.filter(function (u) { return u.is_active; });
-    } else if (state.statusFilter === 'inactive') {
-      filteredUsers = state.users.filter(function (u) { return !u.is_active; });
+    // Filter users client-side for presence filters (online/offline)
+    var displayUsers = state.users.slice();
+    if (state.statusFilter === 'online') {
+      displayUsers = displayUsers.filter(function (u) { return u.is_online; });
+    } else if (state.statusFilter === 'offline') {
+      displayUsers = displayUsers.filter(function (u) { return !u.is_online; });
     }
 
-    // Dynamic Overview KPIs (Prefers backend aggregate metrics if available)
+    // Sort users deterministically
+    displayUsers.sort(function (a, b) {
+      if (state.userSort === 'presence') {
+        // Online first
+        if (a.is_online && !b.is_online) return -1;
+        if (!a.is_online && b.is_online) return 1;
+        // Then by last active or last opened
+        var timeA = new Date(a.last_active_at || a.last_opened_at || a.created_at).getTime() || 0;
+        var timeB = new Date(b.last_active_at || b.last_opened_at || b.created_at).getTime() || 0;
+        return timeB - timeA;
+      } else if (state.userSort === 'recent') {
+        var tA = new Date(a.last_active_at || a.last_opened_at || a.created_at).getTime() || 0;
+        var tB = new Date(b.last_active_at || b.last_opened_at || b.created_at).getTime() || 0;
+        return tB - tA;
+      } else if (state.userSort === 'newest') {
+        var cA = new Date(a.created_at).getTime() || 0;
+        var cB = new Date(b.created_at).getTime() || 0;
+        return cB - cA;
+      } else if (state.userSort === 'name') {
+        var nameA = (a.display_name || a.username || '').toLowerCase();
+        var nameB = (b.display_name || b.username || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      }
+      return 0;
+    });
+
+    // 8 Aggregate Overview KPIs
     var m = state.metrics || {};
     var totalUsersCount = m.total_users !== undefined ? m.total_users : state.totalUsers;
     var onlineUsersCount = m.online_users !== undefined ? m.online_users : state.users.filter(function (u) { return u.is_online; }).length;
     var offlineUsersCount = m.offline_users !== undefined ? m.offline_users : Math.max(0, totalUsersCount - onlineUsersCount);
     var activeAccountsCount = m.active_accounts !== undefined ? m.active_accounts : state.users.filter(function (u) { return u.is_active; }).length;
     var deactivatedAccountsCount = m.deactivated_accounts !== undefined ? m.deactivated_accounts : state.users.filter(function (u) { return !u.is_active; }).length;
+    var pendingRequestsCount = m.pending_access_requests !== undefined ? m.pending_access_requests : 0;
     var totalActiveSessions = m.total_active_sessions !== undefined ? m.total_active_sessions : state.users.reduce(function (acc, u) { return acc + (u.active_sessions_count || 0); }, 0);
     var auditEvents24h = m.recent_audit_events_24h !== undefined ? m.recent_audit_events_24h : state.auditTotal;
 
     var html = ''
       + '<div class="admin-console-wrapper">'
-      // Header & Title
+      // Institutional Oversight Header
       + '  <div class="admin-header">'
       + '    <div class="admin-header-titles">'
       + '      <div class="admin-header-badge">'
-      + '        <span class="material-symbols-outlined">admin_panel_settings</span> Security Administration'
+      + '        <span class="material-symbols-outlined">shield</span> Security Administration'
       + '      </div>'
-      + '      <h1>Ayur-Intel Admin Console</h1>'
-      + '      <p>Institutional oversight: manage verified accounts, inspect device sessions, remotely revoke access, and query immutable audit logs.</p>'
+      + '      <h1>Institutional Oversight</h1>'
+      + '      <p>Manage verified accounts, review device sessions, control access, and investigate security activity.</p>'
       + '    </div>'
-      + '    <div class="admin-header-actions">'
+      + '    <div class="admin-header-actions-group">'
+      + (state.isUnlocked
+          ? '<span class="admin-elevated-pill" title="Sensitive operations unlocked"><span class="material-symbols-outlined">lock_open</span> Elevated Active</span>'
+            + '<button class="btn btn-secondary btn-sm" id="admin-lock-btn" title="Lock console against sensitive modifications"><span class="material-symbols-outlined">lock</span> Lock Console</button>'
+          : '<span class="admin-locked-pill" title="Protected Mode: Elevated password required for modifications"><span class="material-symbols-outlined">lock</span> Protected Mode</span>'
+            + '<button class="btn btn-primary btn-sm" id="admin-unlock-trigger-btn" title="Authenticate to execute mutations"><span class="material-symbols-outlined">lock_open</span> Elevate Access</button>'
+        )
       + '      <button class="btn btn-secondary btn-sm" id="admin-refresh-btn" title="Refresh backend data">'
       + '        <span class="material-symbols-outlined">sync</span> Refresh Data'
       + '      </button>'
       + '    </div>'
       + '  </div>'
 
-      // Overview KPI Cards (5 cards)
-      + '  <div class="admin-kpi-grid">'
+      // Overview 8-KPI Responsive Grid (4x2 on Desktop, 2x4 on Tablet, 1x8 on Mobile)
+      + '  <div class="admin-kpi-grid-8">'
+      // 1. Total Registered Accounts
       + '    <div class="admin-kpi-card">'
       + '      <div class="admin-kpi-icon kpi-icon-total">'
       + '        <span class="material-symbols-outlined">people</span>'
       + '      </div>'
       + '      <div class="admin-kpi-data">'
       + '        <div class="admin-kpi-val">' + totalUsersCount + '</div>'
-      + '        <div class="admin-kpi-lbl">Total Registered</div>'
+      + '        <div class="admin-kpi-lbl">Total Registered Accounts</div>'
       + '        <div class="admin-kpi-sub">Institutional directory</div>'
       + '      </div>'
       + '    </div>'
 
+      // 2. Currently Online
       + '    <div class="admin-kpi-card kpi-card-online">'
       + '      <div class="admin-kpi-icon kpi-icon-online">'
       + '        <span class="material-symbols-outlined">sensors</span>'
@@ -398,10 +583,11 @@
       + '      <div class="admin-kpi-data">'
       + '        <div class="admin-kpi-val"><span class="presence-pulse-dot inline"></span>' + onlineUsersCount + '</div>'
       + '        <div class="admin-kpi-lbl">Currently Online</div>'
-      + '        <div class="admin-kpi-sub">' + totalActiveSessions + ' active sessions</div>'
+      + '        <div class="admin-kpi-sub">Active in idle window</div>'
       + '      </div>'
       + '    </div>'
 
+      // 3. Offline Accounts
       + '    <div class="admin-kpi-card">'
       + '      <div class="admin-kpi-icon kpi-icon-offline">'
       + '        <span class="material-symbols-outlined">nightlight</span>'
@@ -409,37 +595,79 @@
       + '      <div class="admin-kpi-data">'
       + '        <div class="admin-kpi-val">' + offlineUsersCount + '</div>'
       + '        <div class="admin-kpi-lbl">Offline Accounts</div>'
-      + '        <div class="admin-kpi-sub">Idle or signed out</div>'
+      + '        <div class="admin-kpi-sub">Signed out or idle</div>'
       + '      </div>'
       + '    </div>'
 
+      // 4. Active Accounts
       + '    <div class="admin-kpi-card">'
-      + '      <div class="admin-kpi-icon kpi-icon-standing">'
+      + '      <div class="admin-kpi-icon kpi-icon-active">'
       + '        <span class="material-symbols-outlined">verified_user</span>'
       + '      </div>'
       + '      <div class="admin-kpi-data">'
-      + '        <div class="admin-kpi-val">' + activeAccountsCount + '<span class="admin-kpi-val-sec"> / ' + deactivatedAccountsCount + '</span></div>'
-      + '        <div class="admin-kpi-lbl">Account Standing</div>'
-      + '        <div class="admin-kpi-sub">Active / Deactivated</div>'
+      + '        <div class="admin-kpi-val">' + activeAccountsCount + '</div>'
+      + '        <div class="admin-kpi-lbl">Active Accounts</div>'
+      + '        <div class="admin-kpi-sub">Authorized system access</div>'
       + '      </div>'
       + '    </div>'
 
+      // 5. Deactivated Accounts
+      + '    <div class="admin-kpi-card">'
+      + '      <div class="admin-kpi-icon kpi-icon-deactivated">'
+      + '        <span class="material-symbols-outlined">block</span>'
+      + '      </div>'
+      + '      <div class="admin-kpi-data">'
+      + '        <div class="admin-kpi-val">' + deactivatedAccountsCount + '</div>'
+      + '        <div class="admin-kpi-lbl">Deactivated Accounts</div>'
+      + '        <div class="admin-kpi-sub">Access blocked</div>'
+      + '      </div>'
+      + '    </div>'
+
+      // 6. Pending Access Requests
+      + '    <div class="admin-kpi-card ' + (pendingRequestsCount > 0 ? 'kpi-card-pending-alert' : '') + '">'
+      + '      <div class="admin-kpi-icon kpi-icon-pending">'
+      + '        <span class="material-symbols-outlined">pending_actions</span>'
+      + '      </div>'
+      + '      <div class="admin-kpi-data">'
+      + '        <div class="admin-kpi-val">' + pendingRequestsCount + '</div>'
+      + '        <div class="admin-kpi-lbl">Pending Access Requests</div>'
+      + '        <div class="admin-kpi-sub">' + (pendingRequestsCount > 0 ? 'Requires administrator review' : 'Queue clear') + '</div>'
+      + '      </div>'
+      + '    </div>'
+
+      // 7. Active Sessions
+      + '    <div class="admin-kpi-card">'
+      + '      <div class="admin-kpi-icon kpi-icon-sessions">'
+      + '        <span class="material-symbols-outlined">devices</span>'
+      + '      </div>'
+      + '      <div class="admin-kpi-data">'
+      + '        <div class="admin-kpi-val">' + totalActiveSessions + '</div>'
+      + '        <div class="admin-kpi-lbl">Active Sessions</div>'
+      + '        <div class="admin-kpi-sub">Concurrent client tokens</div>'
+      + '      </div>'
+      + '    </div>'
+
+      // 8. Security Events (Last 24 Hours)
       + '    <div class="admin-kpi-card">'
       + '      <div class="admin-kpi-icon kpi-icon-audit">'
-      + '        <span class="material-symbols-outlined">security</span>'
+      + '        <span class="material-symbols-outlined">policy</span>'
       + '      </div>'
       + '      <div class="admin-kpi-data">'
       + '        <div class="admin-kpi-val">' + auditEvents24h + '</div>'
-      + '        <div class="admin-kpi-lbl">Security Audit (24h)</div>'
-      + '        <div class="admin-kpi-sub">Access &amp; privilege events</div>'
+      + '        <div class="admin-kpi-lbl">Security Events (24h)</div>'
+      + '        <div class="admin-kpi-sub">Privilege &amp; auth audits</div>'
       + '      </div>'
       + '    </div>'
       + '  </div>'
 
-      // Navigation Tabs
+      // Main Navigation Tabs
       + '  <div class="admin-tabs">'
       + '    <button class="admin-tab-btn ' + (state.activeTab === 'users' ? 'active' : '') + '" data-admin-tab="users">'
-      + '      <span class="material-symbols-outlined">manage_accounts</span> User Directory &amp; Sessions'
+      + '      <span class="material-symbols-outlined">group</span> User Directory &amp; Sessions (' + state.totalUsers + ')'
+      + '    </button>'
+      + '    <button class="admin-tab-btn ' + (state.activeTab === 'requests' ? 'active' : '') + '" data-admin-tab="requests">'
+      + '      <span class="material-symbols-outlined">assignment_late</span> Access Requests'
+      + (pendingRequestsCount > 0 ? ' <span class="admin-tab-pill">' + pendingRequestsCount + '</span>' : '')
       + '    </button>'
       + '    <button class="admin-tab-btn ' + (state.activeTab === 'audit' ? 'active' : '') + '" data-admin-tab="audit">'
       + '      <span class="material-symbols-outlined">history</span> Immutable Audit Trail'
@@ -447,7 +675,7 @@
       + '  </div>';
 
     // -------------------------------------------------------------------------
-    // TAB 1: USERS & SESSIONS
+    // TAB 1: USER DIRECTORY & SESSIONS (Horizontal User Cards)
     // -------------------------------------------------------------------------
     if (state.activeTab === 'users') {
       var totalUserPages = Math.ceil(state.totalUsers / state.userLimit) || 1;
@@ -456,134 +684,139 @@
 
       html += ''
         + '  <div class="admin-card">'
-        // Filter & Search Controls
+        // Refined Directory Toolbar: Search, Filters, Sorting
         + '    <div class="admin-filter-bar">'
-        + '      <div class="admin-search-wrap">'
-        + '        <span class="material-symbols-outlined">search</span>'
-        + '        <input type="text" id="admin-user-search" class="admin-search-input" placeholder="Search by name, email, or username..." value="' + escapeHtml(state.userQuery) + '">'
-        + '        ' + (state.userQuery ? '<button class="admin-clear-search-btn" id="admin-clear-search-btn" title="Clear search">×</button>' : '')
-        + '      </div>'
-        + '      <div class="admin-filter-actions">'
-        + '        <select id="admin-status-filter" class="admin-select">'
-        + '          <option value="all" ' + (state.statusFilter === 'all' ? 'selected' : '') + '>All Statuses</option>'
-        + '          <option value="active" ' + (state.statusFilter === 'active' ? 'selected' : '') + '>Active Only</option>'
-        + '          <option value="inactive" ' + (state.statusFilter === 'inactive' ? 'selected' : '') + '>Deactivated Only</option>'
-        + '        </select>'
-        + '        <button class="btn btn-primary btn-sm" id="admin-search-submit-btn">'
-        + '          <span class="material-symbols-outlined">filter_list</span> Search'
-        + '        </button>'
+        + '      <div class="admin-toolbar-row">'
+        + '        <div class="admin-search-wrap">'
+        + '          <span class="material-symbols-outlined">search</span>'
+        + '          <input type="text" id="admin-user-search" class="admin-search-input" placeholder="Search by name, email, or username..." value="' + escapeHtml(state.userQuery) + '">'
+        + '          ' + (state.userQuery ? '<button class="admin-clear-search-btn" id="admin-clear-search-btn" title="Clear search">×</button>' : '')
+        + '        </div>'
+        + '        <div class="admin-toolbar-controls">'
+        // Filter By Status
+        + '          <select id="admin-status-filter" class="admin-select" title="Filter by status">'
+        + '            <option value="all" ' + (state.statusFilter === 'all' ? 'selected' : '') + '>All Statuses</option>'
+        + '            <option value="online" ' + (state.statusFilter === 'online' ? 'selected' : '') + '>Online Only</option>'
+        + '            <option value="offline" ' + (state.statusFilter === 'offline' ? 'selected' : '') + '>Offline Only</option>'
+        + '            <option value="active" ' + (state.statusFilter === 'active' ? 'selected' : '') + '>Active Accounts</option>'
+        + '            <option value="inactive" ' + (state.statusFilter === 'inactive' ? 'selected' : '') + '>Deactivated Accounts</option>'
+        + '            <option value="pending" ' + (state.statusFilter === 'pending' ? 'selected' : '') + '>Pending Approval</option>'
+        + '          </select>'
+        // Sort By
+        + '          <select id="admin-user-sort" class="admin-select" title="Sort order">'
+        + '            <option value="presence" ' + (state.userSort === 'presence' ? 'selected' : '') + '>Presence &amp; Recent (Default)</option>'
+        + '            <option value="recent" ' + (state.userSort === 'recent' ? 'selected' : '') + '>Most Recent Activity</option>'
+        + '            <option value="newest" ' + (state.userSort === 'newest' ? 'selected' : '') + '>Newest Accounts</option>'
+        + '            <option value="name" ' + (state.userSort === 'name' ? 'selected' : '') + '>Account Name (A–Z)</option>'
+        + '          </select>'
+        + '          <button class="btn btn-primary btn-sm" id="admin-search-submit-btn">'
+        + '            <span class="material-symbols-outlined">filter_list</span> Apply'
+        + '          </button>'
+        + '        </div>'
         + '      </div>'
         + '    </div>'
 
-        // User Directory Table
-        + '    <div class="admin-table-container">'
-        + '      <table class="admin-table">'
-        + '        <thead>'
-        + '          <tr>'
-        + '            <th>User Account</th>'
-        + '            <th>Email Address</th>'
-        + '            <th>Role</th>'
-        + '            <th>Status</th>'
-        + '            <th>Active Sessions</th>'
-        + '            <th>Joined Date</th>'
-        + '            <th style="text-align: right;">Administrative Actions</th>'
-        + '          </tr>'
-        + '        </thead>'
-        + '        <tbody>';
+        // Horizontal User Cards List (NO avatar initials!)
+        + '    <div class="admin-user-cards-list">';
 
       if (state.isLoading) {
-        html += '<tr><td colspan="7" class="admin-empty-cell"><div class="admin-spinner"></div> Loading user directory...</td></tr>';
-      } else if (filteredUsers.length === 0) {
-        html += '<tr><td colspan="7" class="admin-empty-cell"><div class="admin-empty-icon"><span class="material-symbols-outlined">person_search</span></div><p>No user accounts match the current filter or search criteria.</p></td></tr>';
+        html += '<div class="admin-empty-cell"><div class="admin-spinner"></div> Loading user directory...</div>';
+      } else if (displayUsers.length === 0) {
+        html += '<div class="admin-empty-cell"><div class="admin-empty-icon"><span class="material-symbols-outlined">person_search</span></div><p>No user accounts match the current filter or search criteria.</p></div>';
       } else {
-        filteredUsers.forEach(function (u) {
+        displayUsers.forEach(function (u) {
           var isSelf = currentUser && (currentUser.id === u.id || currentUser.public_id === u.id);
+          var fullName = u.display_name || u.username;
+
+          // Status Badge
+          var statusBadge = '';
+          if (u.has_pending_request) {
+            statusBadge = '<span class="admin-badge badge-pending"><span class="admin-badge-dot"></span> Approval Pending</span>';
+          } else if (u.is_active) {
+            statusBadge = '<span class="admin-badge badge-active"><span class="admin-badge-dot"></span> Active</span>';
+          } else {
+            statusBadge = '<span class="admin-badge badge-inactive"><span class="admin-badge-dot"></span> Deactivated</span>';
+          }
+
           var roleBadgeClass = u.role === 'admin' ? 'badge-admin' : 'badge-user';
-          var statusBadge = u.is_active
-            ? '<span class="admin-badge badge-active"><span class="admin-badge-dot"></span> Active</span>'
-            : '<span class="admin-badge badge-inactive"><span class="admin-badge-dot"></span> Deactivated</span>';
 
-          var sessionBadge = u.active_sessions_count > 0
-            ? '<span class="admin-badge badge-sessions"><span class="material-symbols-outlined" style="font-size:12px;">devices</span> ' + u.active_sessions_count + ' active</span>'
-            : '<span class="admin-badge badge-idle">None</span>';
-
+          // Presence Line
           var presenceHtml = '';
           if (u.is_online) {
             presenceHtml = ''
-              + '<div class="admin-presence-line online" title="Session active within idle window">'
+              + '<div class="admin-presence-line online">'
               + '  <span class="presence-pulse-dot"></span>'
               + '  <span class="presence-status-text">Online · Last active ' + escapeHtml(formatRelativeTime(u.last_active_at)) + '</span>'
-              + '  <span class="presence-duration-line live-duration" data-session-start="' + escapeHtml(u.session_started_at || '') + '" data-is-online="true">(Current session: ' + escapeHtml(formatDuration(u.current_session_duration_seconds)) + ')</span>'
+              + '  <span class="presence-duration-line live-duration" data-session-start="' + escapeHtml(u.session_started_at || '') + '" data-is-online="true">(Current: ' + escapeHtml(formatDuration(u.current_session_duration_seconds)) + ')</span>'
               + '</div>';
           } else {
             var openedText = u.last_opened_at ? ('Last opened ' + formatRelativeTime(u.last_opened_at)) : 'Last opened: Not available';
             var lastDurationText = (u.last_session_duration_seconds !== null && u.last_session_duration_seconds !== undefined)
               ? ('Last session: ' + formatDuration(u.last_session_duration_seconds))
-              : 'Session duration: Not recorded';
+              : 'Duration: Not recorded';
             presenceHtml = ''
-              + '<div class="admin-presence-line offline" title="No active valid session">'
+              + '<div class="admin-presence-line offline">'
               + '  <span class="presence-static-dot"></span>'
               + '  <span class="presence-status-text">Offline · ' + escapeHtml(openedText) + '</span>'
               + '  <span class="presence-duration-line">(' + escapeHtml(lastDurationText) + ')</span>'
               + '</div>';
           }
 
-          html += ''
-            + '      <tr class="' + (!u.is_active ? 'tr-deactivated' : (u.is_online ? 'tr-online' : 'tr-offline')) + '">'
-            + '        <td>'
-            + '          <div class="admin-user-cell">'
-            + '            <div class="admin-user-avatar ' + (u.is_online ? 'avatar-online' : '') + '" style="background-color: ' + (window.AYUR_AUTH ? window.AYUR_AUTH.getAvatarColor(u.display_name || u.email) : '#10b981') + ';">'
-            + '              ' + (window.AYUR_AUTH ? window.AYUR_AUTH.getInitials(u.display_name, u.email) : 'U')
-            + (u.is_online ? '<span class="avatar-presence-dot" title="Online"></span>' : '')
-            + '            </div>'
-            + '            <div class="admin-user-info">'
-            + '              <div class="admin-user-name-line">'
-            + '                <strong>' + escapeHtml(u.display_name || u.username) + (isSelf ? ' <span class="self-tag">(You)</span>' : '') + '</strong>'
-            + '                <small class="user-handle">@' + escapeHtml(u.username) + '</small>'
-            + '              </div>'
-            + '              ' + presenceHtml
-            + '            </div>'
-            + '          </div>'
-            + '        </td>'
-            + '        <td><span class="mono-text">' + escapeHtml(u.email || '—') + '</span></td>'
-            + '        <td><span class="admin-badge ' + roleBadgeClass + '">' + escapeHtml(u.role) + '</span></td>'
-            + '        <td>' + statusBadge + '</td>'
-            + '        <td>' + sessionBadge + '</td>'
-            + '        <td><span class="mono-date">' + formatDate(u.created_at) + '</span></td>'
-            + '        <td style="text-align: right;">'
-            + '          <div class="admin-action-btn-group">'
-            + '            <button class="btn btn-secondary btn-xs btn-inspect-user" data-user-id="' + escapeHtml(u.id) + '" title="View complete details and device sessions">'
-            + '              <span class="material-symbols-outlined">visibility</span> Inspect'
-            + '            </button>';
-
-          if (u.is_active) {
-            html += ''
-              + '            <button class="btn btn-danger-outline btn-xs btn-toggle-status" data-user-id="' + escapeHtml(u.id) + '" data-user-name="' + escapeHtml(u.display_name || u.username) + '" data-active="false" ' + (isSelf ? 'disabled title="You cannot deactivate your own administrator account"' : 'title="Deactivate account and revoke all sessions"') + '>'
-              + '              <span class="material-symbols-outlined">block</span> Deactivate'
-              + '            </button>';
-          } else {
-            html += ''
-              + '            <button class="btn btn-success-outline btn-xs btn-toggle-status" data-user-id="' + escapeHtml(u.id) + '" data-user-name="' + escapeHtml(u.display_name || u.username) + '" data-active="true" title="Restore account login access">'
-              + '              <span class="material-symbols-outlined">check_circle</span> Activate'
-              + '            </button>';
-          }
+          var cardClass = 'admin-user-card';
+          if (u.has_pending_request) cardClass += ' user-card-pending';
+          else if (u.is_online) cardClass += ' user-card-online';
+          else if (!u.is_active) cardClass += ' user-card-deactivated';
 
           html += ''
-            + '          </div>'
-            + '        </td>'
-            + '      </tr>';
+            + '<div class="' + cardClass + '" data-user-id="' + escapeHtml(u.id) + '">'
+            // Primary Identity Info (NO Avatar Circle!)
+            + '  <div class="admin-card-primary">'
+            + '    <div class="admin-card-name-row">'
+            + '      <span class="admin-card-name">' + escapeHtml(fullName) + '</span>'
+            + (isSelf ? ' <span class="self-tag">(You)</span>' : '')
+            + '      <span class="admin-badge ' + roleBadgeClass + '">' + escapeHtml(u.role) + '</span>'
+            + '      ' + statusBadge
+            + '    </div>'
+            + '    <div class="admin-card-meta-row">'
+            + '      <span class="admin-card-email">' + escapeHtml(u.email || '—') + '</span>'
+            + '      <span class="admin-card-handle">@' + escapeHtml(u.username) + '</span>'
+            + '    </div>'
+            + '    ' + presenceHtml
+            + '  </div>'
+
+            // Secondary Metrics
+            + '  <div class="admin-card-stats">'
+            + '    <div class="admin-stat-item">'
+            + '      <span class="admin-stat-value">' + (u.login_count || 0) + '</span>'
+            + '      <span class="admin-stat-label">Logins Recorded</span>'
+            + '    </div>'
+            + '    <div class="admin-stat-item">'
+            + '      <span class="admin-stat-value">' + (u.active_sessions_count || 0) + '</span>'
+            + '      <span class="admin-stat-label">Active Sessions</span>'
+            + '    </div>'
+            + '    <div class="admin-stat-item">'
+            + '      <span class="admin-stat-value">' + formatDate(u.created_at).split(',')[0] + '</span>'
+            + '      <span class="admin-stat-label">Member Since</span>'
+            + '    </div>'
+            + '  </div>'
+
+            // Right Affordance
+            + '  <div class="admin-card-actions">'
+            + '    <button class="btn btn-secondary btn-sm btn-view-details" data-user-id="' + escapeHtml(u.id) + '">'
+            + '      View Details <span class="material-symbols-outlined">chevron_right</span>'
+            + '    </button>'
+            + '  </div>'
+            + '</div>';
         });
       }
 
       html += ''
-        + '        </tbody>'
-        + '      </table>'
         + '    </div>'
 
-        // User Pagination
+        // Directory Pagination
         + '    <div class="admin-pagination">'
         + '      <div class="admin-pagination-info">'
-        + '        Showing <strong>' + (state.totalUsers > 0 ? startIdx : 0) + '–' + endIdx + '</strong> of <strong>' + state.totalUsers + '</strong> users'
+        + '        Showing <strong>' + (state.totalUsers > 0 ? startIdx : 0) + '–' + endIdx + '</strong> of <strong>' + state.totalUsers + '</strong> user accounts'
         + '      </div>'
         + '      <div class="admin-pagination-btns">'
         + '        <button class="btn btn-secondary btn-sm" id="admin-user-prev" ' + (state.userPage <= 1 ? 'disabled' : '') + '>'
@@ -599,7 +832,121 @@
     }
 
     // -------------------------------------------------------------------------
-    // TAB 2: SYSTEM AUDIT TRAIL
+    // TAB 2: ACCESS REQUESTS QUEUE
+    // -------------------------------------------------------------------------
+    if (state.activeTab === 'requests') {
+      var totalReqPages = Math.ceil(state.requestsTotal / state.requestsLimit) || 1;
+      var reqStart = (state.requestsPage - 1) * state.requestsLimit + 1;
+      var reqEnd = Math.min(state.requestsPage * state.requestsLimit, state.requestsTotal);
+
+      html += ''
+        + '  <div class="admin-card">'
+        + '    <div class="admin-filter-bar">'
+        + '      <div class="admin-toolbar-row">'
+        + '        <div>'
+        + '          <h3 style="font-size: 15px; font-weight: 700; color: #f2f7f4; margin-bottom: 2px;">Device-Level Access Approval Queue</h3>'
+        + '          <p style="font-size: 12px; color: #94a39b;">Review sign-in requests from deactivated users and authorized device cryptographic fingerprints.</p>'
+        + '        </div>'
+        + '        <div class="admin-toolbar-controls">'
+        + '          <select id="admin-requests-filter" class="admin-select">'
+        + '            <option value="all" ' + (state.requestsFilter === 'all' ? 'selected' : '') + '>All Requests</option>'
+        + '            <option value="pending" ' + (state.requestsFilter === 'pending' ? 'selected' : '') + '>Pending Review Only</option>'
+        + '            <option value="approved" ' + (state.requestsFilter === 'approved' ? 'selected' : '') + '>Approved</option>'
+        + '            <option value="rejected" ' + (state.requestsFilter === 'rejected' ? 'selected' : '') + '>Rejected</option>'
+        + '          </select>'
+        + '          <button class="btn btn-secondary btn-sm" id="admin-requests-refresh-btn">'
+        + '            <span class="material-symbols-outlined">sync</span> Refresh'
+        + '          </button>'
+        + '        </div>'
+        + '      </div>'
+        + '    </div>'
+
+        + '    <div class="admin-requests-list">';
+
+      if (state.isRequestsLoading) {
+        html += '<div class="admin-empty-cell"><div class="admin-spinner"></div> Loading access requests...</div>';
+      } else if (state.accessRequests.length === 0) {
+        html += '<div class="admin-empty-cell"><div class="admin-empty-icon"><span class="material-symbols-outlined">task_alt</span></div><p>No access requests matching current filter.</p></div>';
+      } else {
+        state.accessRequests.forEach(function (req) {
+          var isPending = req.status === 'pending';
+          var statusBadge = '';
+          if (req.status === 'pending') {
+            statusBadge = '<span class="admin-badge badge-pending"><span class="admin-badge-dot"></span> Pending Review</span>';
+          } else if (req.status === 'approved') {
+            statusBadge = '<span class="admin-badge badge-approved"><span class="admin-badge-dot"></span> Approved</span>';
+          } else {
+            statusBadge = '<span class="admin-badge badge-rejected"><span class="admin-badge-dot"></span> Rejected</span>';
+          }
+
+          var cardClass = 'admin-request-card' + (isPending ? ' pending' : '');
+
+          html += ''
+            + '<div class="' + cardClass + '">'
+            + '  <div class="admin-request-head">'
+            + '    <div class="admin-request-user">'
+            + '      <h4>' + escapeHtml(req.user_display_name || req.user_email) + '</h4>'
+            + '      <div class="admin-request-meta">'
+            + '        <span><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">mail</span> ' + escapeHtml(req.user_email) + '</span>'
+            + '        <span><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">schedule</span> ' + formatRelativeTime(req.created_at) + ' (' + formatDate(req.created_at) + ')</span>'
+            + '        <span><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">devices</span> ' + escapeHtml(req.device_info || 'Unknown Device') + '</span>'
+            + '      </div>'
+            + '    </div>'
+            + '    <div>' + statusBadge + '</div>'
+            + '  </div>'
+
+            + '  <div class="admin-request-body">'
+            + '    <strong>Reason:</strong> ' + escapeHtml(req.reason || 'Deactivated user sign-in attempt') + '<br>'
+            + '    <small class="mono-text">Device Cryptographic Fingerprint: ' + escapeHtml(req.device_hash ? ('sha256:' + req.device_hash.substring(0, 24) + '...') : 'None') + '</small>'
+            + '  </div>';
+
+          if (isPending) {
+            html += ''
+              + '  <div class="admin-request-foot">'
+              + '    <span class="text-muted" style="font-size:12px;">Action requires elevated administrator authorization.</span>'
+              + '    <div class="admin-action-btn-group">'
+              + '      <button class="btn btn-danger-outline btn-sm btn-reject-request" data-req-id="' + escapeHtml(req.id) + '" data-user-email="' + escapeHtml(req.user_email) + '">'
+              + '        <span class="material-symbols-outlined">cancel</span> Reject Request'
+              + '      </button>'
+              + '      <button class="btn btn-success-outline btn-sm btn-approve-request" data-req-id="' + escapeHtml(req.id) + '" data-user-email="' + escapeHtml(req.user_email) + '">'
+              + '        <span class="material-symbols-outlined">check_circle</span> Approve &amp; Reactivate'
+              + '      </button>'
+              + '    </div>'
+              + '  </div>';
+          } else {
+            html += ''
+              + '  <div class="admin-request-foot">'
+              + '    <span class="mono-text" style="font-size:11.5px;">Reviewed by @' + escapeHtml(req.reviewer_username || 'admin') + ' on ' + formatDate(req.reviewed_at) + ' · Notes: ' + escapeHtml(req.review_notes || 'None') + '</span>'
+              + '  </div>';
+          }
+
+          html += '</div>';
+        });
+      }
+
+      html += ''
+        + '    </div>'
+
+        // Requests Pagination
+        + '    <div class="admin-pagination">'
+        + '      <div class="admin-pagination-info">'
+        + '        Showing <strong>' + (state.requestsTotal > 0 ? reqStart : 0) + '–' + reqEnd + '</strong> of <strong>' + state.requestsTotal + '</strong> access requests'
+        + '      </div>'
+        + '      <div class="admin-pagination-btns">'
+        + '        <button class="btn btn-secondary btn-sm" id="admin-req-prev" ' + (state.requestsPage <= 1 ? 'disabled' : '') + '>'
+        + '          <span class="material-symbols-outlined">chevron_left</span> Previous'
+        + '        </button>'
+        + '        <span class="admin-page-indicator">Page ' + state.requestsPage + ' of ' + totalReqPages + '</span>'
+        + '        <button class="btn btn-secondary btn-sm" id="admin-req-next" ' + (state.requestsPage >= totalReqPages ? 'disabled' : '') + '>'
+        + '          Next <span class="material-symbols-outlined">chevron_right</span>'
+        + '        </button>'
+        + '      </div>'
+        + '    </div>'
+        + '  </div>';
+    }
+
+    // -------------------------------------------------------------------------
+    // TAB 3: IMMUTABLE AUDIT TRAIL
     // -------------------------------------------------------------------------
     if (state.activeTab === 'audit') {
       var totalAuditPages = Math.ceil(state.auditTotal / state.auditLimit) || 1;
@@ -608,7 +955,6 @@
 
       html += ''
         + '  <div class="admin-card">'
-        // Filter Controls
         + '    <div class="admin-filter-bar">'
         + '      <div class="admin-search-wrap">'
         + '        <span class="material-symbols-outlined">person_search</span>'
@@ -623,6 +969,9 @@
         + '          <option value="LOGOUT_ALL" ' + (state.auditActionFilter === 'LOGOUT_ALL' ? 'selected' : '') + '>LOGOUT_ALL</option>'
         + '          <option value="STATUS_CHANGE" ' + (state.auditActionFilter === 'STATUS_CHANGE' ? 'selected' : '') + '>STATUS_CHANGE</option>'
         + '          <option value="SESSION_REVOKE" ' + (state.auditActionFilter === 'SESSION_REVOKE' ? 'selected' : '') + '>SESSION_REVOKE</option>'
+        + '          <option value="ADMIN_UNLOCK" ' + (state.auditActionFilter === 'ADMIN_UNLOCK' ? 'selected' : '') + '>ADMIN_UNLOCK</option>'
+        + '          <option value="ACCESS_REQUEST_SUBMIT" ' + (state.auditActionFilter === 'ACCESS_REQUEST_SUBMIT' ? 'selected' : '') + '>ACCESS_REQUEST_SUBMIT</option>'
+        + '          <option value="ACCESS_REQUEST_APPROVE" ' + (state.auditActionFilter === 'ACCESS_REQUEST_APPROVE' ? 'selected' : '') + '>ACCESS_REQUEST_APPROVE</option>'
         + '        </select>'
         + '        <select id="admin-audit-status-filter" class="admin-select">'
         + '          <option value="" ' + (!state.auditStatusFilter ? 'selected' : '') + '>All Statuses</option>'
@@ -639,12 +988,11 @@
         + '      </div>'
         + '    </div>'
 
-        // Audit Log Table
         + '    <div class="admin-table-container">'
         + '      <table class="admin-table">'
         + '        <thead>'
         + '          <tr>'
-        + '            <th>Timestamp (UTC)</th>'
+        + '            <th>Timestamp (Local)</th>'
         + '            <th>Action</th>'
         + '            <th>Resource</th>'
         + '            <th>Actor / Target</th>'
@@ -692,7 +1040,6 @@
         + '      </table>'
         + '    </div>'
 
-        // Audit Pagination
         + '    <div class="admin-pagination">'
         + '      <div class="admin-pagination-info">'
         + '        Showing <strong>' + (state.auditTotal > 0 ? auditStartIdx : 0) + '–' + auditEndIdx + '</strong> of <strong>' + state.auditTotal + '</strong> events'
@@ -711,127 +1058,272 @@
     }
 
     // -------------------------------------------------------------------------
-    // User Inspection & Session Modal
+    // USER DETAIL SLIDING SIDE DRAWER
     // -------------------------------------------------------------------------
     if (state.selectedUser) {
       var sel = state.selectedUser;
       var isSelfModal = currentUser && (currentUser.id === sel.id || currentUser.public_id === sel.id);
       var sessions = sel.recent_sessions || [];
+      var requests = sel.access_requests || [];
 
       html += ''
-        + '<div class="admin-modal-backdrop" id="admin-user-modal">'
-        + '  <div class="admin-modal admin-modal-lg">'
-        + '    <div class="admin-modal-head">'
-        + '      <div class="admin-modal-title">'
-        + '        <span class="material-symbols-outlined">shield_person</span>'
-        + '        <h2>User Profile &amp; Device Sessions</h2>'
-        + '      </div>'
-        + '      <button class="admin-modal-close" id="admin-modal-close-btn" title="Close modal">×</button>'
+        + '<div class="admin-drawer-backdrop" id="admin-drawer-backdrop"></div>'
+        + '<div class="admin-detail-drawer" id="admin-detail-drawer">'
+        // Drawer Head
+        + '  <div class="admin-drawer-head">'
+        + '    <div class="admin-drawer-title-wrap">'
+        + '      <h2>' + escapeHtml(sel.display_name || sel.username) + (isSelfModal ? ' <span class="self-tag">(You)</span>' : '') + '</h2>'
+        + '      <p>' + escapeHtml(sel.email || '—') + ' · @' + escapeHtml(sel.username) + '</p>'
         + '    </div>'
-        + '    <div class="admin-modal-body">'
-        // User Profile Summary Card
-        + '      <div class="admin-user-modal-summary">'
-        + '        <div class="admin-user-avatar lg" style="background-color: ' + (window.AYUR_AUTH ? window.AYUR_AUTH.getAvatarColor(sel.display_name || sel.email) : '#476558') + ';">'
-        + '          ' + (window.AYUR_AUTH ? window.AYUR_AUTH.getInitials(sel.display_name, sel.email) : 'U')
-        + '        </div>'
-        + '        <div class="admin-user-modal-meta">'
-        + '          <div class="admin-user-modal-name-row">'
-        + '            <h3>' + escapeHtml(sel.display_name || sel.username) + '</h3>'
-        + '            <span class="admin-badge ' + (sel.role === 'admin' ? 'badge-admin' : 'badge-user') + '">' + escapeHtml(sel.role) + '</span>'
-        + '            ' + (sel.is_active ? '<span class="admin-badge badge-active">Active</span>' : '<span class="admin-badge badge-inactive">Deactivated</span>')
-        + '          </div>'
-        + '          <div class="admin-meta-grid">'
-        + '            <div><small>Email:</small> <strong>' + escapeHtml(sel.email || '—') + '</strong></div>'
-        + '            <div><small>Username:</small> <strong>@' + escapeHtml(sel.username) + '</strong></div>'
-        + '            <div><small>Public ID:</small> <span class="mono-text">' + escapeHtml(sel.id) + '</span></div>'
-        + '            <div><small>Registered:</small> <span class="mono-date">' + formatDate(sel.created_at) + '</span></div>'
-        + '          </div>'
-        + '        </div>'
-        + '      </div>'
+        + '    <button class="admin-modal-close" id="admin-drawer-close-btn" title="Close details">×</button>'
+        + '  </div>'
 
-        // Actions Header
-        + '      <div class="admin-session-header">'
-        + '        <div>'
-        + '          <h4>Active Sessions &amp; Login History</h4>'
-        + '          <p>Review logged-in devices and remotely revoke individual sessions or force logout across all platforms.</p>'
-        + '        </div>'
-        + '        <div>'
-        + '          <button class="btn btn-danger-outline btn-sm" id="admin-revoke-all-btn" data-user-id="' + escapeHtml(sel.id) + '" data-user-name="' + escapeHtml(sel.display_name || sel.username) + '" ' + (sessions.length === 0 ? 'disabled' : '') + '>'
-        + '            <span class="material-symbols-outlined">power_settings_new</span> Logout from All Devices'
-        + '          </button>'
-        + '        </div>'
-        + '      </div>'
+        // Drawer Sub-Tabs
+        + '  <div class="admin-drawer-subtabs">'
+        + '    <button class="admin-drawer-subtab ' + (state.selectedUserSubtab === 'overview' ? 'active' : '') + '" data-subtab="overview">'
+        + '      <span class="material-symbols-outlined">badge</span> Overview'
+        + '    </button>'
+        + '    <button class="admin-drawer-subtab ' + (state.selectedUserSubtab === 'sessions' ? 'active' : '') + '" data-subtab="sessions">'
+        + '      <span class="material-symbols-outlined">devices</span> Sessions (' + sessions.length + ')'
+        + '    </button>'
+        + '    <button class="admin-drawer-subtab ' + (state.selectedUserSubtab === 'requests' ? 'active' : '') + '" data-subtab="requests">'
+        + '      <span class="material-symbols-outlined">assignment_turned_in</span> Requests (' + requests.length + ')'
+        + '    </button>'
+        + '    <button class="admin-drawer-subtab ' + (state.selectedUserSubtab === 'controls' ? 'active' : '') + '" data-subtab="controls">'
+        + '      <span class="material-symbols-outlined">security</span> Access Controls'
+        + '    </button>'
+        + '  </div>'
 
-        // Sessions Table
-        + '      <div class="admin-table-container">'
-        + '        <table class="admin-table">'
-        + '          <thead>'
-        + '            <tr>'
-        + '              <th>Client Device &amp; Browser</th>'
-        + '              <th>IP Address</th>'
-        + '              <th>Created (UTC)</th>'
-        + '              <th>Last Active</th>'
-        + '              <th>Status</th>'
-        + '              <th style="text-align: right;">Action</th>'
-        + '            </tr>'
-        + '          </thead>'
-        + '          <tbody>';
+        // Drawer Body
+        + '  <div class="admin-drawer-body">';
 
-      if (sessions.length === 0) {
-        html += '<tr><td colspan="6" class="admin-empty-cell"><p>No session activity recorded for this user.</p></td></tr>';
+      if (state.loadingUserDetail) {
+        html += '<div class="admin-empty-cell"><div class="admin-spinner"></div> Fetching user records...</div>';
       } else {
-        sessions.forEach(function (s) {
-          var isRevoked = s.is_revoked;
-          var statusBadge = isRevoked
-            ? '<span class="admin-badge badge-inactive">Revoked</span>'
-            : '<span class="admin-badge badge-active">Active</span>';
+        // Sub-Tab 1: Overview
+        if (state.selectedUserSubtab === 'overview') {
+          var liveDurationText = sel.is_online
+            ? formatDuration(sel.current_session_duration_seconds)
+            : (sel.last_session_duration_seconds !== null && sel.last_session_duration_seconds !== undefined
+                ? formatDuration(sel.last_session_duration_seconds)
+                : 'Not recorded');
 
           html += ''
-            + '      <tr class="' + (isRevoked ? 'tr-revoked' : '') + '">'
-            + '        <td>'
-            + '          <div class="admin-device-info">'
-            + '            <span class="material-symbols-outlined admin-device-icon">computer</span>'
-            + '            <div>'
-            + '              <strong>' + escapeHtml(s.device_info || 'Unknown Device') + '</strong>'
-            + '              ' + (s.user_agent ? '<small class="text-muted" title="' + escapeHtml(s.user_agent) + '">' + escapeHtml(s.user_agent.substring(0, 50)) + '...</small>' : '')
-            + '            </div>'
-            + '          </div>'
-            + '        </td>'
-            + '        <td><span class="mono-ip">' + escapeHtml(s.ip_address || '—') + '</span></td>'
-            + '        <td><span class="mono-date">' + formatDate(s.created_at) + '</span></td>'
-            + '        <td><span class="mono-date">' + formatDate(s.last_active_at) + '</span></td>'
-            + '        <td>' + statusBadge + '</td>'
-            + '        <td style="text-align: right;">';
+            + '<div class="admin-detail-section">'
+            + '  <div class="admin-detail-section-title"><span class="material-symbols-outlined">fingerprint</span> Account Identity</div>'
+            + '  <div class="admin-detail-kv-grid">'
+            + '    <div class="admin-detail-kv-item"><small>Full Name</small><strong>' + escapeHtml(sel.display_name || sel.username) + '</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>Email Address</small><strong>' + escapeHtml(sel.email || '—') + '</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>Username Handle</small><strong>@' + escapeHtml(sel.username) + '</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>System Role</small><strong><span class="admin-badge ' + (sel.role === 'admin' ? 'badge-admin' : 'badge-user') + '">' + escapeHtml(sel.role) + '</span></strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>Account Standing</small><strong>' + (sel.is_active ? '<span class="admin-badge badge-active">Active</span>' : '<span class="admin-badge badge-inactive">Deactivated</span>') + '</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>Member Since</small><strong class="mono-date">' + formatDate(sel.created_at) + '</strong></div>'
+            + '  </div>'
+            + '</div>'
 
-          if (!isRevoked) {
-            html += ''
-              + '          <button class="btn btn-danger-outline btn-xs btn-revoke-session" data-user-id="' + escapeHtml(sel.id) + '" data-session-id="' + escapeHtml(s.id) + '" data-device="' + escapeHtml(s.device_info || s.ip_address || 'this device') + '">'
-              + '            <span class="material-symbols-outlined">logout</span> Revoke Session'
-              + '          </button>';
+            + '<div class="admin-detail-section">'
+            + '  <div class="admin-detail-section-title"><span class="material-symbols-outlined">insights</span> Presence &amp; Activity</div>'
+            + '  <div class="admin-detail-kv-grid">'
+            + '    <div class="admin-detail-kv-item"><small>Presence State</small><strong>' + (sel.is_online ? '<span class="presence-pulse-dot inline"></span> Online' : '<span class="presence-static-dot inline"></span> Offline') + '</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>Total Logins Recorded</small><strong>' + (sel.login_count || 0) + ' logins</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>Last Activity</small><strong>' + formatRelativeTime(sel.last_active_at) + '</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>Last Opened</small><strong>' + (sel.last_opened_at ? formatRelativeTime(sel.last_opened_at) : 'Not available') + '</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>' + (sel.is_online ? 'Current Session Duration' : 'Last Session Duration') + '</small><strong>' + escapeHtml(liveDurationText) + '</strong></div>'
+            + '    <div class="admin-detail-kv-item"><small>Active Sessions</small><strong>' + (sel.active_sessions_count || sessions.length || 0) + ' concurrent</strong></div>'
+            + '    <div class="admin-detail-kv-item" style="grid-column: 1 / -1;"><small>Approved Device Cryptographic Hash</small><span class="mono-text">' + (sel.approved_device_hash ? ('sha256:' + sel.approved_device_hash) : 'None (No specific device binding enforced)') + '</span></div>'
+            + '  </div>'
+            + '</div>';
+        }
+
+        // Sub-Tab 2: Sessions
+        if (state.selectedUserSubtab === 'sessions') {
+          html += ''
+            + '<div class="admin-session-header">'
+            + '  <div>'
+            + '    <h4>Active &amp; Historic Device Sessions</h4>'
+            + '    <p>View client sessions with exact local timestamps and remote revocation control.</p>'
+            + '  </div>'
+            + '  <button class="btn btn-danger-outline btn-sm" id="admin-drawer-revoke-all-btn" data-user-id="' + escapeHtml(sel.id) + '" data-user-name="' + escapeHtml(sel.display_name || sel.username) + '" ' + (sessions.length === 0 ? 'disabled' : '') + '>'
+            + '    <span class="material-symbols-outlined">power_settings_new</span> Logout from All Devices'
+            + '  </button>'
+            + '</div>'
+
+            + '<div class="admin-table-container">'
+            + '  <table class="admin-table">'
+            + '    <thead>'
+            + '      <tr>'
+            + '        <th>Device &amp; Browser</th>'
+            + '        <th>Client IP</th>'
+            + '        <th>Started (Local)</th>'
+            + '        <th>Last Active</th>'
+            + '        <th>State</th>'
+            + '        <th style="text-align: right;">Action</th>'
+            + '      </tr>'
+            + '    </thead>'
+            + '    <tbody>';
+
+          if (sessions.length === 0) {
+            html += '<tr><td colspan="6" class="admin-empty-cell"><p>No session activity recorded for this user.</p></td></tr>';
           } else {
-            html += '<span class="text-muted" style="font-size:12px;">Terminated</span>';
+            sessions.forEach(function (s) {
+              var isRevoked = s.is_revoked;
+              var statusBadge = isRevoked
+                ? '<span class="admin-badge badge-inactive">Revoked</span>'
+                : '<span class="admin-badge badge-active">Active</span>';
+
+              html += ''
+                + '<tr class="' + (isRevoked ? 'tr-revoked' : '') + '">'
+                + '  <td>'
+                + '    <div class="admin-device-info">'
+                + '      <span class="material-symbols-outlined admin-device-icon">computer</span>'
+                + '      <div>'
+                + '        <strong>' + escapeHtml(s.device_info || 'Browser Client') + '</strong>'
+                + '        ' + (s.user_agent ? '<small class="text-muted" title="' + escapeHtml(s.user_agent) + '">' + escapeHtml(s.user_agent.substring(0, 42)) + '...</small>' : '')
+                + '      </div>'
+                + '    </div>'
+                + '  </td>'
+                + '  <td><span class="mono-ip">' + escapeHtml(s.ip_address || '—') + '</span></td>'
+                + '  <td><span class="mono-date">' + formatDate(s.created_at) + '</span></td>'
+                + '  <td><span class="mono-date">' + formatRelativeTime(s.last_active_at) + '</span></td>'
+                + '  <td>' + statusBadge + '</td>'
+                + '  <td style="text-align: right;">';
+
+              if (!isRevoked) {
+                html += ''
+                  + '    <button class="btn btn-danger-outline btn-xs btn-revoke-session" data-user-id="' + escapeHtml(sel.id) + '" data-session-id="' + escapeHtml(s.id) + '" data-device="' + escapeHtml(s.device_info || 'this device') + '">'
+                  + '      <span class="material-symbols-outlined">logout</span> Revoke'
+                  + '    </button>';
+              } else {
+                html += '<span class="text-muted" style="font-size:11.5px;">Terminated</span>';
+              }
+
+              html += '  </td></tr>';
+            });
           }
 
           html += ''
-            + '        </td>'
-            + '      </tr>';
-        });
+            + '    </tbody>'
+            + '  </table>'
+            + '</div>';
+        }
+
+        // Sub-Tab 3: Requests
+        if (state.selectedUserSubtab === 'requests') {
+          html += ''
+            + '<div class="admin-session-header">'
+            + '  <div>'
+            + '    <h4>Access Approval History</h4>'
+            + '    <p>Review past and pending device verification requests for this account.</p>'
+            + '  </div>'
+            + '</div>';
+
+          if (requests.length === 0) {
+            html += '<div class="admin-empty-cell"><p>No access approval requests submitted by this user.</p></div>';
+          } else {
+            requests.forEach(function (r) {
+              var statusBadge = '';
+              if (r.status === 'pending') statusBadge = '<span class="admin-badge badge-pending">Pending Review</span>';
+              else if (r.status === 'approved') statusBadge = '<span class="admin-badge badge-approved">Approved</span>';
+              else statusBadge = '<span class="admin-badge badge-rejected">Rejected</span>';
+
+              html += ''
+                + '<div class="admin-detail-section" style="margin-bottom: 12px;">'
+                + '  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">'
+                + '    <strong style="color:#f2f7f4; font-size:13.5px;">' + formatDate(r.created_at) + '</strong>'
+                + '    ' + statusBadge
+                + '  </div>'
+                + '  <div class="admin-detail-kv-grid">'
+                + '    <div><small>Device Information</small><span>' + escapeHtml(r.device_info || 'Unknown') + '</span></div>'
+                + '    <div><small>Client IP</small><span class="mono-ip">' + escapeHtml(r.ip_address || '—') + '</span></div>'
+                + '    <div><small>Device Hash</small><span class="mono-text">' + escapeHtml(r.device_hash ? ('sha256:' + r.device_hash.substring(0, 16) + '...') : 'None') + '</span></div>'
+                + '    <div><small>Reviewer Notes</small><span>' + escapeHtml(r.review_notes || 'None') + '</span></div>'
+                + '  </div>'
+                + '</div>';
+            });
+          }
+        }
+
+        // Sub-Tab 4: Controls (Danger Zone)
+        if (state.selectedUserSubtab === 'controls') {
+          html += ''
+            + '<div class="admin-danger-zone">'
+            + '  <div class="admin-danger-title">'
+            + '    <span class="material-symbols-outlined">warning</span> Access &amp; Account Controls'
+            + '  </div>'
+            + '  <p style="font-size:12.5px; color:#cbd5e1; margin-bottom:14px;">Destructive administrative operations require elevated permissions and prompt for confirmation.</p>'
+
+            // 1. Deactivate / Reactivate
+            + '  <div class="admin-danger-row">'
+            + '    <div class="admin-danger-info">'
+            + '      <h5>' + (sel.is_active ? 'Deactivate Account' : 'Reactivate Account') + '</h5>'
+            + '      <p>' + (sel.is_active ? 'Immediately revoke all active sessions and block further authentication.' : 'Restore system login access for this account.') + '</p>'
+            + '    </div>'
+            + (sel.is_active
+                ? '<button class="btn btn-danger-outline btn-sm btn-drawer-toggle-status" data-user-id="' + escapeHtml(sel.id) + '" data-user-name="' + escapeHtml(sel.display_name || sel.username) + '" data-active="false" ' + (isSelfModal ? 'disabled title="You cannot deactivate your own account"' : '') + '><span class="material-symbols-outlined">block</span> Deactivate</button>'
+                : '<button class="btn btn-success-outline btn-sm btn-drawer-toggle-status" data-user-id="' + escapeHtml(sel.id) + '" data-user-name="' + escapeHtml(sel.display_name || sel.username) + '" data-active="true"><span class="material-symbols-outlined">check_circle</span> Reactivate</button>'
+              )
+            + '  </div>'
+
+            // 2. Force Logout All Sessions
+            + '  <div class="admin-danger-row">'
+            + '    <div class="admin-danger-info">'
+            + '      <h5>Invalidate Active Sessions</h5>'
+            + '      <p>Terminate all active browser and device sessions across all platforms.</p>'
+            + '    </div>'
+            + '    <button class="btn btn-danger-outline btn-sm btn-drawer-logout-all" data-user-id="' + escapeHtml(sel.id) + '" data-user-name="' + escapeHtml(sel.display_name || sel.username) + '" ' + (sessions.length === 0 ? 'disabled' : '') + '>'
+            + '      <span class="material-symbols-outlined">logout</span> Revoke All Sessions'
+            + '    </button>'
+            + '  </div>'
+            + '</div>';
+        }
       }
 
       html += ''
-        + '          </tbody>'
-        + '        </table>'
+        + '  </div>' // end drawer body
+
+        // Drawer Foot
+        + '  <div class="admin-drawer-foot">'
+        + '    <button class="btn btn-secondary" id="admin-drawer-foot-close">Close Drawer</button>'
+        + '  </div>'
+        + '</div>';
+    }
+
+    // -------------------------------------------------------------------------
+    // ELEVATED ADMIN RE-AUTHENTICATION UNLOCK MODAL
+    // -------------------------------------------------------------------------
+    if (state.showUnlockModal) {
+      html += ''
+        + '<div class="admin-modal-backdrop" id="admin-unlock-modal">'
+        + '  <div class="admin-modal admin-modal-sm">'
+        + '    <div class="admin-modal-head">'
+        + '      <div class="admin-modal-title">'
+        + '        <span class="material-symbols-outlined" style="color: #10b981;">lock</span>'
+        + '        <h2>Elevated Security Access</h2>'
+        + '      </div>'
+        + '      <button class="admin-modal-close" id="admin-unlock-close-btn" title="Cancel">×</button>'
+        + '    </div>'
+        + '    <div class="admin-modal-body admin-unlock-card">'
+        + '      <div class="admin-unlock-icon"><span class="material-symbols-outlined">lock_open</span></div>'
+        + '      <h3 style="font-size:16px; font-weight:700; color:#f2f7f4; margin-bottom:6px;">Administrator Re-authentication</h3>'
+        + '      <p style="font-size:12.5px; color:#94a39b; line-height:1.5;">Sensitive actions (status modification, remote revocation, access approvals) require elevated privileges. Enter your password to unlock the console for 15 minutes.</p>'
+        + (state.unlockError ? '<div class="admin-confirm-warning" style="margin-top:12px;">' + escapeHtml(state.unlockError) + '</div>' : '')
+        + '      <div class="admin-unlock-input-wrap">'
+        + '        <input type="password" id="admin-unlock-password" class="admin-unlock-input" placeholder="Enter administrator password..." autofocus>'
+        + '        <button type="button" class="admin-unlock-toggle-btn" id="admin-unlock-toggle-pwd" title="Toggle visibility"><span class="material-symbols-outlined" style="font-size:18px;">visibility</span></button>'
         + '      </div>'
         + '    </div>'
         + '    <div class="admin-modal-foot">'
-        + '      <button class="btn btn-secondary" id="admin-modal-foot-close-btn">Close</button>'
+        + '      <button class="btn btn-secondary" id="admin-unlock-cancel-btn">Cancel</button>'
+        + '      <button class="btn btn-primary" id="admin-unlock-submit-btn">'
+        + '        <span class="material-symbols-outlined">lock_open</span> Unlock Console'
+        + '      </button>'
         + '    </div>'
         + '  </div>'
         + '</div>';
     }
 
     // -------------------------------------------------------------------------
-    // Generic Confirmation Dialog Modal
+    // GENERIC CONFIRMATION DIALOG MODAL
     // -------------------------------------------------------------------------
     if (state.confirmation) {
       var c = state.confirmation;
@@ -840,7 +1332,7 @@
         + '  <div class="admin-modal admin-modal-sm">'
         + '    <div class="admin-modal-head">'
         + '      <div class="admin-modal-title">'
-        + '        <span class="material-symbols-outlined" style="color: ' + (c.isDanger ? '#b91c1c' : '#2D4A3E') + ';">' + (c.isDanger ? 'warning' : 'help') + '</span>'
+        + '        <span class="material-symbols-outlined" style="color: ' + (c.isDanger ? '#ef4444' : '#10b981') + ';">' + (c.isDanger ? 'warning' : 'help') + '</span>'
         + '        <h2>' + escapeHtml(c.title) + '</h2>'
         + '      </div>'
         + '    </div>'
@@ -867,12 +1359,29 @@
   // ---------------------------------------------------------------------------
 
   function bindEvents() {
-    // 1. Refresh Button
+    // 1. Refresh & Header Actions
     var refreshBtn = document.getElementById('admin-refresh-btn');
     if (refreshBtn) {
       refreshBtn.onclick = function () {
         if (state.activeTab === 'users') loadUsers();
+        else if (state.activeTab === 'requests') loadAccessRequests();
         else loadAuditLogs();
+      };
+    }
+
+    var lockBtn = document.getElementById('admin-lock-btn');
+    if (lockBtn) {
+      lockBtn.onclick = function () {
+        executeLock();
+      };
+    }
+
+    var unlockTriggerBtn = document.getElementById('admin-unlock-trigger-btn');
+    if (unlockTriggerBtn) {
+      unlockTriggerBtn.onclick = function () {
+        state.showUnlockModal = true;
+        state.unlockError = null;
+        refreshView();
       };
     }
 
@@ -884,15 +1393,17 @@
         if (tab && state.activeTab !== tab) {
           state.activeTab = tab;
           if (tab === 'users' && state.users.length === 0) loadUsers(1);
+          if (tab === 'requests') loadAccessRequests(1);
           if (tab === 'audit' && state.auditLogs.length === 0) loadAuditLogs(1);
           refreshView();
         }
       };
     });
 
-    // 3. User Search & Filter
+    // 3. User Search, Filter & Sort
     var searchInput = document.getElementById('admin-user-search');
     var statusSelect = document.getElementById('admin-status-filter');
+    var sortSelect = document.getElementById('admin-user-sort');
     var searchSubmit = document.getElementById('admin-search-submit-btn');
     var clearSearch = document.getElementById('admin-clear-search-btn');
 
@@ -900,6 +1411,7 @@
       searchSubmit.onclick = function () {
         if (searchInput) state.userQuery = searchInput.value;
         if (statusSelect) state.statusFilter = statusSelect.value;
+        if (sortSelect) state.userSort = sortSelect.value;
         loadUsers(1);
       };
     }
@@ -908,6 +1420,7 @@
         if (e.key === 'Enter') {
           state.userQuery = searchInput.value;
           if (statusSelect) state.statusFilter = statusSelect.value;
+          if (sortSelect) state.userSort = sortSelect.value;
           loadUsers(1);
         }
       };
@@ -922,6 +1435,12 @@
     if (statusSelect) {
       statusSelect.onchange = function () {
         state.statusFilter = statusSelect.value;
+        loadUsers(1);
+      };
+    }
+    if (sortSelect) {
+      sortSelect.onchange = function () {
+        state.userSort = sortSelect.value;
         refreshView();
       };
     }
@@ -941,29 +1460,66 @@
       };
     }
 
-    // 5. Inspect User & Detail
-    var inspectBtns = document.querySelectorAll('.btn-inspect-user');
-    inspectBtns.forEach(function (b) {
-      b.onclick = function () {
-        var uid = b.getAttribute('data-user-id');
+    // 5. Open User Detail (Clicking on user card or view button)
+    var userCards = document.querySelectorAll('.admin-user-card[data-user-id]');
+    userCards.forEach(function (card) {
+      card.onclick = function (e) {
+        // Prevent if clicking an internal button
+        if (e.target.closest('button')) return;
+        var uid = card.getAttribute('data-user-id');
         if (uid) loadUserDetail(uid);
       };
     });
 
-    // 6. Toggle Status (Activate / Deactivate) with Confirmation
-    var toggleStatusBtns = document.querySelectorAll('.btn-toggle-status');
-    toggleStatusBtns.forEach(function (b) {
-      b.onclick = function () {
-        var uid = b.getAttribute('data-user-id');
-        var uname = b.getAttribute('data-user-name');
-        var makeActive = b.getAttribute('data-active') === 'true';
+    var viewDetailBtns = document.querySelectorAll('.btn-view-details');
+    viewDetailBtns.forEach(function (btn) {
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        var uid = btn.getAttribute('data-user-id');
+        if (uid) loadUserDetail(uid);
+      };
+    });
+
+    // 6. User Detail Drawer Sub-Tabs & Close
+    var drawerSubtabs = document.querySelectorAll('.admin-drawer-subtab');
+    drawerSubtabs.forEach(function (tab) {
+      tab.onclick = function () {
+        var sub = tab.getAttribute('data-subtab');
+        if (sub) {
+          state.selectedUserSubtab = sub;
+          refreshView();
+        }
+      };
+    });
+
+    var drawerBackdrop = document.getElementById('admin-drawer-backdrop');
+    var drawerCloseBtn = document.getElementById('admin-drawer-close-btn');
+    var drawerFootClose = document.getElementById('admin-drawer-foot-close');
+
+    function closeDrawer() {
+      state.selectedUser = null;
+      state.selectedUserSubtab = 'overview';
+      refreshView();
+    }
+
+    if (drawerBackdrop) drawerBackdrop.onclick = closeDrawer;
+    if (drawerCloseBtn) drawerCloseBtn.onclick = closeDrawer;
+    if (drawerFootClose) drawerFootClose.onclick = closeDrawer;
+
+    // 7. Drawer Danger Zone Actions
+    var drawerToggleStatus = document.querySelector('.btn-drawer-toggle-status');
+    if (drawerToggleStatus) {
+      drawerToggleStatus.onclick = function () {
+        var uid = drawerToggleStatus.getAttribute('data-user-id');
+        var uname = drawerToggleStatus.getAttribute('data-user-name');
+        var makeActive = drawerToggleStatus.getAttribute('data-active') === 'true';
 
         if (!makeActive) {
           state.confirmation = {
-            title: 'Deactivate Account',
-            message: 'Are you sure you want to deactivate the user account for ' + uname + '?',
-            warning: 'Immediate Security Effect: All active device sessions will be invalidated immediately, and any subsequent authenticated requests will be blocked.',
-            confirmText: 'Deactivate User',
+            title: 'Deactivate User Account',
+            message: 'Are you sure you want to deactivate ' + uname + '?',
+            warning: 'All active sessions will be revoked immediately and subsequent logins will require administrator approval.',
+            confirmText: 'Deactivate Account',
             isDanger: true,
             onConfirm: function () {
               executeStatusChange({ id: uid, username: uname }, false);
@@ -971,10 +1527,10 @@
           };
         } else {
           state.confirmation = {
-            title: 'Activate Account',
-            message: 'Restore system access for ' + uname + '? The user will be permitted to authenticate and create new sessions.',
+            title: 'Reactivate User Account',
+            message: 'Restore login access for ' + uname + '?',
             warning: null,
-            confirmText: 'Activate User',
+            confirmText: 'Reactivate Account',
             isDanger: false,
             onConfirm: function () {
               executeStatusChange({ id: uid, username: uname }, true);
@@ -983,36 +1539,40 @@
         }
         refreshView();
       };
-    });
+    }
 
-    // 7. Modal Close Buttons
-    var modalCloseBtn = document.getElementById('admin-modal-close-btn');
-    var modalFootClose = document.getElementById('admin-modal-foot-close-btn');
-    if (modalCloseBtn) {
-      modalCloseBtn.onclick = function () {
-        state.selectedUser = null;
+    var drawerRevokeAll = document.querySelector('.btn-drawer-logout-all') || document.getElementById('admin-drawer-revoke-all-btn');
+    if (drawerRevokeAll) {
+      drawerRevokeAll.onclick = function () {
+        var uid = drawerRevokeAll.getAttribute('data-user-id');
+        var uname = drawerRevokeAll.getAttribute('data-user-name');
+
+        state.confirmation = {
+          title: 'Revoke All User Sessions',
+          message: 'Terminate all active sessions across all devices for ' + uname + '?',
+          warning: 'The user will be required to re-authenticate on all devices upon their next request.',
+          confirmText: 'Terminate All Sessions',
+          isDanger: true,
+          onConfirm: function () {
+            executeRevokeAllSessions(uid, uname);
+          }
+        };
         refreshView();
       };
     }
-    if (modalFootClose) {
-      modalFootClose.onclick = function () {
-        state.selectedUser = null;
-        refreshView();
-      };
-    }
 
-    // 8. Revoke Individual Session with Confirmation
+    // 8. Individual Session Revocation
     var revokeSessBtns = document.querySelectorAll('.btn-revoke-session');
-    revokeSessBtns.forEach(function (b) {
-      b.onclick = function () {
-        var uid = b.getAttribute('data-user-id');
-        var sid = b.getAttribute('data-session-id');
-        var dev = b.getAttribute('data-device');
+    revokeSessBtns.forEach(function (btn) {
+      btn.onclick = function () {
+        var uid = btn.getAttribute('data-user-id');
+        var sid = btn.getAttribute('data-session-id');
+        var dev = btn.getAttribute('data-device');
 
         state.confirmation = {
           title: 'Revoke Device Session',
           message: 'Revoke active session for ' + dev + '?',
-          warning: 'The user will be immediately logged out of this device upon their next request.',
+          warning: 'The user will be logged out of this device immediately.',
           confirmText: 'Revoke Session',
           isDanger: true,
           onConfirm: function () {
@@ -1023,28 +1583,122 @@
       };
     });
 
-    // 9. Revoke All Sessions with Confirmation
-    var revokeAllBtn = document.getElementById('admin-revoke-all-btn');
-    if (revokeAllBtn) {
-      revokeAllBtn.onclick = function () {
-        var uid = revokeAllBtn.getAttribute('data-user-id');
-        var uname = revokeAllBtn.getAttribute('data-user-name');
+    // 9. Access Requests Tab Actions
+    var reqFilter = document.getElementById('admin-requests-filter');
+    if (reqFilter) {
+      reqFilter.onchange = function () {
+        state.requestsFilter = reqFilter.value;
+        loadAccessRequests(1);
+      };
+    }
+
+    var reqRefresh = document.getElementById('admin-requests-refresh-btn');
+    if (reqRefresh) {
+      reqRefresh.onclick = function () {
+        loadAccessRequests(state.requestsPage);
+      };
+    }
+
+    var approveBtns = document.querySelectorAll('.btn-approve-request');
+    approveBtns.forEach(function (btn) {
+      btn.onclick = function () {
+        var reqId = btn.getAttribute('data-req-id');
+        var email = btn.getAttribute('data-user-email');
 
         state.confirmation = {
-          title: 'Revoke All Device Sessions',
-          message: 'Terminate all active sessions across all devices for ' + uname + '?',
-          warning: 'This will invalidate every active access token for this user. The user will be required to re-authenticate on all devices.',
-          confirmText: 'Logout All Devices',
-          isDanger: true,
+          title: 'Approve Access & Reactivate',
+          message: 'Approve access request for ' + email + '? The account will be reactivated and bound to this device.',
+          warning: null,
+          confirmText: 'Approve & Reactivate',
+          isDanger: false,
           onConfirm: function () {
-            executeRevokeAllSessions(uid, uname);
+            executeApproveRequest(reqId, 'Approved by administrator via Institutional Oversight.');
           }
         };
         refreshView();
       };
+    });
+
+    var rejectBtns = document.querySelectorAll('.btn-reject-request');
+    rejectBtns.forEach(function (btn) {
+      btn.onclick = function () {
+        var reqId = btn.getAttribute('data-req-id');
+        var email = btn.getAttribute('data-user-email');
+
+        state.confirmation = {
+          title: 'Reject Access Request',
+          message: 'Reject access request for ' + email + '?',
+          warning: 'The account will remain deactivated and this request will be marked as rejected.',
+          confirmText: 'Reject Request',
+          isDanger: true,
+          onConfirm: function () {
+            executeRejectRequest(reqId, 'Rejected by administrator.');
+          }
+        };
+        refreshView();
+      };
+    });
+
+    var reqPrev = document.getElementById('admin-req-prev');
+    var reqNext = document.getElementById('admin-req-next');
+    if (reqPrev) {
+      reqPrev.onclick = function () {
+        if (state.requestsPage > 1) loadAccessRequests(state.requestsPage - 1);
+      };
+    }
+    if (reqNext) {
+      reqNext.onclick = function () {
+        var totalReqPages = Math.ceil(state.requestsTotal / state.requestsLimit) || 1;
+        if (state.requestsPage < totalReqPages) loadAccessRequests(state.requestsPage + 1);
+      };
     }
 
-    // 10. Confirmation Modal Buttons
+    // 10. Admin Unlock Modal Controls
+    var unlockSubmit = document.getElementById('admin-unlock-submit-btn');
+    var unlockInput = document.getElementById('admin-unlock-password');
+    var unlockCancel = document.getElementById('admin-unlock-cancel-btn');
+    var unlockClose = document.getElementById('admin-unlock-close-btn');
+    var unlockTogglePwd = document.getElementById('admin-unlock-toggle-pwd');
+
+    if (unlockSubmit && unlockInput) {
+      unlockSubmit.onclick = function () {
+        var val = unlockInput.value;
+        if (val) executeUnlock(val);
+      };
+      unlockInput.onkeydown = function (e) {
+        if (e.key === 'Enter') {
+          var val = unlockInput.value;
+          if (val) executeUnlock(val);
+        }
+      };
+    }
+    if (unlockCancel) {
+      unlockCancel.onclick = function () {
+        state.showUnlockModal = false;
+        state.unlockError = null;
+        refreshView();
+      };
+    }
+    if (unlockClose) {
+      unlockClose.onclick = function () {
+        state.showUnlockModal = false;
+        state.unlockError = null;
+        refreshView();
+      };
+    }
+    if (unlockTogglePwd && unlockInput) {
+      unlockTogglePwd.onclick = function () {
+        if (unlockInput.type === 'password') {
+          unlockInput.type = 'text';
+          unlockTogglePwd.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">visibility_off</span>';
+        } else {
+          unlockInput.type = 'password';
+          unlockTogglePwd.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">visibility</span>';
+        }
+      };
+    }
+
+    // 11. Generic Confirmation Modal Controls
     var confirmCancel = document.getElementById('admin-confirm-cancel-btn');
     var confirmAction = document.getElementById('admin-confirm-action-btn');
     if (confirmCancel) {
@@ -1061,7 +1715,7 @@
       };
     }
 
-    // 11. Audit Log Filter & Pagination
+    // 12. Audit Log Filters & Pagination
     var auditSearchInput = document.getElementById('admin-audit-user-search');
     var auditActionSelect = document.getElementById('admin-audit-action-filter');
     var auditStatusSelect = document.getElementById('admin-audit-status-filter');
@@ -1112,7 +1766,7 @@
       };
     }
 
-    // 12. Client-Side Live Duration Updates (15s interval, zero backend polling)
+    // 13. Client-Side Live Duration Updates (15s interval, zero backend polling)
     if (state.durationTimerId) {
       clearInterval(state.durationTimerId);
       state.durationTimerId = null;
@@ -1126,7 +1780,7 @@
         var startTime = new Date(startIso).getTime();
         if (isNaN(startTime)) return;
         var elapsedSec = Math.max(0, Math.floor((now - startTime) / 1000));
-        el.textContent = '(Current session: ' + formatDuration(elapsedSec) + ')';
+        el.textContent = '(Current: ' + formatDuration(elapsedSec) + ')';
       });
     }, 15000);
   }
@@ -1140,9 +1794,12 @@
     state.totalUsers = 0;
     state.metrics = null;
     state.selectedUser = null;
+    state.accessRequests = [];
+    state.requestsTotal = 0;
     state.auditLogs = [];
     state.auditTotal = 0;
     state.confirmation = null;
+    state.showUnlockModal = false;
     state.isUnauthorized = false;
     state.error = null;
   }
@@ -1152,7 +1809,6 @@
   // ---------------------------------------------------------------------------
   window.AYUR_ADMIN = {
     render: function () {
-      // If users list is empty and not currently loading, trigger initial load
       if (state.users.length === 0 && !state.isLoading && !state.isUnauthorized) {
         loadUsers(1);
       }
@@ -1160,6 +1816,7 @@
     },
     bindEvents: bindEvents,
     loadUsers: loadUsers,
+    loadAccessRequests: loadAccessRequests,
     loadAuditLogs: loadAuditLogs,
     clearData: clearData,
     getState: function () { return state; }

@@ -83,6 +83,9 @@ class UserSession(Base):
     idle_timeout_seconds = Column(Integer, nullable=False, default=1800)
     max_lifetime_seconds = Column(Integer, nullable=False, default=43200)
 
+    # Admin Console Unlock State (Elevated Access)
+    admin_unlocked_until = Column(DateTime, nullable=True)
+
     # Timestamps
     created_at = Column(DateTime, nullable=False, default=_now_utc)
     last_active_at = Column(DateTime, nullable=False, default=_now_utc)
@@ -90,3 +93,46 @@ class UserSession(Base):
 
     # Relationships
     user = relationship("User", back_populates="sessions", lazy="select")
+
+
+class AccessRequest(Base):
+    """Access / Reactivation request for deactivated accounts.
+
+    Tracks device-level enrollment, client context, and administrator decisions.
+    """
+
+    __tablename__ = "access_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    public_id = Column(String(32), unique=True, nullable=False, default=_uuid, index=True)
+
+    # Requester
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_email = Column(String(200), nullable=False, index=True)
+    user_display_name = Column(String(200), nullable=False, default="")
+
+    # Status: PENDING, APPROVED, REJECTED
+    status = Column(String(20), nullable=False, default="PENDING", index=True)
+
+    # Request details
+    reason = Column(Text, nullable=True)
+
+    # Device binding (cryptographically hashed)
+    device_id = Column(String(100), nullable=True)  # Client-supplied opaque ID (sanitized)
+    device_hash = Column(String(64), nullable=True, index=True)  # SHA-256 of persistent device token
+    device_info = Column(String(200), nullable=True)  # Parsed Browser / OS
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+
+    # Review metadata
+    reviewer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewer_username = Column(String(100), nullable=True)
+    review_notes = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, nullable=False, default=_now_utc, index=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id], back_populates="access_requests")
+

@@ -20,7 +20,7 @@ from api.models.decision import DecisionDashboardSnapshot
 from api.models.monitoring import (
     MonitoringConfig, MonitoringSource, MonitoringRun, ChangeRecord, Alert,
 )
-from api.models.security import AuditLog, UserSession
+from api.models.security import AuditLog, UserSession, AccessRequest
 from api.models.review import ReviewRequest, ReviewItem, ReviewDecision, ReviewHistory
 
 __all__ = [
@@ -36,6 +36,7 @@ __all__ = [
     "Risk", "RiskEvidence", "RiskResolution", "SelfExtensionRequest", "RiskAssessment",
     "DecisionDashboardSnapshot",
     "MonitoringConfig", "MonitoringSource", "MonitoringRun", "ChangeRecord", "Alert",
-    "AuditLog", "UserSession",
+    "AuditLog", "UserSession", "AccessRequest",
     "ReviewRequest", "ReviewItem", "ReviewDecision", "ReviewHistory",
 ]
+

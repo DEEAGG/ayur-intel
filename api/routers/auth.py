@@ -34,7 +34,9 @@ from api.services.auth_service import (
     logout_user_session,
     logout_all_user_sessions,
     update_session_preferences,
+    submit_access_request,
 )
+
 
 logger = logging.getLogger("ayur_intel.routers.auth")
 
@@ -56,6 +58,14 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, description="Password")
     session_timeout: Optional[str] = Field(None, description="Inactivity timeout: 5m, 15m, 30m, 1h, 2h, 4h")
     max_lifetime: Optional[str] = Field(None, description="Max session lifetime: 8h, 12h, 24h")
+    device_id: Optional[str] = Field(None, description="Opaque client device enrollment ID")
+
+
+class AccessRequestSubmission(BaseModel):
+    email: str = Field(..., description="Account Email")
+    password: str = Field(..., min_length=1, description="Account Password")
+    reason: Optional[str] = Field(None, max_length=500, description="Optional reason for access request")
+    device_id: Optional[str] = Field(None, max_length=100, description="Opaque client device enrollment ID")
 
 
 class SessionSettingsRequest(BaseModel):
@@ -121,7 +131,31 @@ def login(
         user_agent=user_agent,
         session_timeout=req.session_timeout,
         max_lifetime=req.max_lifetime,
+        device_id=req.device_id,
     )
+
+
+@router.post("/access-request", summary="Submit or retrieve account access request")
+def submit_request(
+    req: AccessRequestSubmission,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Submit access or reactivation request for a deactivated account."""
+    client_ip = get_client_ip(request)
+    check_auth_rate_limit(ip=client_ip, identifier=req.email, action="access_request")
+    user_agent = request.headers.get("User-Agent")
+
+    return submit_access_request(
+        db=db,
+        email=req.email,
+        password=req.password,
+        reason=req.reason,
+        device_id=req.device_id,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
 
 
 @router.post("/logout", summary="Log out current user session")

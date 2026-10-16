@@ -46,6 +46,26 @@
     }
   }
 
+  function getDeviceId() {
+    try {
+      var devId = localStorage.getItem('ayur_device_id');
+      if (!devId) {
+        var arr = new Uint8Array(16);
+        if (window.crypto && window.crypto.getRandomValues) {
+          window.crypto.getRandomValues(arr);
+        } else {
+          for (var i = 0; i < 16; i++) arr[i] = Math.floor(Math.random() * 256);
+        }
+        devId = Array.from(arr, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+        localStorage.setItem('ayur_device_id', devId);
+      }
+      return devId;
+    } catch (_) {
+      return 'dev_' + Math.random().toString(36).substring(2, 15);
+    }
+  }
+
+
   function setToken(token, rememberMe) {
     try {
       if (token) {
@@ -485,10 +505,11 @@
 
       var sessTimeout = settingsState.sessionTimeout || '30m';
       var maxLifetime = settingsState.maxSessionLifetime || '12h';
+      var devId = getDeviceId();
 
       var payload = CURRENT_MODE === 'signup'
         ? { full_name: fullName, email: email, password: password }
-        : { email: email, password: password, session_timeout: sessTimeout, max_lifetime: maxLifetime };
+        : { email: email, password: password, session_timeout: sessTimeout, max_lifetime: maxLifetime, device_id: devId };
 
       var response = await fetch(endpoint, {
         method: 'POST',
@@ -536,9 +557,19 @@
         }
       } else {
         var errorDetail = data.detail || (CURRENT_MODE === 'signup' ? 'Registration failed. Please check your information.' : 'Invalid email or password.');
-        setAlert(errorDetail, 'error');
-        showToastMsg('❌ ' + errorDetail, 'error');
+        if (response.status === 403 && (errorDetail.indexOf('Approval pending by Admin') !== -1 || errorDetail.indexOf('deactivated') !== -1)) {
+          setAlert(
+            '<strong>Approval Pending by Admin</strong><br>'
+            + 'Your account is currently deactivated. Your access request has been submitted for administrator review. You will be able to sign in once access is approved.',
+            'warning'
+          );
+          showToastMsg('⏳ Approval pending by Admin for this account', 'warning');
+        } else {
+          setAlert(errorDetail, 'error');
+          showToastMsg('❌ ' + errorDetail, 'error');
+        }
       }
+
     } catch (err) {
       console.error('Auth request exception:', err);
       setAlert('Network error occurred. Please check your connection and try again.', 'error');

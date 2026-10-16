@@ -107,6 +107,9 @@ def init_db() -> None:
             ("knowledge_evidence", "license_note", "TEXT"),
             ("user_sessions", "idle_timeout_seconds", "INTEGER DEFAULT 1800"),
             ("user_sessions", "max_lifetime_seconds", "INTEGER DEFAULT 43200"),
+            ("user_sessions", "admin_unlocked_until", "DATETIME" if is_sqlite else "TIMESTAMP WITH TIME ZONE"),
+            ("users", "login_count", "INTEGER DEFAULT 0"),
+            ("users", "approved_device_hash", "VARCHAR(64)"),
         ]
 
         for table, col, col_type in new_cols:
@@ -144,7 +147,13 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_user_sessions_public_id ON user_sessions (public_id)",
             "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_id ON user_sessions (user_id)",
             "CREATE INDEX IF NOT EXISTS ix_user_sessions_is_revoked ON user_sessions (is_revoked)",
+            "CREATE INDEX IF NOT EXISTS ix_access_requests_public_id ON access_requests (public_id)",
+            "CREATE INDEX IF NOT EXISTS ix_access_requests_user_id ON access_requests (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_access_requests_status ON access_requests (status)",
+            "CREATE INDEX IF NOT EXISTS ix_access_requests_created_at ON access_requests (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_access_requests_device_hash ON access_requests (device_hash)",
         ]
+
 
 
         for idx_sql in indexes:

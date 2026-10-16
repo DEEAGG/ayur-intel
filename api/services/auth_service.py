@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from api.models.models import User
-from api.models.security import UserSession
+from api.models.security import UserSession, AccessRequest
 from api.services.audit_service import log_action
 from api.core.config import settings
 
@@ -289,9 +289,12 @@ def user_to_dict(user: User) -> Dict[str, Any]:
         "display_name": user.display_name or user.username,
         "email": user.email or "",
         "role": getattr(user, "role", "user") or "user",
+        "is_active": bool(getattr(user, "is_active", True)),
+        "login_count": getattr(user, "login_count", 0) or 0,
         "avatar_url": getattr(user, "avatar_url", None) or "",
         "created_at": user.created_at.isoformat() if user.created_at else "",
     }
+
 
 
 def parse_device_info(user_agent: Optional[str]) -> str:
@@ -439,6 +442,7 @@ def login_user(
     user_agent: Optional[str] = None,
     session_timeout: Optional[str] = None,
     max_lifetime: Optional[str] = None,
+    device_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Authenticate an existing user with email/username and password."""
     clean_identifier = email_or_username.strip().lower()
@@ -451,10 +455,10 @@ def login_user(
         .first()
     )
 
-    # If account does not exist, has no password set, or is inactive:
+    # If account does not exist or has no password set:
     # run dummy password hash verification to minimize timing discrepancy, then fail.
     # An account without a configured password must NEVER become claimable through login.
-    if not user or not user.hashed_password or not user.is_active:
+    if not user or not user.hashed_password:
         verify_password(password, DUMMY_PASSWORD_HASH)
         try:
             log_action(
@@ -464,7 +468,7 @@ def login_user(
                 ip_address=ip_address,
                 user_agent=user_agent,
                 status="FAILED",
-                detail="Invalid credentials or account inactive",
+                detail="Invalid credentials",
                 metadata={"identifier": clean_identifier},
             )
             db.commit()
@@ -494,11 +498,66 @@ def login_user(
             db.rollback()
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # Successful login: create active session
+    # If password is correct but account is deactivated:
+    # Do not issue token; record/retrieve access request and notify user
+    if not user.is_active:
+        device_hash = hashlib.sha256(device_id.strip().encode("utf-8")).hexdigest() if device_id and device_id.strip() else None
+        pending_req = (
+            db.query(AccessRequest)
+            .filter(AccessRequest.user_id == user.id, AccessRequest.status == "PENDING")
+            .order_by(AccessRequest.created_at.desc())
+            .first()
+        )
+        if not pending_req:
+            pending_req = AccessRequest(
+                user_id=user.id,
+                user_email=user.email or "",
+                user_display_name=user.display_name or user.username,
+                status="PENDING",
+                device_id=device_id.strip()[:100] if device_id and device_id.strip() else None,
+                device_hash=device_hash,
+                device_info=parse_device_info(user_agent),
+                ip_address=ip_address,
+                user_agent=user_agent,
+                reason="Automatic access request on sign-in attempt",
+            )
+            db.add(pending_req)
+            db.commit()
+            db.refresh(pending_req)
+
+        try:
+            log_action(
+                db,
+                action="LOGIN_DENIED",
+                resource_type="AUTH",
+                user_id=user.id,
+                user_public_id=user.public_id,
+                username=user.username,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="DENIED",
+                detail="Approval pending by Admin. Account is currently deactivated.",
+                metadata={"identifier": clean_identifier, "request_id": pending_req.public_id},
+            )
+            db.commit()
+        except Exception as e:
+            logger.debug("Failed to record login denied audit log: %s", e)
+            db.rollback()
+
+        raise HTTPException(
+            status_code=403,
+            detail="Approval pending by Admin. Your account is currently deactivated. Your access request has been submitted for administrator review. You will be able to sign in once access is approved.",
+        )
+
+    # Successful login: track login count & create active session
+    user.login_count = (getattr(user, "login_count", 0) or 0) + 1
     idle_timeout_seconds, max_lifetime_seconds = parse_timeout_settings(session_timeout, max_lifetime)
     now_utc = datetime.now(timezone.utc)
     expires_at = now_utc + timedelta(seconds=max_lifetime_seconds)
     device_info = parse_device_info(user_agent)
+
+    # Admin sessions receive an initial 15-minute elevated unlock window upon password authentication
+    admin_unlocked = (now_utc + timedelta(minutes=15)) if getattr(user, "role", "user") == "admin" else None
 
     session = UserSession(
         user_id=user.id,
@@ -506,6 +565,7 @@ def login_user(
         user_agent=user_agent,
         device_info=device_info,
         is_revoked=False,
+        admin_unlocked_until=admin_unlocked,
         idle_timeout_seconds=idle_timeout_seconds,
         max_lifetime_seconds=max_lifetime_seconds,
         created_at=now_utc,
@@ -515,6 +575,7 @@ def login_user(
     db.add(session)
     db.commit()
     db.refresh(session)
+
 
     token = create_access_token(
         {
@@ -657,7 +718,16 @@ def get_user_from_token(
             except Exception:
                 db.rollback()
 
+    user._current_session = session
+    if request:
+        try:
+            request.state.current_session = session
+            request.state.current_user = user
+        except Exception:
+            pass
+
     return user
+
 
 
 def logout_user_session(
@@ -917,4 +987,99 @@ def delete_user_account(db: Session, user: User) -> Dict[str, Any]:
     db.commit()
     logger.info("Deleted user account #%s (%s)", user_id, display_name)
     return {"message": "Account deleted successfully"}
+
+
+def submit_access_request(
+    db: Session,
+    email: str,
+    password: str,
+    reason: Optional[str] = None,
+    device_id: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Submit or retrieve an access / reactivation request for a deactivated account."""
+    clean_email = email.strip().lower()
+    user = db.query(User).filter(User.email.ilike(clean_email)).first()
+    if not user or not user.hashed_password:
+        verify_password(password, DUMMY_PASSWORD_HASH)
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    if user.is_active:
+        return {
+            "status": "already_active",
+            "message": "Account is already active. Please sign in normally.",
+            "is_active": True,
+        }
+
+    device_hash = hashlib.sha256(device_id.strip().encode("utf-8")).hexdigest() if device_id and device_id.strip() else None
+
+    # Check for existing pending request to avoid duplicates
+    pending = (
+        db.query(AccessRequest)
+        .filter(AccessRequest.user_id == user.id, AccessRequest.status == "PENDING")
+        .order_by(AccessRequest.created_at.desc())
+        .first()
+    )
+    if pending:
+        if reason and reason.strip():
+            pending.reason = reason.strip()
+        if device_id and device_id.strip():
+            pending.device_id = device_id.strip()[:100]
+            pending.device_hash = device_hash
+        db.commit()
+        db.refresh(pending)
+        return {
+            "status": "pending",
+            "request_id": pending.public_id,
+            "message": "Approval pending by Admin. Your access request is currently pending administrator review.",
+            "requested_at": pending.created_at.isoformat(),
+            "device_info": pending.device_info,
+        }
+
+    new_req = AccessRequest(
+        user_id=user.id,
+        user_email=user.email or "",
+        user_display_name=user.display_name or user.username,
+        status="PENDING",
+        reason=reason.strip() if reason and reason.strip() else "Reactivation requested",
+        device_id=device_id.strip()[:100] if device_id and device_id.strip() else None,
+        device_hash=device_hash,
+        device_info=parse_device_info(user_agent),
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+    db.add(new_req)
+    try:
+        log_action(
+            db,
+            action="ACCESS_REQUEST_SUBMIT",
+            resource_type="ACCESS_REQUEST",
+            resource_id=new_req.public_id,
+            user_id=user.id,
+            user_public_id=user.public_id,
+            username=user.username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status="SUCCESS",
+            detail="User submitted account reactivation request",
+            metadata={"email": clean_email, "device_info": new_req.device_info},
+        )
+        db.commit()
+        db.refresh(new_req)
+    except Exception as e:
+        logger.debug("Failed to record access request audit log: %s", e)
+        db.rollback()
+        raise
+
+    return {
+        "status": "pending",
+        "request_id": new_req.public_id,
+        "message": "Approval pending by Admin. Your access request has been submitted for administrator review. You will be able to sign in once access is approved.",
+        "requested_at": new_req.created_at.isoformat(),
+        "device_info": new_req.device_info,
+    }
+
 
