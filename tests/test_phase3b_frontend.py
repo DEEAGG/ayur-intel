@@ -149,6 +149,12 @@ class TestPhase3BAdminConsoleUI(unittest.TestCase):
         self.assertIn("renderAdminConsole", content)
         self.assertIn("/api/admin/users", content)
         self.assertIn("/api/admin/audit-logs", content)
+        self.assertIn("btn-approve-request", content)
+        self.assertIn("btn-reject-request", content)
+        self.assertIn("executeApproveRequest", content)
+        self.assertIn("executeRejectRequest", content)
+        self.assertIn("Accept / Approve", content)
+        self.assertIn("processingRequestId", content)
 
     def test_styles_css_contains_admin_console_rules(self):
         """styles.css must include .admin-* component styling."""

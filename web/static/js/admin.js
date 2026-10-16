@@ -48,6 +48,8 @@
     requestsLimit: 10,
     requestsFilter: 'all', // 'all' | 'pending' | 'approved' | 'rejected'
     isRequestsLoading: false,
+    processingRequestId: null,
+    processingAction: null,
 
     // Global Active Sessions Tab
     allSessions: [],
@@ -496,7 +498,20 @@
     }
   }
 
+  async function loadMetrics() {
+    try {
+      var metrics = await callApi('/api/admin/metrics');
+      if (metrics) state.metrics = metrics;
+      refreshView();
+    } catch (_) {}
+  }
+
   async function executeApproveRequest(reqId, notes) {
+    if (state.processingRequestId) return;
+    state.processingRequestId = reqId;
+    state.processingAction = 'approve';
+    refreshView();
+
     try {
       var res = await callApi('/api/admin/requests/' + encodeURIComponent(reqId) + '/approve', {
         method: 'POST',
@@ -504,16 +519,29 @@
         body: JSON.stringify({ review_notes: notes || 'Access request approved by administrator.' })
       });
       showToast(res.message || 'Access request approved. Account reactivated and device bound.', 'success');
+      await loadMetrics();
       await loadAccessRequests();
       await loadUsers();
+      if (state.selectedUser && state.selectedUser.id) {
+        await loadUserDetail(state.selectedUser.id);
+      }
     } catch (e) {
       if (e.status !== 423) {
         showToast('Failed to approve request: ' + (e.message || 'Server error'), 'error');
       }
+    } finally {
+      state.processingRequestId = null;
+      state.processingAction = null;
+      refreshView();
     }
   }
 
   async function executeRejectRequest(reqId, notes) {
+    if (state.processingRequestId) return;
+    state.processingRequestId = reqId;
+    state.processingAction = 'reject';
+    refreshView();
+
     try {
       var res = await callApi('/api/admin/requests/' + encodeURIComponent(reqId) + '/reject', {
         method: 'POST',
@@ -521,12 +549,20 @@
         body: JSON.stringify({ review_notes: notes || 'Access request rejected by administrator.' })
       });
       showToast(res.message || 'Access request rejected.', 'info');
+      await loadMetrics();
       await loadAccessRequests();
       await loadUsers();
+      if (state.selectedUser && state.selectedUser.id) {
+        await loadUserDetail(state.selectedUser.id);
+      }
     } catch (e) {
       if (e.status !== 423) {
         showToast('Failed to reject request: ' + (e.message || 'Server error'), 'error');
       }
+    } finally {
+      state.processingRequestId = null;
+      state.processingAction = null;
+      refreshView();
     }
   }
 
@@ -1226,11 +1262,15 @@
         html += '<div class="admin-empty-cell"><div class="admin-empty-icon"><span class="material-symbols-outlined">task_alt</span></div><p>No access requests matching current filter.</p></div>';
       } else {
         state.accessRequests.forEach(function (req) {
-          var isPending = req.status === 'pending';
+          var reqStatus = (req.status || '').toUpperCase();
+          var isPending = reqStatus === 'PENDING';
+          var isApproved = reqStatus === 'APPROVED';
+          var isRejected = reqStatus === 'REJECTED';
+
           var statusBadge = '';
-          if (req.status === 'pending') {
+          if (isPending) {
             statusBadge = '<span class="admin-badge badge-pending"><span class="admin-badge-dot"></span> Pending Review</span>';
-          } else if (req.status === 'approved') {
+          } else if (isApproved) {
             statusBadge = '<span class="admin-badge badge-approved"><span class="admin-badge-dot"></span> Approved</span>';
           } else {
             statusBadge = '<span class="admin-badge badge-rejected"><span class="admin-badge-dot"></span> Rejected</span>';
@@ -1255,22 +1295,32 @@
             + '  </div>';
 
           if (isPending) {
+            var isProcessingThis = state.processingRequestId === req.id;
+            var anyProcessing = !!state.processingRequestId;
+            var isApproving = isProcessingThis && state.processingAction === 'approve';
+            var isRejecting = isProcessingThis && state.processingAction === 'reject';
+
             html += ''
               + '  <div class="admin-request-foot">'
               + '    <span class="text-muted" style="font-size:12px;">Action requires elevated administrator authorization.</span>'
               + '    <div class="admin-action-btn-group">'
-              + '      <button class="btn btn-danger-outline btn-sm btn-reject-request" data-req-id="' + escapeHtml(req.id) + '" data-user-email="' + escapeHtml(req.user_email) + '">'
-              + '        <span class="material-symbols-outlined">cancel</span> Reject Request'
+              + '      <button class="btn btn-danger-outline btn-sm btn-reject-request" data-req-id="' + escapeHtml(req.id) + '" data-user-email="' + escapeHtml(req.user_email) + '"' + (anyProcessing ? ' disabled' : '') + '>'
+              + (isRejecting
+                  ? '<div class="admin-spinner sm" style="display:inline-block; margin-right:6px; vertical-align:middle; width:13px; height:13px;"></div> Rejecting...'
+                  : '<span class="material-symbols-outlined">cancel</span> Reject Request')
               + '      </button>'
-              + '      <button class="btn btn-success-outline btn-sm btn-approve-request" data-req-id="' + escapeHtml(req.id) + '" data-user-email="' + escapeHtml(req.user_email) + '">'
-              + '        <span class="material-symbols-outlined">check_circle</span> Approve &amp; Reactivate'
+              + '      <button class="btn btn-primary btn-sm btn-approve-request" data-req-id="' + escapeHtml(req.id) + '" data-user-email="' + escapeHtml(req.user_email) + '"' + (anyProcessing ? ' disabled' : '') + '>'
+              + (isApproving
+                  ? '<div class="admin-spinner sm" style="display:inline-block; margin-right:6px; vertical-align:middle; width:13px; height:13px;"></div> Approving...'
+                  : '<span class="material-symbols-outlined">check_circle</span> Accept / Approve')
               + '      </button>'
               + '    </div>'
               + '  </div>';
           } else {
+            var decisionLabel = isApproved ? 'Approved' : 'Rejected';
             html += ''
               + '  <div class="admin-request-foot">'
-              + '    <span class="mono-text" style="font-size:11.5px;">Reviewed by @' + escapeHtml(req.reviewer_username || 'admin') + ' on ' + formatDate(req.reviewed_at) + ' · Notes: ' + escapeHtml(req.review_notes || 'None') + '</span>'
+              + '    <span class="mono-text" style="font-size:11.5px;">' + decisionLabel + ' by @' + escapeHtml(req.reviewer_username || 'admin') + ' on ' + formatDate(req.reviewed_at) + ' · Notes: ' + escapeHtml(req.review_notes || 'None') + '</span>'
               + '  </div>';
           }
 
@@ -1659,10 +1709,31 @@
             html += '<div class="admin-empty-cell"><p>No access approval requests submitted by this user.</p></div>';
           } else {
             requests.forEach(function (r) {
+              var rStatus = (r.status || '').toUpperCase();
+              var isPending = rStatus === 'PENDING';
+              var isApproved = rStatus === 'APPROVED';
               var statusBadge = '';
-              if (r.status === 'pending') statusBadge = '<span class="admin-badge badge-pending">Pending Review</span>';
-              else if (r.status === 'approved') statusBadge = '<span class="admin-badge badge-approved">Approved</span>';
+              if (isPending) statusBadge = '<span class="admin-badge badge-pending">Pending Review</span>';
+              else if (isApproved) statusBadge = '<span class="admin-badge badge-approved">Approved</span>';
               else statusBadge = '<span class="admin-badge badge-rejected">Rejected</span>';
+
+              var isProcessingThis = state.processingRequestId === r.id;
+              var anyProcessing = !!state.processingRequestId;
+              var isApproving = isProcessingThis && state.processingAction === 'approve';
+              var isRejecting = isProcessingThis && state.processingAction === 'reject';
+
+              var drawerActions = '';
+              if (isPending) {
+                drawerActions = ''
+                  + '<div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">'
+                  + '  <button class="btn btn-danger-outline btn-xs btn-reject-request" data-req-id="' + escapeHtml(r.id) + '" data-user-email="' + escapeHtml(sel.email || '') + '"' + (anyProcessing ? ' disabled' : '') + '>'
+                  + (isRejecting ? '<div class="admin-spinner sm" style="display:inline-block; margin-right:4px; vertical-align:middle; width:11px; height:11px;"></div> Rejecting...' : '<span class="material-symbols-outlined" style="font-size:12px;">cancel</span> Reject')
+                  + '  </button>'
+                  + '  <button class="btn btn-primary btn-xs btn-approve-request" data-req-id="' + escapeHtml(r.id) + '" data-user-email="' + escapeHtml(sel.email || '') + '"' + (anyProcessing ? ' disabled' : '') + '>'
+                  + (isApproving ? '<div class="admin-spinner sm" style="display:inline-block; margin-right:4px; vertical-align:middle; width:11px; height:11px;"></div> Approving...' : '<span class="material-symbols-outlined" style="font-size:12px;">check_circle</span> Accept / Approve')
+                  + '  </button>'
+                  + '</div>';
+              }
 
               html += ''
                 + '<div class="admin-detail-section" style="margin-bottom: 12px;">'
@@ -1676,6 +1747,7 @@
                 + '    <div><small>Device Hash</small><span class="mono-text">' + escapeHtml(r.device_hash ? ('sha256:' + r.device_hash.substring(0, 16) + '...') : 'None') + '</span></div>'
                 + '    <div><small>Reviewer Notes</small><span>' + escapeHtml(r.review_notes || 'None') + '</span></div>'
                 + '  </div>'
+                + drawerActions
                 + '</div>';
             });
           }
@@ -2368,26 +2440,17 @@
     var approveBtns = document.querySelectorAll('.btn-approve-request');
     approveBtns.forEach(function (btn) {
       btn.onclick = function () {
+        if (state.processingRequestId) return;
         var reqId = btn.getAttribute('data-req-id');
         var email = btn.getAttribute('data-user-email');
-
-        state.confirmation = {
-          title: 'Approve Access & Reactivate',
-          message: 'Approve access request for ' + email + '? The account will be reactivated and bound to this device.',
-          warning: null,
-          confirmText: 'Approve & Reactivate',
-          isDanger: false,
-          onConfirm: function () {
-            executeApproveRequest(reqId, 'Approved by administrator via Institutional Oversight.');
-          }
-        };
-        refreshView();
+        executeApproveRequest(reqId, 'Approved by administrator via Institutional Oversight.');
       };
     });
 
     var rejectBtns = document.querySelectorAll('.btn-reject-request');
     rejectBtns.forEach(function (btn) {
       btn.onclick = function () {
+        if (state.processingRequestId) return;
         var reqId = btn.getAttribute('data-req-id');
         var email = btn.getAttribute('data-user-email');
 

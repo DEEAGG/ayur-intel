@@ -359,6 +359,83 @@ class TestPhase4AdminAccessWorkflow(unittest.TestCase):
         self.assertEqual(r2.status_code, 400)
         self.assertIn("already been approved", r2.json()["detail"])
 
+    def test_double_rejection_prevented(self):
+        """Attempting to reject an already rejected request returns 400 Bad Request."""
+        req = AccessRequest(
+            user_id=self.deactivated_user.id,
+            user_email=self.deactivated_user.email,
+            status="PENDING",
+        )
+        self.db.add(req)
+        self.db.commit()
+
+        r1 = self.client.post(f"/api/admin/requests/{req.public_id}/reject", headers=self.admin_headers)
+        self.assertEqual(r1.status_code, 200)
+
+        # Second rejection attempt
+        r2 = self.client.post(f"/api/admin/requests/{req.public_id}/reject", headers=self.admin_headers)
+        self.assertEqual(r2.status_code, 400)
+        self.assertIn("already been rejected", r2.json()["detail"])
+
+    def test_access_request_status_case_insensitivity_and_refresh(self):
+        """Access requests are stored as uppercase, filtered case-insensitively, and update status upon decision."""
+        req = AccessRequest(
+            user_id=self.deactivated_user.id,
+            user_email=self.deactivated_user.email,
+            status="PENDING",
+            reason="Laboratory data validation",
+        )
+        self.db.add(req)
+        self.db.commit()
+
+        # 1. Fetch pending requests using lowercase query parameter
+        r_pending = self.client.get("/api/admin/requests?status=pending", headers=self.admin_headers)
+        self.assertEqual(r_pending.status_code, 200)
+        data = r_pending.json()
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["requests"][0]["status"], "PENDING")
+
+        # 2. Approve the pending request
+        r_approve = self.client.post(
+            f"/api/admin/requests/{req.public_id}/approve",
+            json={"review_notes": "Verified institutional researcher credential."},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(r_approve.status_code, 200)
+        self.assertEqual(r_approve.json()["status"], "APPROVED")
+
+        # 3. Request list refreshed: pending filter now has 0 items
+        r_pending_after = self.client.get("/api/admin/requests?status=pending", headers=self.admin_headers)
+        self.assertEqual(r_pending_after.status_code, 200)
+        self.assertEqual(r_pending_after.json()["total"], 0)
+
+        # 4. Approved filter now has 1 item with review metadata
+        r_approved = self.client.get("/api/admin/requests?status=approved", headers=self.admin_headers)
+        self.assertEqual(r_approved.status_code, 200)
+        data_app = r_approved.json()
+        self.assertEqual(data_app["total"], 1)
+        self.assertEqual(data_app["requests"][0]["status"], "APPROVED")
+        self.assertEqual(data_app["requests"][0]["review_notes"], "Verified institutional researcher credential.")
+
+    def test_frontend_admin_js_access_approval_contract(self):
+        """admin.js contains uppercase status normalization and working Accept/Approve button."""
+        from api.core.config import PROJECT_ROOT
+        admin_js_file = PROJECT_ROOT / "web" / "static" / "js" / "admin.js"
+        self.assertTrue(admin_js_file.exists())
+        js = admin_js_file.read_text(encoding="utf-8")
+
+        # Case normalization
+        self.assertIn(".toUpperCase()", js)
+        self.assertIn("reqStatus === 'PENDING'", js)
+        self.assertIn("reqStatus === 'APPROVED'", js)
+
+        # Action buttons
+        self.assertIn("btn-approve-request", js)
+        self.assertIn("btn-reject-request", js)
+        self.assertIn("Accept / Approve", js)
+        self.assertIn("executeApproveRequest", js)
+        self.assertIn("processingRequestId", js)
+
     # -----------------------------------------------------------------------
     # 3. Extended Metrics & User Directory Capabilities
     # -----------------------------------------------------------------------
