@@ -1276,13 +1276,23 @@
             statusBadge = '<span class="admin-badge badge-rejected"><span class="admin-badge-dot"></span> Rejected</span>';
           }
 
+          var reqType = req.request_type_display || (req.request_type === 'NEW_USER' ? 'New User' : 'Reactivation');
+          var isNewUser = (req.request_type === 'NEW_USER' || reqType === 'New User');
+          var typeBadge = isNewUser
+            ? '<span class="admin-badge badge-role-user" style="display:inline-flex; align-items:center; gap:3px; margin-left:8px; font-size:11px;"><span class="material-symbols-outlined" style="font-size:13px;">person_add</span> New User</span>'
+            : '<span class="admin-badge badge-role-researcher" style="display:inline-flex; align-items:center; gap:3px; margin-left:8px; font-size:11px;"><span class="material-symbols-outlined" style="font-size:13px;">lock_reset</span> Reactivation</span>';
+
           html += ''
             + '<div class="admin-request-card ' + (isPending ? 'pending' : '') + '">'
             + '  <div class="admin-request-head">'
             + '    <div class="admin-request-user">'
-            + '      <h4>' + escapeHtml(req.user_display_name || req.user_email) + '</h4>'
+            + '      <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin-bottom:4px;">'
+            + '        <h4 style="margin:0;">' + escapeHtml(req.user_display_name || req.user_email) + '</h4>'
+            +          typeBadge
+            + '      </div>'
             + '      <div class="admin-request-meta">'
             + '        <span><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">mail</span> ' + escapeHtml(req.user_email) + '</span>'
+            + '        <span><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">category</span> Type: <strong>' + escapeHtml(reqType) + '</strong></span>'
             + '        <span><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">schedule</span> ' + formatRelativeTime(req.created_at) + ' (' + formatDate(req.created_at) + ')</span>'
             + '        <span><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">devices</span> ' + escapeHtml(req.device_info || 'Unknown Device') + '</span>'
             + '      </div>'
@@ -1290,7 +1300,7 @@
             + '    <div>' + statusBadge + '</div>'
             + '  </div>'
             + '  <div class="admin-request-body">'
-            + '    <strong>Reason:</strong> ' + escapeHtml(req.reason || 'Deactivated user sign-in attempt') + '<br>'
+            + '    <strong>Reason:</strong> ' + escapeHtml(req.reason || (isNewUser ? 'New user registration approval request' : 'Deactivated user sign-in attempt')) + '<br>'
             + '    <small class="mono-text">Device Cryptographic Fingerprint: ' + escapeHtml(req.device_hash ? ('sha256:' + req.device_hash.substring(0, 24) + '...') : 'None') + '</small>'
             + '  </div>';
 

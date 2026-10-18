@@ -715,6 +715,9 @@ def get_admin_access_requests(
                 "user_display_name": r.user_display_name or (r.user.display_name if r.user else ""),
                 "user_is_active": r.user.is_active if r.user else False,
                 "status": r.status,
+                "request_type": getattr(r, "request_type", "REACTIVATION"),
+                "request_type_display": "New User" if getattr(r, "request_type", "REACTIVATION") == "NEW_USER" else "Reactivation",
+                "notification_sent": bool(getattr(r, "notification_sent", False)),
                 "reason": r.reason or "",
                 "device_id": r.device_id or "Not provided",
                 "device_info": r.device_info or "Unknown Device",
@@ -746,6 +749,9 @@ def get_admin_access_request_detail(db: Session, request_id: str) -> Dict[str, A
         "user_display_name": req.user_display_name,
         "user_is_active": req.user.is_active if req.user else False,
         "status": req.status,
+        "request_type": getattr(req, "request_type", "REACTIVATION"),
+        "request_type_display": "New User" if getattr(req, "request_type", "REACTIVATION") == "NEW_USER" else "Reactivation",
+        "notification_sent": bool(getattr(req, "notification_sent", False)),
         "reason": req.reason or "",
         "device_id": req.device_id,
         "device_hash": req.device_hash,
@@ -768,7 +774,7 @@ def approve_access_request_admin(
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Approve access request, reactivating the account and binding approved device."""
+    """Approve access request, activating the account and binding approved device."""
     req = db.query(AccessRequest).filter(AccessRequest.public_id == request_id.strip()).first()
     if not req:
         raise HTTPException(status_code=404, detail="Access request not found")
@@ -781,8 +787,9 @@ def approve_access_request_admin(
     if not target:
         raise HTTPException(status_code=404, detail="Target user account not found")
 
-    # Reactivate target user
+    # Activate and approve target user
     target.is_active = True
+    target.is_approved = True
     if req.device_hash:
         target.approved_device_hash = req.device_hash
 
@@ -804,8 +811,8 @@ def approve_access_request_admin(
             ip_address=ip_address,
             user_agent=user_agent,
             status="SUCCESS",
-            detail=f"Admin approved access request for user {target.username}. Account reactivated.",
-            metadata={"target_user": target.username, "request_id": req.public_id, "device_info": req.device_info},
+            detail=f"Admin approved access request for user {target.username}. Account activated.",
+            metadata={"target_user": target.username, "request_id": req.public_id, "device_info": req.device_info, "request_type": getattr(req, "request_type", "REACTIVATION")},
         )
         db.commit()
         db.refresh(req)
@@ -816,8 +823,10 @@ def approve_access_request_admin(
         raise
 
     logger.info("Admin %s approved access request %s for %s", admin.username, req.public_id, target.username)
+    is_new = getattr(req, "request_type", "REACTIVATION") == "NEW_USER"
+    action_desc = "approved" if is_new else "reactivated"
     return {
-        "message": f"Access request approved. Account for {target.username} has been reactivated.",
+        "message": f"Access request approved. Account for {target.username} has been {action_desc}.",
         "request_id": req.public_id,
         "status": "APPROVED",
         "user_is_active": True,

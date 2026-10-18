@@ -272,12 +272,13 @@ class TestAuthSecurityHardening(unittest.TestCase):
         password = "LegitPassword2026!"
         full_name = "Dr. Charaka Researcher"
 
-        # Sign up
+        # Sign up (with auto_approve for login flow testing)
         signup_result = signup_user(
             db=self.db,
             full_name=full_name,
             email=email,
             password=password,
+            auto_approve=True,
         )
         self.assertIn("token", signup_result)
         self.assertIn("user", signup_result)

@@ -113,6 +113,10 @@ def init_db() -> None:
             ("users", "admin_console_password_hash", "VARCHAR(300)"),
             ("users", "admin_console_failed_attempts", "INTEGER DEFAULT 0"),
             ("users", "admin_console_cooldown_until", "DATETIME" if is_sqlite else "TIMESTAMP WITH TIME ZONE"),
+            ("users", "is_approved", "BOOLEAN DEFAULT 1" if is_sqlite else "BOOLEAN DEFAULT TRUE"),
+            ("access_requests", "request_type", "VARCHAR(50) DEFAULT 'REACTIVATION'"),
+            ("access_requests", "notification_sent", "BOOLEAN DEFAULT 0" if is_sqlite else "BOOLEAN DEFAULT FALSE"),
+            ("access_requests", "notification_error", "TEXT"),
         ]
 
         for table, col, col_type in new_cols:
@@ -126,6 +130,8 @@ def init_db() -> None:
 
         # 2. Performance indexes
         indexes = [
+            "CREATE INDEX IF NOT EXISTS ix_access_requests_request_type ON access_requests (request_type)",
+            "CREATE INDEX IF NOT EXISTS ix_access_requests_user_status ON access_requests (user_id, status)",
             "CREATE INDEX IF NOT EXISTS ix_product_cases_public_id ON product_cases (public_id)",
             "CREATE INDEX IF NOT EXISTS ix_product_cases_owner_id ON product_cases (owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_product_cases_status ON product_cases (status)",

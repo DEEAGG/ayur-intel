@@ -114,6 +114,13 @@ class AccessRequest(Base):
     # Status: PENDING, APPROVED, REJECTED
     status = Column(String(20), nullable=False, default="PENDING", index=True)
 
+    # Request Type: NEW_USER, REACTIVATION
+    request_type = Column(String(50), nullable=False, default="REACTIVATION", index=True)
+
+    # Email notification delivery status
+    notification_sent = Column(Boolean, nullable=False, default=False)
+    notification_error = Column(Text, nullable=True)
+
     # Request details
     reason = Column(Text, nullable=True)
 

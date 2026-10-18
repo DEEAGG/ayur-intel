@@ -123,6 +123,7 @@ class TestSessionTimeoutAndRoleSecurity(unittest.TestCase):
             full_name="Dr. Charaka Researcher",
             email="charaka@ayurintel.org",
             password="SecurePassword123!",
+            auto_approve=True,
         )
         self.user = self.db.query(User).filter(User.email == "charaka@ayurintel.org").first()
         self.user_token = self.ordinary_res["token"]
@@ -133,6 +134,7 @@ class TestSessionTimeoutAndRoleSecurity(unittest.TestCase):
             full_name="Admin Vaidya",
             email="admin@ayurintel.org",
             password="AdminPassword123!",
+            auto_approve=True,
         )
         self.admin = self.db.query(User).filter(User.email == "admin@ayurintel.org").first()
         self.admin.role = "admin"

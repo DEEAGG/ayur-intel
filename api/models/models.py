@@ -65,6 +65,7 @@ class User(Base):
     role = Column(String(20), nullable=False, default="user")
     token_version = Column(Integer, nullable=False, default=1)
     is_active = Column(Boolean, nullable=False, default=True)
+    is_approved = Column(Boolean, nullable=False, default=True)
     login_count = Column(Integer, nullable=False, default=0)
     approved_device_hash = Column(String(64), nullable=True)
     admin_console_password_hash = Column(String(300), nullable=True)

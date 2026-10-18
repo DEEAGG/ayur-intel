@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from api.models.models import User
 from api.models.security import UserSession, AccessRequest
 from api.services.audit_service import log_action
+from api.services.email_service import dispatch_admin_notification
 from api.core.config import settings
 
 logger = logging.getLogger("ayur_intel.auth")
@@ -290,6 +291,7 @@ def user_to_dict(user: User) -> Dict[str, Any]:
         "email": user.email or "",
         "role": getattr(user, "role", "user") or "user",
         "is_active": bool(getattr(user, "is_active", True)),
+        "is_approved": bool(getattr(user, "is_approved", True)),
         "login_count": getattr(user, "login_count", 0) or 0,
         "avatar_url": getattr(user, "avatar_url", None) or "",
         "created_at": user.created_at.isoformat() if user.created_at else "",
@@ -339,8 +341,14 @@ def signup_user(
     password: str,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
+    auto_approve: bool = False,
 ) -> Dict[str, Any]:
-    """Register a new user account."""
+    """Register a new user account.
+
+    By default (auto_approve=False), new accounts require administrator approval before
+    accessing any protected resources. An access request is created and the administrator
+    is notified via email.
+    """
     clean_email = email.strip().lower()
     clean_name = full_name.strip()
     
@@ -371,17 +379,84 @@ def signup_user(
         hashed_password=hashed,
         role="user",
         token_version=1,
-        is_active=True,
+        is_active=bool(auto_approve),
+        is_approved=bool(auto_approve),
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # Issue active session for newly registered user
-    idle_timeout_seconds, max_lifetime_seconds = parse_timeout_settings()
     now_utc = datetime.now(timezone.utc)
-    expires_at = now_utc + timedelta(seconds=max_lifetime_seconds)
     device_info = parse_device_info(user_agent)
+
+    if not auto_approve:
+        # Mandatory access approval workflow: record pending access request
+        new_req = AccessRequest(
+            user_id=user.id,
+            user_email=user.email or clean_email,
+            user_display_name=user.display_name or user.username,
+            status="PENDING",
+            request_type="NEW_USER",
+            reason="New user registration approval request",
+            device_info=device_info,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            created_at=now_utc,
+        )
+        db.add(new_req)
+        db.commit()
+        db.refresh(new_req)
+
+        # Dispatch email notification to administrator (does not block registration if provider fails)
+        try:
+            ok, err = dispatch_admin_notification(
+                applicant_name=user.display_name or user.username,
+                applicant_email=user.email or clean_email,
+                request_type="NEW_USER",
+                created_at=new_req.created_at,
+                device_info=new_req.device_info,
+                reason=new_req.reason,
+            )
+            new_req.notification_sent = ok
+            new_req.notification_error = err
+            db.commit()
+        except Exception as e:
+            logger.warning("Exception dispatching admin notification email: %s", e)
+            new_req.notification_sent = False
+            new_req.notification_error = str(e)
+            db.commit()
+
+        try:
+            log_action(
+                db,
+                action="SIGNUP",
+                resource_type="AUTH",
+                resource_id=new_req.public_id,
+                user_id=user.id,
+                user_public_id=user.public_id,
+                username=user.username,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                status="SUCCESS",
+                detail="User registered; pending administrator access approval",
+                metadata={"request_id": new_req.public_id, "request_type": "NEW_USER"},
+            )
+            db.commit()
+        except Exception as e:
+            logger.debug("Failed to record signup audit log: %s", e)
+            db.rollback()
+
+        logger.info("New user registered (pending approval): %s (%s)", user.display_name, user.email)
+        return {
+            "user": user_to_dict(user),
+            "status": "pending_approval",
+            "message": "Approval pending by Admin. Your account has been registered and is pending administrator review. You will be able to sign in once access is approved.",
+            "request_id": new_req.public_id,
+        }
+
+    # If auto_approve is True (internal/fixture use):
+    idle_timeout_seconds, max_lifetime_seconds = parse_timeout_settings()
+    expires_at = now_utc + timedelta(seconds=max_lifetime_seconds)
 
     session = UserSession(
         user_id=user.id,
@@ -420,14 +495,14 @@ def signup_user(
             ip_address=ip_address,
             user_agent=user_agent,
             status="SUCCESS",
-            detail="User registered and session created",
+            detail="User registered and session created (auto-approved)",
         )
         db.commit()
     except Exception as e:
         logger.debug("Failed to record signup audit log: %s", e)
         db.rollback()
 
-    logger.info("User registered successfully: %s (%s)", user.display_name, user.email)
+    logger.info("User registered successfully (auto-approved): %s (%s)", user.display_name, user.email)
     return {
         "token": token,
         "user": user_to_dict(user),
@@ -498,32 +573,120 @@ def login_user(
             db.rollback()
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # If password is correct but account is deactivated:
-    # Do not issue token; record/retrieve access request and notify user
-    if not user.is_active:
+    # If password is correct but account is unapproved, deactivated, or rejected:
+    # Do not issue token; record/retrieve access request and notify administrator on genuinely new request.
+    if not user.is_active or not getattr(user, "is_approved", True):
         device_hash = hashlib.sha256(device_id.strip().encode("utf-8")).hexdigest() if device_id and device_id.strip() else None
+        
+        # 1. Reuse existing pending request to avoid duplicates and duplicate emails
         pending_req = (
             db.query(AccessRequest)
             .filter(AccessRequest.user_id == user.id, AccessRequest.status == "PENDING")
             .order_by(AccessRequest.created_at.desc())
             .first()
         )
-        if not pending_req:
-            pending_req = AccessRequest(
-                user_id=user.id,
-                user_email=user.email or "",
-                user_display_name=user.display_name or user.username,
-                status="PENDING",
-                device_id=device_id.strip()[:100] if device_id and device_id.strip() else None,
-                device_hash=device_hash,
-                device_info=parse_device_info(user_agent),
-                ip_address=ip_address,
-                user_agent=user_agent,
-                reason="Automatic access request on sign-in attempt",
+        if pending_req:
+            is_new = (pending_req.request_type == "NEW_USER") or not getattr(user, "is_approved", True)
+            error_detail = (
+                "Approval pending by Admin. Your account is pending administrator approval. You will be able to sign in once access is approved."
+                if is_new
+                else "Approval pending by Admin. Your account is currently deactivated. Your access request has been submitted for administrator review. You will be able to sign in once access is approved."
             )
-            db.add(pending_req)
+            try:
+                log_action(
+                    db,
+                    action="LOGIN_DENIED",
+                    resource_type="AUTH",
+                    user_id=user.id,
+                    user_public_id=user.public_id,
+                    username=user.username,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    status="DENIED",
+                    detail=error_detail,
+                    metadata={"identifier": clean_identifier, "request_id": pending_req.public_id, "retry": True},
+                )
+                db.commit()
+            except Exception as e:
+                logger.debug("Failed to record login denied audit log: %s", e)
+                db.rollback()
+
+            raise HTTPException(status_code=403, detail=error_detail)
+
+        # 2. Check if user's latest access request was REJECTED
+        latest_req = (
+            db.query(AccessRequest)
+            .filter(AccessRequest.user_id == user.id)
+            .order_by(AccessRequest.created_at.desc())
+            .first()
+        )
+        if latest_req and latest_req.status == "REJECTED":
+            reject_msg = "Access not approved. Your access request was not approved by an administrator. Please contact an administrator if you require access."
+            try:
+                log_action(
+                    db,
+                    action="LOGIN_DENIED",
+                    resource_type="AUTH",
+                    user_id=user.id,
+                    user_public_id=user.public_id,
+                    username=user.username,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    status="DENIED",
+                    detail=reject_msg,
+                    metadata={"identifier": clean_identifier, "request_id": latest_req.public_id, "status": "REJECTED"},
+                )
+                db.commit()
+            except Exception as e:
+                logger.debug("Failed to record login denied audit log: %s", e)
+                db.rollback()
+
+            raise HTTPException(status_code=403, detail=reject_msg)
+
+        # 3. Genuinely new access request (e.g. deactivated account without pending request)
+        is_new_user = not getattr(user, "is_approved", True)
+        req_type = "NEW_USER" if is_new_user else "REACTIVATION"
+        pending_req = AccessRequest(
+            user_id=user.id,
+            user_email=user.email or "",
+            user_display_name=user.display_name or user.username,
+            status="PENDING",
+            request_type=req_type,
+            device_id=device_id.strip()[:100] if device_id and device_id.strip() else None,
+            device_hash=device_hash,
+            device_info=parse_device_info(user_agent),
+            ip_address=ip_address,
+            user_agent=user_agent,
+            reason="Automatic access request on sign-in attempt",
+        )
+        db.add(pending_req)
+        db.commit()
+        db.refresh(pending_req)
+
+        # Dispatch email notification for genuinely new request
+        try:
+            ok, err = dispatch_admin_notification(
+                applicant_name=user.display_name or user.username,
+                applicant_email=user.email or clean_identifier,
+                request_type=req_type,
+                created_at=pending_req.created_at,
+                device_info=pending_req.device_info,
+                reason=pending_req.reason,
+            )
+            pending_req.notification_sent = ok
+            pending_req.notification_error = err
             db.commit()
-            db.refresh(pending_req)
+        except Exception as e:
+            logger.warning("Exception dispatching admin notification email: %s", e)
+            pending_req.notification_sent = False
+            pending_req.notification_error = str(e)
+            db.commit()
+
+        error_msg = (
+            "Approval pending by Admin. Your account is pending administrator approval. You will be able to sign in once access is approved."
+            if is_new_user
+            else "Approval pending by Admin. Your account is currently deactivated. Your access request has been submitted for administrator review. You will be able to sign in once access is approved."
+        )
 
         try:
             log_action(
@@ -536,7 +699,7 @@ def login_user(
                 ip_address=ip_address,
                 user_agent=user_agent,
                 status="DENIED",
-                detail="Approval pending by Admin. Account is currently deactivated.",
+                detail=error_msg,
                 metadata={"identifier": clean_identifier, "request_id": pending_req.public_id},
             )
             db.commit()
@@ -546,7 +709,7 @@ def login_user(
 
         raise HTTPException(
             status_code=403,
-            detail="Approval pending by Admin. Your account is currently deactivated. Your access request has been submitted for administrator review. You will be able to sign in once access is approved.",
+            detail=error_msg,
         )
 
     # Successful login: track login count & create active session
@@ -629,8 +792,8 @@ def get_user_from_token(
         raise HTTPException(status_code=401, detail="Invalid or expired authorization token")
 
     user = db.query(User).filter(User.public_id == payload["sub"]).first()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User account not found or inactive")
+    if not user or not user.is_active or not getattr(user, "is_approved", True):
+        raise HTTPException(status_code=401, detail="User account not found, inactive, or pending approval")
 
     sid = payload.get("sid")
     if not sid:
@@ -1045,12 +1208,17 @@ def submit_access_request(
             "device_info": pending.device_info,
         }
 
+    is_new = not getattr(user, "is_approved", True)
+    req_type = "NEW_USER" if is_new else "REACTIVATION"
+    default_reason = "New user registration approval request" if is_new else "Reactivation requested"
+
     new_req = AccessRequest(
         user_id=user.id,
         user_email=user.email or "",
         user_display_name=user.display_name or user.username,
         status="PENDING",
-        reason=reason.strip() if reason and reason.strip() else "Reactivation requested",
+        request_type=req_type,
+        reason=reason.strip() if reason and reason.strip() else default_reason,
         device_id=device_id.strip()[:100] if device_id and device_id.strip() else None,
         device_hash=device_hash,
         device_info=parse_device_info(user_agent),
@@ -1058,6 +1226,28 @@ def submit_access_request(
         user_agent=user_agent,
     )
     db.add(new_req)
+    db.commit()
+    db.refresh(new_req)
+
+    # Dispatch email notification for genuinely new request
+    try:
+        ok, err = dispatch_admin_notification(
+            applicant_name=user.display_name or user.username,
+            applicant_email=user.email or clean_email,
+            request_type=req_type,
+            created_at=new_req.created_at,
+            device_info=new_req.device_info,
+            reason=new_req.reason,
+        )
+        new_req.notification_sent = ok
+        new_req.notification_error = err
+        db.commit()
+    except Exception as e:
+        logger.warning("Exception dispatching admin notification email: %s", e)
+        new_req.notification_sent = False
+        new_req.notification_error = str(e)
+        db.commit()
+
     try:
         log_action(
             db,
@@ -1070,11 +1260,10 @@ def submit_access_request(
             ip_address=ip_address,
             user_agent=user_agent,
             status="SUCCESS",
-            detail="User submitted account reactivation request",
-            metadata={"email": clean_email, "device_info": new_req.device_info},
+            detail=f"User submitted account {req_type.lower()} request",
+            metadata={"email": clean_email, "device_info": new_req.device_info, "request_type": req_type},
         )
         db.commit()
-        db.refresh(new_req)
     except Exception as e:
         logger.debug("Failed to record access request audit log: %s", e)
         db.rollback()

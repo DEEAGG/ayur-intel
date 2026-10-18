@@ -42,6 +42,22 @@ class Settings(BaseSettings):
     AYURINTEL_SESSION_TTL_SECONDS: int = 86400
     AYURINTEL_DEMO_MODE: bool = True
     AYURINTEL_ADMIN_EMAIL: Optional[str] = None
+    ADMIN_NOTIFICATION_EMAIL: Optional[str] = None
+    AYURINTEL_PRODUCTION_URL: str = "https://ayur-intel.onrender.com/"
+
+    # SMTP Configuration (Optional)
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
+    SMTP_FROM_EMAIL: Optional[str] = None
+    SMTP_FROM_NAME: str = "AYUR-INTEL Notifications"
+
+    # Resend Configuration (Optional)
+    RESEND_API_KEY: Optional[str] = None
+    RESEND_FROM_EMAIL: Optional[str] = None
 
     # CORS
     AYURINTEL_CORS_ALLOW_ORIGINS: str = "http://127.0.0.1:8000"
