@@ -726,7 +726,7 @@
         var statusText = statusLabel(c.status) || c.status || 'Draft';
         var statusClass = (c.status || 'draft').toLowerCase();
 
-        html += '<div class="clean-product-card" data-case-id="' + c.id + '">'
+        html += '<div class="clean-product-card" data-case-id="' + c.id + '" onclick="openCase(\'' + c.id + '\')">'
           + '<div class="product-card-left">'
           + '<span class="product-card-name">' + escapeHtml(c.name || 'Product') + '</span>'
           + '<div class="product-card-meta">'
@@ -10686,6 +10686,7 @@
       var data = await api("/api/cases");
       state.cases = data.cases || [];
       saveStateToLocalStorage();
+      if (state.view === "product-cases") { render({ scroll: "preserve" }); }
     } catch (e) { state.error = "Failed to load cases."; }
   }
 

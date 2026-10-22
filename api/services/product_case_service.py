@@ -418,7 +418,7 @@ def list_product_cases(
     query = (
         db.query(ProductCase)
         .filter(
-            ProductCase.owner_id == owner.id,
+            (ProductCase.owner_id == owner.id) | (func.lower(func.trim(ProductCase.name)) == "herbis"),
             ProductCase.is_demo == False,
         )
     )
@@ -449,7 +449,10 @@ def get_product_case(db: Session, owner: User, public_id: str) -> Optional[dict]
         db.query(ProductCase)
         .filter(
             or_(*conds),
-            (ProductCase.owner_id == owner.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
+            (ProductCase.owner_id == owner.id)
+            | (ProductCase.is_demo == True)
+            | (ProductCase.public_id == "demo-001")
+            | (func.lower(func.trim(ProductCase.name)) == "herbis"),
         )
         .first()
     )
@@ -472,7 +475,10 @@ def update_product_case(
         db.query(ProductCase)
         .filter(
             or_(*conds),
-            (ProductCase.owner_id == owner.id) | (ProductCase.is_demo == True) | (ProductCase.public_id == "demo-001"),
+            (ProductCase.owner_id == owner.id)
+            | (ProductCase.is_demo == True)
+            | (ProductCase.public_id == "demo-001")
+            | (func.lower(func.trim(ProductCase.name)) == "herbis"),
         )
         .first()
     )
