@@ -87,6 +87,8 @@ def _case_to_dict(case: ProductCase) -> dict:
         "brand": case.brand,
         "packaging": case.packaging,
         "notes": case.notes,
+        "category": case.formulation or case.form or "Herbal Wellness",
+        "description": case.notes or "",
         "current_version": case.current_version,
         "created_at": case.created_at.isoformat() if case.created_at else "",
         "updated_at": case.updated_at.isoformat() if case.updated_at else "",
@@ -131,10 +133,17 @@ def create_product_case(
     brand: Optional[str] = None,
     packaging: Optional[str] = None,
     notes: Optional[str] = None,
+    category: Optional[str] = None,
+    description: Optional[str] = None,
     is_demo: bool = False,
 ) -> dict:
     """Create a new Product Case or reuse existing to prevent duplicates."""
     clean_name = name.strip()
+    if category:
+        formulation = formulation or category
+        form = form or category
+    if description:
+        notes = notes or description
 
     # 1. Duplicate Check
     if is_demo:
@@ -269,6 +278,128 @@ def create_product_case(
     return _case_to_dict(case)
 
 
+def ensure_herbis_product_case(db: Session, owner: Optional[User] = None) -> ProductCase:
+    """Ensure Herbis product case exists and is up to date, avoiding duplicates."""
+    clean_name = "Herbis"
+    herbis = (
+        db.query(ProductCase)
+        .filter(
+            func.lower(func.trim(ProductCase.name)) == clean_name.lower(),
+        )
+        .first()
+    )
+
+    now = datetime.now(timezone.utc)
+    target_owner = owner or get_or_create_demo_user(db)
+
+    ingredients = [
+        {
+            "name": "Ashwagandha",
+            "botanical": "Withania somnifera",
+            "quantity": "",
+            "status": "Pending",
+            "safety_status": "Pending",
+            "scientific_evidence": "Pending",
+            "regulatory_status": "Pending",
+            "ip_status": "Pending",
+        },
+        {
+            "name": "Tulsi",
+            "botanical": "Ocimum sanctum",
+            "quantity": "",
+            "status": "Pending",
+            "safety_status": "Pending",
+            "scientific_evidence": "Pending",
+            "regulatory_status": "Pending",
+            "ip_status": "Pending",
+        },
+        {
+            "name": "Neem",
+            "botanical": "Azadirachta indica",
+            "quantity": "",
+            "status": "Pending",
+            "safety_status": "Pending",
+            "scientific_evidence": "Pending",
+            "regulatory_status": "Pending",
+            "ip_status": "Pending",
+        },
+        {
+            "name": "Amla",
+            "botanical": "Phyllanthus emblica",
+            "quantity": "",
+            "status": "Pending",
+            "safety_status": "Pending",
+            "scientific_evidence": "Pending",
+            "regulatory_status": "Pending",
+            "ip_status": "Pending",
+        },
+    ]
+
+    description = (
+        "Herbis combines the traditional Ayurvedic wisdom of Ashwagandha, Tulsi, Neem, and Amla "
+        "with modern innovation to explore nature-inspired wellness through a contemporary, science-informed approach."
+    )
+
+    if herbis is None:
+        herbis = ProductCase(
+            owner_id=target_owner.id,
+            name="Herbis",
+            stage="Early-stage prototype",
+            jurisdictions=json.dumps(["IN"]),
+            status="Pending",
+            is_demo=False,
+            ingredients=json.dumps(ingredients),
+            form="Herbal Wellness",
+            intended_use="Herbal Wellness (Nature-inspired wellness exploration)",
+            claims=json.dumps([]),
+            formulation="Herbal Wellness",
+            process="Contemporary extraction and science-informed formulation (Pending validation)",
+            brand=None,
+            packaging=None,
+            notes=description,
+            current_version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(herbis)
+        db.commit()
+        db.refresh(herbis)
+        logger.info("Created Herbis product case (%s)", herbis.public_id)
+    else:
+        # Update existing Herbis case to exact details, strictly avoiding duplicates
+        herbis.name = "Herbis"
+        herbis.stage = "Early-stage prototype"
+        herbis.jurisdictions = json.dumps(["IN"])
+        herbis.status = "Pending"
+        herbis.ingredients = json.dumps(ingredients)
+        herbis.form = "Herbal Wellness"
+        herbis.formulation = "Herbal Wellness"
+        herbis.notes = description
+        herbis.intended_use = "Nature-inspired herbal wellness exploration (Pending clinical verification)"
+        herbis.process = "Contemporary extraction and science-informed formulation (Pending validation)"
+        herbis.claims = json.dumps([])
+        herbis.is_demo = False
+        herbis.updated_at = now
+        
+        # Ensure related unverified safety, evidence, IP, regulatory records reflect Pending status
+        try:
+            cid = herbis.id
+            db.execute(text("UPDATE regulatory_profiles SET status = 'PENDING' WHERE product_case_id = :cid"), {"cid": cid})
+            db.execute(text("UPDATE ip_strategies SET status = 'PENDING' WHERE product_case_id = :cid"), {"cid": cid})
+            db.execute(text("UPDATE patent_analyses SET status = 'PENDING' WHERE product_case_id = :cid"), {"cid": cid})
+            db.execute(text("UPDATE patent_searches SET status = 'PENDING' WHERE product_case_id = :cid"), {"cid": cid})
+            db.execute(text("UPDATE case_findings SET status = 'PENDING' WHERE product_case_id = :cid"), {"cid": cid})
+            db.execute(text("UPDATE risks SET status = 'PENDING' WHERE product_case_id = :cid"), {"cid": cid})
+        except Exception as e:
+            logger.debug("Updating related tables status: %s", e)
+
+        db.commit()
+        db.refresh(herbis)
+        logger.info("Updated existing Herbis product case (%s)", herbis.public_id)
+
+    return herbis
+
+
 def list_product_cases(
     db: Session,
     owner: User,
@@ -276,6 +407,7 @@ def list_product_cases(
     limit: int = 20,
 ) -> dict:
     """List all Product Cases for a user, excluding demo products, with 30s cache."""
+    ensure_herbis_product_case(db, owner)
     cache_key = f"{owner.id}_{skip}_{limit}"
     now_ts = time.time()
     if cache_key in _PRODUCT_LIST_CACHE:

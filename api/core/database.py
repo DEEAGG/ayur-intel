@@ -231,6 +231,13 @@ def _seed_initial_knowledge_hub_if_empty() -> None:
             d_res = d_adapter.search(query="", limit=10)
             KnowledgeIngestionService.ingest_results(db, user.id, d_res.results)
 
+        # Ensure Herbis product case is populated
+        try:
+            from api.services.product_case_service import ensure_herbis_product_case
+            ensure_herbis_product_case(db, user)
+        except Exception as he:
+            logger.warning("Herbis initialization deferred: %s", he)
+
         logger.info("Successfully seeded initial Knowledge Hub evidence records and DRAVYA plants.")
     except Exception as e:
         logger.warning("Initial Knowledge Hub seeding skipped: %s", e)

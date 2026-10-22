@@ -288,8 +288,9 @@
     state.passportData = {
       id: c.id || c.public_id || null,
       name: c.name || "",
-      product_type: c.product_type || null, // ZERO DEFAULT
-      description: c.description || "",
+      product_type: c.product_type || c.category || c.formulation || c.form || null, // ZERO DEFAULT
+      category: c.category || c.product_type || c.formulation || c.form || "Herbal Wellness",
+      description: c.description || c.notes || "",
       normalized_description: c.normalized_description || "",
       product_suggestions: c.product_suggestions || [],
       reference_context: c.reference_context || "", // Optional benchmark context
@@ -497,6 +498,7 @@
     var categories = [
       { id: "Ayurvedic Product", title: "Ayurvedic Product", sub: "Classical or proprietary Ayurvedic formulation", icon: "science" },
       { id: "Herbal Product", title: "Herbal Product", sub: "Plant-based herbal & botanical formulation", icon: "eco" },
+      { id: "Herbal Wellness", title: "Herbal Wellness", sub: "Nature-inspired herbal & botanical wellness formulation", icon: "spa" },
       { id: "Herbal Supplement", title: "Herbal Supplement", sub: "Nutraceutical or dietary supplement", icon: "medication" },
       { id: "Functional Food / Beverage", title: "Food / Beverage", sub: "Herbal tea, health drink, wellness powder", icon: "local_cafe" },
       { id: "Cosmetic / Personal Care", title: "Cosmetic / Personal Care", sub: "Herbal skincare, haircare, topicals", icon: "spa" },

@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 # Enums (as string constants — Pydantic v2 style)
 # ---------------------------------------------------------------------------
 
-VALID_STAGES = ("IDEA", "RND", "PILOT", "PRE_LAUNCH", "COMMERCIAL")
-VALID_STATUSES = ("DRAFT", "ANALYZING", "COMPLETED", "ARCHIVED")
+VALID_STAGES = ("IDEA", "RND", "PILOT", "PRE_LAUNCH", "COMMERCIAL", "Early-stage prototype")
+VALID_STATUSES = ("DRAFT", "ANALYZING", "COMPLETED", "ARCHIVED", "Pending", "PENDING")
 
 # Common jurisdiction codes (not exhaustive)
 KNOWN_JURISDICTIONS = ("IN", "US", "EU", "DE", "GB", "JP", "AU", "CA", "BR")
@@ -49,6 +49,8 @@ class ProductCaseCreate(BaseModel):
     brand: Optional[str] = None
     packaging: Optional[str] = None
     notes: Optional[str] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
     is_demo: Optional[bool] = False
 
     def model_post_init(self, __context) -> None:
@@ -80,6 +82,8 @@ class ProductCaseUpdate(BaseModel):
     brand: Optional[str] = None
     packaging: Optional[str] = None
     notes: Optional[str] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +110,8 @@ class ProductCaseResponse(BaseModel):
     brand: Optional[str] = None
     packaging: Optional[str] = None
     notes: Optional[str] = None
+    category: Optional[str] = None
+    description: Optional[str] = None
     current_version: int
     created_at: datetime
     updated_at: datetime

@@ -78,6 +78,8 @@ def create_case(
             brand=payload.brand,
             packaging=payload.packaging,
             notes=payload.notes,
+            category=payload.category,
+            description=payload.description,
             is_demo=bool(payload.is_demo),
         )
         log_action(

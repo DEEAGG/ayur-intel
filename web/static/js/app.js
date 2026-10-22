@@ -122,7 +122,7 @@
   }
 
   function stageLabel(s) {
-    var m = { IDEA: "Idea", RND: "R&D", PILOT: "Pilot", PRE_LAUNCH: "Pre-Launch", COMMERCIAL: "Commercial" };
+    var m = { IDEA: "Idea", RND: "R&D", PILOT: "Pilot", PRE_LAUNCH: "Pre-Launch", COMMERCIAL: "Commercial", "Early-stage prototype": "Early-stage prototype" };
     return m[s] || s;
   }
 
@@ -737,6 +737,7 @@
           + '<div class="product-card-right">'
           + '<span class="product-card-status ' + escapeHtml(statusClass) + '">' + escapeHtml(statusText) + '</span>'
           + '<button class="product-open-btn" onclick="event.stopPropagation(); openCase(\'' + c.id + '\')">Open Case</button>'
+          + '<button class="product-open-btn" style="background:rgba(46,204,113,0.15);color:#2ecc71;border-color:rgba(46,204,113,0.3);margin-left:6px;" onclick="event.stopPropagation(); editProductPassport(\'' + c.id + '\')">Product Passport</button>'
           + '<button class="product-delete-btn" onclick="event.stopPropagation(); deleteCase(\'' + c.id + '\', \'' + safeName + '\')">🗑 Delete</button>'
           + '</div>'
           + '</div>';
