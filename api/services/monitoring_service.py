@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from api.models.models import User, ProductCase, KnowledgeEvidence, PatentSearch, PatentRelevance, PatentRecord
@@ -50,7 +50,11 @@ def _deserialize(value) -> list:
 
 
 def _get_case(db: Session, user: User, case_public_id: str) -> Optional[ProductCase]:
-    """Retrieve ProductCase with owner or demo access check."""
+    """Retrieve a case the user owns or a deliberately shared demo/sample case.
+
+    Keep access rules aligned with api.core.security.verify_case_access so
+    the shared Herbis showcase product is available to graph and monitoring.
+    """
     conds = [ProductCase.public_id == case_public_id]
     if str(case_public_id).isdigit():
         conds.append(ProductCase.id == int(case_public_id))
@@ -62,6 +66,7 @@ def _get_case(db: Session, user: User, case_public_id: str) -> Optional[ProductC
                 ProductCase.owner_id == user.id,
                 ProductCase.is_demo == True,
                 ProductCase.public_id == "demo-001",
+                func.lower(func.trim(ProductCase.name)) == "herbis",
             ),
         )
         .first()

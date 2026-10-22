@@ -11,6 +11,7 @@ import json
 import logging
 from typing import Dict, List, Optional, Set
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from api.models.models import (
@@ -44,9 +45,26 @@ def _get_user(db: Session, user_id: int) -> Optional[User]:
 
 
 def _get_case(db: Session, user: User, case_public_id: str) -> Optional[ProductCase]:
+    """Retrieve a case the user owns or a deliberately shared demo/sample case.
+
+    Keep access rules aligned with api.core.security.verify_case_access so
+    public demo products (including the Herbis showcase product) work across
+    the graph and other case modules without weakening access to private cases.
+    """
+    identifiers = [ProductCase.public_id == case_public_id]
+    if str(case_public_id).isdigit():
+        identifiers.append(ProductCase.id == int(case_public_id))
     return (
         db.query(ProductCase)
-        .filter(ProductCase.public_id == case_public_id, ProductCase.owner_id == user.id)
+        .filter(
+            or_(*identifiers),
+            or_(
+                ProductCase.owner_id == user.id,
+                ProductCase.is_demo == True,
+                ProductCase.public_id == "demo-001",
+                func.lower(func.trim(ProductCase.name)) == "herbis",
+            ),
+        )
         .first()
     )
 
