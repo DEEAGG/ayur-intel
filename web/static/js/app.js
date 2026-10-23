@@ -723,8 +723,6 @@
         var createdDate = c.created_at ? new Date(c.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" }) : "Recently";
         var safeName = String(c.name || 'Product').replace(/'/g, "\\'");
         var ingCount = Array.isArray(c.ingredients) ? c.ingredients.length : (c.ingredients && typeof c.ingredients === 'object' ? Object.keys(c.ingredients).length : (c.ingredients ? 1 : 0));
-        var statusText = statusLabel(c.status) || c.status || 'Draft';
-        var statusClass = (c.status || 'draft').toLowerCase();
 
         html += '<div class="clean-product-card" data-case-id="' + c.id + '" onclick="openCase(\'' + c.id + '\')">'
           + '<div class="product-card-left">'
@@ -735,7 +733,6 @@
           + '</div>'
           + '</div>'
           + '<div class="product-card-right">'
-          + '<span class="product-card-status ' + escapeHtml(statusClass) + '">' + escapeHtml(statusText) + '</span>'
           + '<button class="product-open-btn" onclick="event.stopPropagation(); openCase(\'' + c.id + '\')">Open Case</button>'
           + '<button class="product-open-btn" style="background:rgba(46,204,113,0.15);color:#2ecc71;border-color:rgba(46,204,113,0.3);margin-left:6px;" onclick="event.stopPropagation(); editProductPassport(\'' + c.id + '\')">Product Passport</button>'
           + '<button class="product-delete-btn" onclick="event.stopPropagation(); deleteCase(\'' + c.id + '\', \'' + safeName + '\')">🗑 Delete</button>'
@@ -767,8 +764,6 @@
         var createdDate = c.created_at ? new Date(c.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" }) : "Recently";
         var safeName = String(c.name || 'Product').replace(/'/g, "\\'");
         var ingCount = Array.isArray(c.ingredients) ? c.ingredients.length : (c.ingredients && typeof c.ingredients === 'object' ? Object.keys(c.ingredients).length : (c.ingredients ? 1 : 0));
-        var statusText = statusLabel(c.status) || c.status || 'Draft';
-        var statusClass = (c.status || 'draft').toLowerCase();
 
         html += '<div class="clean-product-card" data-case-id="' + c.id + '">'
           + '<div class="product-card-left">'
@@ -779,7 +774,6 @@
           + '</div>'
           + '</div>'
           + '<div class="product-card-right">'
-          + '<span class="product-card-status ' + escapeHtml(statusClass) + '">' + escapeHtml(statusText) + '</span>'
           + '<button class="product-open-btn" onclick="event.stopPropagation(); openCase(\'' + c.id + '\')">Open Case</button>'
           + '<button class="product-delete-btn" onclick="event.stopPropagation(); deleteCase(\'' + c.id + '\', \'' + safeName + '\')">🗑 Delete</button>'
           + '</div>'
