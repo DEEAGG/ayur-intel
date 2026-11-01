@@ -520,64 +520,45 @@
       var data = await response.json();
 
       if (response.ok && data.user) {
-        if (CURRENT_MODE === 'signup') {
-          // POST-SIGNUP REDIRECT TO LOGIN: Do NOT store token, redirect to Login form
-          showToastMsg('⏳ Registration submitted! Pending administrator approval.', 'info');
-          renderAuthCard('signin', email);
-          setAlert('<strong>Registration Submitted</strong><br>Your account has been registered and is pending administrator review. You will be able to sign in once access is approved.', 'info');
+        // Both signup and login return an authenticated session. New accounts enter
+        // the workspace immediately; the Admin Console still lists every account.
+        sessionStartTimestamp = Date.now();
+        lastUserActivityTimestamp = Date.now();
+
+        if (rememberMe) {
+          try {
+            localStorage.setItem('ayur_remember_me', 'true');
+            localStorage.setItem('ayur_remembered_email', email);
+          } catch (e) {}
+          setToken(data.token, true);
+          setUser(data.user, true);
         } else {
-          // LOGIN SUCCESS: Apply Remember Me strategy, save token, update UI, hide overlay
-          sessionStartTimestamp = Date.now();
-          lastUserActivityTimestamp = Date.now();
+          try {
+            localStorage.removeItem('ayur_remember_me');
+            localStorage.removeItem('ayur_remembered_email');
+          } catch (e) {}
+          setToken(data.token, false);
+          setUser(data.user, false);
+        }
 
-          if (rememberMe) {
-            try {
-              localStorage.setItem('ayur_remember_me', 'true');
-              localStorage.setItem('ayur_remembered_email', email);
-            } catch (e) {}
-            setToken(data.token, true);
-            setUser(data.user, true);
-          } else {
-            try {
-              localStorage.removeItem('ayur_remember_me');
-              localStorage.removeItem('ayur_remembered_email');
-            } catch (e) {}
-            setToken(data.token, false);
-            setUser(data.user, false);
-          }
+        hideAuthOverlay();
+        updateUIWithUser(data.user);
+        startSessionInactivityMonitor();
+        showToastMsg(
+          CURRENT_MODE === 'signup'
+            ? '✅ Account created. Welcome, ' + (data.user.display_name || data.user.username) + '!'
+            : '✅ Welcome back, ' + (data.user.display_name || data.user.username) + '!',
+          'success'
+        );
 
-          hideAuthOverlay();
-          updateUIWithUser(data.user);
-          startSessionInactivityMonitor();
-          showToastMsg('✅ Welcome back, ' + (data.user.display_name || data.user.username) + '!', 'success');
-
-          if (window.AYUR && typeof window.AYUR.init === 'function') {
-            window.AYUR.init();
-          }
+        if (window.AYUR && typeof window.AYUR.init === 'function') {
+          window.AYUR.init();
         }
       } else {
         var errorDetail = data.detail || (CURRENT_MODE === 'signup' ? 'Registration failed. Please check your information.' : 'Invalid email or password.');
-        if (response.status === 403) {
-          if (errorDetail.indexOf('Approval pending by Admin') !== -1) {
-            var isNewUserPending = errorDetail.indexOf('pending administrator approval') !== -1;
-            var alertSubtext = isNewUserPending
-              ? 'Your account is pending administrator approval. You will be able to sign in once access is approved.'
-              : 'Your account is currently deactivated. Your access request has been submitted for administrator review. You will be able to sign in once access is approved.';
-            setAlert(
-              '<strong>Approval Pending by Admin</strong><br>' + alertSubtext,
-              'warning'
-            );
-            showToastMsg('⏳ Approval pending by Admin for this account', 'warning');
-          } else if (errorDetail.indexOf('Access not approved') !== -1) {
-            setAlert(
-              '<strong>Access Not Approved</strong><br>' + escapeHtml(errorDetail),
-              'error'
-            );
-            showToastMsg('❌ Access not approved by administrator', 'error');
-          } else {
-            setAlert(errorDetail, 'error');
-            showToastMsg('❌ ' + errorDetail, 'error');
-          }
+        if (response.status === 403 || response.status === 401) {
+          setAlert('This account is currently unavailable. Please contact the administrator.', 'error');
+          showToastMsg('This account is currently unavailable.', 'error');
         } else {
           setAlert(errorDetail, 'error');
           showToastMsg('❌ ' + errorDetail, 'error');
