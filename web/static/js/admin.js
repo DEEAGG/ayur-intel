@@ -1027,15 +1027,7 @@
       + '      </div>'
       + '    </div>'
 
-      // 6. Pending Access Requests
-      + '    <div class="admin-kpi-card ' + (pendingRequestsCount > 0 ? 'kpi-card-pending-alert' : '') + '">'
-      + '      <div class="admin-kpi-icon kpi-icon-pending"><span class="material-symbols-outlined">pending_actions</span></div>'
-      + '      <div class="admin-kpi-data">'
-      + '        <div class="admin-kpi-val">' + pendingRequestsCount + '</div>'
-      + '        <div class="admin-kpi-lbl">Pending Access Requests</div>'
-      + '        <div class="admin-kpi-sub">' + (pendingRequestsCount > 0 ? 'Requires administrator review' : 'Queue clear') + '</div>'
-      + '      </div>'
-      + '    </div>'
+      // Access-request KPI intentionally suppressed while approval workflow is paused.
 
       // 7. Active Sessions
       + '    <div class="admin-kpi-card">'
@@ -1063,10 +1055,7 @@
       + '    <button class="admin-tab-btn ' + (state.activeTab === 'users' ? 'active' : '') + '" data-admin-tab="users">'
       + '      <span class="material-symbols-outlined">group</span> User Directory (' + state.totalUsers + ')'
       + '    </button>'
-      + '    <button class="admin-tab-btn ' + (state.activeTab === 'requests' ? 'active' : '') + '" data-admin-tab="requests">'
-      + '      <span class="material-symbols-outlined">assignment_late</span> Access Requests'
-      + (pendingRequestsCount > 0 ? ' <span class="admin-tab-pill">' + pendingRequestsCount + '</span>' : '')
-      + '    </button>'
+      // Access Requests tab intentionally hidden; new accounts remain visible in User Directory.
       + '    <button class="admin-tab-btn ' + (state.activeTab === 'sessions' ? 'active' : '') + '" data-admin-tab="sessions">'
       + '      <span class="material-symbols-outlined">devices</span> Session Management (' + state.sessionsTotal + ')'
       + '    </button>'
