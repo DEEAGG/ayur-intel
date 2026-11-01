@@ -238,18 +238,12 @@
   var lastSwayTime = 0;
   var swayInterval = 1000 / 30; // 30 FPS cap for sway animation
 
-  function runSwayLoop(timestamp) {
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      renderTreeFrame();
-      return; // Static frame for reduced motion
-    }
-
-    if (!timestamp || timestamp - lastSwayTime >= swayInterval) {
-      lastSwayTime = timestamp || performance.now();
-      renderTreeFrame();
-    }
-
-    animId = requestAnimationFrame(runSwayLoop);
+  function runSwayLoop() {
+    // Render the completed tree once; continuous 30 FPS redraws compete with
+    // text input, scrolling and workspace interactions on lower-powered devices.
+    if (animId) cancelAnimationFrame(animId);
+    animId = null;
+    renderTreeFrame();
   }
 
   var resizeTimeout;
