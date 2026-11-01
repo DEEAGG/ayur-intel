@@ -8593,17 +8593,21 @@
         }
       }
 
+      var searchDebounceTimer = null;
       tbSearch.addEventListener("input", function () {
-        var q = this.value.toLowerCase().trim();
-        // 1. In-page cards filter
-        var cards = document.querySelectorAll(".case-card");
-        cards.forEach(function (c) {
-          var text = c.textContent.toLowerCase();
-          c.style.display = (q === "" || text.indexOf(q) !== -1) ? "" : "none";
-        });
-
-        // 2. Global floating search dropdown
-        renderSearchDropdown(q);
+        var input = this;
+        // Defer DOM-wide filtering until the user pauses briefly. This avoids
+        // repeated layout/text scans on every keystroke.
+        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(function () {
+          var q = input.value.toLowerCase().trim();
+          var cards = document.querySelectorAll(".case-card");
+          cards.forEach(function (card) {
+            var cardText = card.textContent.toLowerCase();
+            card.style.display = (q === "" || cardText.indexOf(q) !== -1) ? "" : "none";
+          });
+          renderSearchDropdown(q);
+        }, 110);
       });
 
       // Close dropdown on outside click
