@@ -109,6 +109,7 @@ def signup(
         password=req.password,
         ip_address=client_ip,
         user_agent=user_agent,
+        auto_approve=True,
     )
 
 
