@@ -341,13 +341,12 @@ def signup_user(
     password: str,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
-    auto_approve: bool = False,
+    auto_approve: bool = True,
 ) -> Dict[str, Any]:
     """Register a new user account.
 
-    By default (auto_approve=False), new accounts require administrator approval before
-    accessing any protected resources. An access request is created and the administrator
-    is notified via email.
+    New registrations are enabled immediately. The administrator retains visibility
+    and can deactivate an account from the Admin Console when necessary.
     """
     clean_email = email.strip().lower()
     clean_name = full_name.strip()
